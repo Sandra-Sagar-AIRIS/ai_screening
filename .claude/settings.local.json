@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python \"C:\\\\Users\\\\sandr\\\\AppData\\\\Roaming\\\\Claude\\\\local-agent-mode-sessions\\\\skills-plugin\\\\7ec6bfaa-9ee9-41a4-8cc3-f3579aa18cee\\\\e7add008-ad4f-477c-afa0-0db9f0011272\\\\skills\\\\docx\\\\scripts\\\\office\\\\unpack.py\" \"AI_Recruiting_Platform_Feature_Spec.docx\" \"unpacked/\")",
+      "Bash(python \"C:/Users/sandr/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/7ec6bfaa-9ee9-41a4-8cc3-f3579aa18cee/e7add008-ad4f-477c-afa0-0db9f0011272/skills/docx/scripts/office/unpack.py\" \"AI_Recruiting_Platform_Feature_Spec.docx\" \"unpacked/\")",
+      "Bash(python C:/Users/sandr/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/7ec6bfaa-9ee9-41a4-8cc3-f3579aa18cee/e7add008-ad4f-477c-afa0-0db9f0011272/skills/docx/scripts/office/unpack.py AI_Recruiting_Platform_Feature_Spec.docx unpacked/)",
+      "Bash(python /c/Users/sandr/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/7ec6bfaa-9ee9-41a4-8cc3-f3579aa18cee/e7add008-ad4f-477c-afa0-0db9f0011272/skills/docx/scripts/office/unpack.py AI_Recruiting_Platform_Feature_Spec.docx unpacked/)",
+      "Bash(python -c ':*)",
+      "Bash(pandoc \"AI_Recruiting_Platform_Feature_Spec.docx\" -o \"spec_content.md\")",
+      "Bash(pip install:*)",
+      "Bash(python -c ' *)",
+      "Read(//c/Users/sandr/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/7ec6bfaa-9ee9-41a4-8cc3-f3579aa18cee/e7add008-ad4f-477c-afa0-0db9f0011272/skills/docx/**)",
+      "Bash(pandoc \"C:\\\\Users\\\\sandr\\\\Downloads\\\\Updated_AI_Recruiting_Platform_Feature_Spec - Copy.docx\" -t plain)",
+      "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\sandr\\\\Downloads\\\\Updated_AI_Recruiting_Platform_Feature_Spec - Copy.docx\" /tmp/docx_unpacked)",
+      "Bash(git ls-tree *)",
+      "Bash(git checkout *)",
+      "Bash(git diff-tree *)",
+      "Bash(python3)",
+      "Bash(gh repo *)",
+      "Bash(npm list *)",
+      "Bash(node generate-prd.js)",
+      "Bash(npm root *)",
+      "Bash(NODE_PATH=\"C:/Users/sandr/AppData/Roaming/npm/node_modules\" node generate-prd.js)",
+      "Bash(python \"C:/Users/sandr/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/7ec6bfaa-9ee9-41a4-8cc3-f3579aa18cee/e7add008-ad4f-477c-afa0-0db9f0011272/skills/docx/scripts/office/validate.py\" \"C:/Users/sandr/Documents/Interview_platform/AIRIS/docs/prds/airis-recruiting-platform-prd-v1.0.docx\")",
+      "Bash(python \"C:/Users/sandr/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/7ec6bfaa-9ee9-41a4-8cc3-f3579aa18cee/e7add008-ad4f-477c-afa0-0db9f0011272/skills/docx/scripts/office/unpack.py\" AIRIS_PRD_v1.0.docx _prd_unpacked)",
+      "Bash(python patch_toc.py)",
+      "Bash(node -e ' *)",
+      "Bash(python -c \"import sys; sys.stdout.reconfigure\\(encoding='utf-8'\\); [print\\(l,end=''\\) for l in sys.stdin]\")",
+      "Bash(NODE_PATH=\"C:/Users/sandr/AppData/Roaming/npm/node_modules\" node build_prd.js)",
+      "Bash(python create_airis_excel.py)",
+      "Bash(del \"C:\\\\Users\\\\sandr\\\\Documents\\\\Interview_platform\\\\AIRIS\\\\create_airis_excel.py\")"
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+Alembic migration environment for AIRIS backend.
+
+IMPORTANT for existing Supabase database:
+1) Do NOT run migrations against production before validating in staging.
+2) Baseline migration exists to establish migration history.
+3) Use `alembic stamp head` against an existing DB to mark current state as managed.
+

@@ -1,0 +1,66 @@
+# ----------------------------
+# OS / Editor
+# ----------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+
+# ----------------------------
+# Environment / Secrets
+# ----------------------------
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# ----------------------------
+# Python
+# ----------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
+
+# ----------------------------
+# Node / Next.js
+# ----------------------------
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ----------------------------
+# Runtime / Temporary files
+# ----------------------------
+*.log
+*.pid
+*.seed
+*.pid.lock
+tmp/
+temp/
