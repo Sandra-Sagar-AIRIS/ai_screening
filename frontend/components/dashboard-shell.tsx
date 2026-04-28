@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { hasAccess, WRITE_ROLES } from "@/lib/rbac";
 import { useAuthStore } from "@/store/auth-store";
 
 const navItems = [
@@ -13,6 +13,9 @@ const navItems = [
   { href: "/candidates", label: "Candidates" },
   { href: "/jobs", label: "Jobs" },
   { href: "/pipeline", label: "Pipeline" },
+  { href: "/invite", label: "Invite" },
+  { href: "/users", label: "Users" },
+  { href: "/roles", label: "Roles" },
 ];
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
@@ -20,12 +23,21 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const token = useAuthStore((state) => state.token);
   const role = useAuthStore((state) => state.role);
+  const permissions = useAuthStore((state) => state.permissions);
   const hydrate = useAuthStore((state) => state.hydrate);
+  const refreshPermissions = useAuthStore((state) => state.refreshPermissions);
   const clearToken = useAuthStore((state) => state.clearToken);
 
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    if (!token || permissions.length > 0) {
+      return;
+    }
+    void refreshPermissions();
+  }, [token, permissions.length, refreshPermissions]);
 
   useEffect(() => {
     if (token === null) {
@@ -42,6 +54,28 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   function onLogout() {
     clearToken();
     router.push("/login");
+  }
+
+  function canAccessPage() {
+    if (pathname.startsWith("/candidates")) {
+      return permissions.includes("candidates:read");
+    }
+    if (pathname.startsWith("/jobs")) {
+      return permissions.includes("jobs:read");
+    }
+    if (pathname.startsWith("/pipeline")) {
+      return permissions.includes("pipeline:read");
+    }
+    if (pathname.startsWith("/invite")) {
+      return role === "admin" || permissions.includes("users:invite");
+    }
+    if (pathname.startsWith("/users")) {
+      return role === "admin" || permissions.includes("users:invite");
+    }
+    if (pathname.startsWith("/roles")) {
+      return role === "admin";
+    }
+    return true;
   }
 
   return (
@@ -75,13 +109,26 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
           </nav>
-          {!hasAccess(role, WRITE_ROLES) ? (
+          {permissions.length === 0 ? (
             <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              Read-only access. Contact your admin to request recruiter permissions.
+              No assigned permissions found. Contact your admin to request access.
             </p>
           ) : null}
         </aside>
-        <main>{children}</main>
+        <main>
+          {canAccessPage() ? (
+            children
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>Access restricted</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-slate-600">
+                You do not have permission to view this page.
+              </CardContent>
+            </Card>
+          )}
+        </main>
       </div>
     </div>
   );

@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.models.pipeline import Pipeline
 from app.core.config import get_settings
+from app.schemas.auth import CurrentUser
 from app.schemas.pipeline import PipelineCreate, PipelineStage, PipelineStatus, PipelineUpdate
+from app.services.access_scope_service import AccessScopeService
 from app.services.candidate_service import CandidateService
 from app.services.job_service import JobService
 
@@ -20,12 +22,13 @@ logger = logging.getLogger(__name__)
 class PipelineService:
     def __init__(self, db: Session) -> None:
         self.db = db
+        self._scope = AccessScopeService(db)
         self._candidates = CandidateService(db)
         self._jobs = JobService(db)
 
-    def create_pipeline(self, organization_id: UUID, payload: PipelineCreate) -> Pipeline:
-        self._candidates.get_candidate_by_id(payload.candidate_id, organization_id)
-        self._jobs.get_job_by_id(payload.job_id, organization_id)
+    def create_pipeline(self, organization_id: UUID, current_user: CurrentUser, payload: PipelineCreate) -> Pipeline:
+        self._candidates.get_candidate_by_id(payload.candidate_id, organization_id, current_user)
+        self._jobs.get_job_by_id(payload.job_id, organization_id, current_user)
 
         existing = self.db.scalar(
             select(Pipeline.id).where(
@@ -62,6 +65,7 @@ class PipelineService:
     def list_pipelines(
         self,
         organization_id: UUID,
+        current_user: CurrentUser,
         *,
         limit: int = 50,
         offset: int = 0,
@@ -73,10 +77,15 @@ class PipelineService:
             stmt = stmt.where(Pipeline.job_id == job_id)
         if stage is not None:
             stmt = stmt.where(Pipeline.stage == stage.value)
+        allowed_job_ids = self._scope.allowed_job_ids(current_user)
+        if self._scope.is_client_user(current_user):
+            if not allowed_job_ids:
+                return []
+            stmt = stmt.where(Pipeline.job_id.in_(allowed_job_ids))
         stmt = stmt.order_by(Pipeline.created_at.desc()).offset(offset).limit(limit)
         return list(self.db.scalars(stmt))
 
-    def get_pipeline_by_id(self, pipeline_id: UUID, organization_id: UUID) -> Pipeline:
+    def get_pipeline_by_id(self, pipeline_id: UUID, organization_id: UUID, current_user: CurrentUser | None = None) -> Pipeline:
         logger.info(
             "Pipeline lookup requested",
             extra={"pipeline_id": str(pipeline_id), "organization_id": str(organization_id)},
@@ -85,6 +94,9 @@ class PipelineService:
             Pipeline.id == pipeline_id,
             Pipeline.organization_id == organization_id,
         )
+        if current_user is not None and self._scope.is_client_user(current_user):
+            allowed_job_ids = self._scope.allowed_job_ids(current_user)
+            stmt = stmt.where(Pipeline.job_id.in_(allowed_job_ids))
         pipeline = self.db.scalar(stmt)
         if pipeline is None:
             other_org_pipeline = self.db.scalar(select(Pipeline.organization_id).where(Pipeline.id == pipeline_id))
@@ -119,9 +131,10 @@ class PipelineService:
         self,
         pipeline_id: UUID,
         organization_id: UUID,
+        current_user: CurrentUser,
         payload: PipelineUpdate,
     ) -> Pipeline:
-        pipeline = self.get_pipeline_by_id(pipeline_id, organization_id)
+        pipeline = self.get_pipeline_by_id(pipeline_id, organization_id, current_user)
 
         update_data = payload.model_dump(exclude_unset=True)
         if "stage" in update_data and update_data["stage"] is not None:
@@ -142,9 +155,10 @@ class PipelineService:
         self,
         pipeline_id: UUID,
         organization_id: UUID,
+        current_user: CurrentUser,
         payload: PipelineUpdate,
     ) -> Pipeline:
-        return self.update_pipeline(pipeline_id, organization_id, payload)
+        return self.update_pipeline(pipeline_id, organization_id, current_user, payload)
 
     def list_all_pipelines_debug(self, *, limit: int = 200, offset: int = 0) -> list[Pipeline]:
         stmt: Select[tuple[Pipeline]] = (

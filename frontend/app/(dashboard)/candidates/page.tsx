@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api/client";
 import { getCandidates } from "@/lib/api/candidates";
 import type { Candidate } from "@/lib/api/types";
-import { hasAccess, WRITE_ROLES } from "@/lib/rbac";
+import { CANDIDATES_CREATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export default function CandidatesPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const role = useAuthStore((state) => state.role);
+  const permissions = useAuthStore((state) => state.permissions);
 
   useEffect(() => {
     async function loadData() {
@@ -35,7 +35,7 @@ export default function CandidatesPage() {
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Candidates</h1>
-        {hasAccess(role, WRITE_ROLES) ? <Button>Create candidate</Button> : null}
+        {hasPermission(permissions, CANDIDATES_CREATE_PERMISSION) ? <Button>Create candidate</Button> : null}
       </div>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       <Card>

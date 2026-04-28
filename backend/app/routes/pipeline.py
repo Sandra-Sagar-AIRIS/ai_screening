@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.dependencies import get_current_user, require_admin, require_recruiter_or_admin
+from app.core.dependencies import get_current_user, require_permission
+from app.core.permissions import ORGANIZATION_MANAGE, PIPELINE_CREATE, PIPELINE_READ, PIPELINE_UPDATE
 from app.db.session import get_db
 from app.schemas.auth import CurrentUser
 from app.schemas.pipeline import PipelineCreate, PipelineResponse, PipelineStage, PipelineUpdate
@@ -20,17 +21,18 @@ router = APIRouter(prefix="/pipelines", tags=["pipelines"])
 def create_pipeline(
     payload: PipelineCreate,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(require_recruiter_or_admin)],
+    _: Annotated[CurrentUser, Depends(require_permission(PIPELINE_CREATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PipelineResponse:
     service = PipelineService(db)
-    pipeline = service.create_pipeline(UUID(current_user.organization_id), payload)
+    pipeline = service.create_pipeline(UUID(current_user.organization_id), current_user, payload)
     return PipelineResponse.model_validate(pipeline)
 
 
 @router.get("", response_model=list[PipelineResponse])
 def list_pipelines(
     db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(PIPELINE_READ))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -40,6 +42,7 @@ def list_pipelines(
     service = PipelineService(db)
     pipelines = service.list_pipelines(
         UUID(current_user.organization_id),
+        current_user,
         limit=limit,
         offset=offset,
         job_id=job_id,
@@ -52,10 +55,11 @@ def list_pipelines(
 def get_pipeline(
     pipeline_id: UUID,
     db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(PIPELINE_READ))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PipelineResponse:
     service = PipelineService(db)
-    pipeline = service.get_pipeline_by_id(pipeline_id, UUID(current_user.organization_id))
+    pipeline = service.get_pipeline_by_id(pipeline_id, UUID(current_user.organization_id), current_user)
     return PipelineResponse.model_validate(pipeline)
 
 
@@ -64,13 +68,14 @@ def update_pipeline(
     pipeline_id: UUID,
     payload: PipelineUpdate,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(require_recruiter_or_admin)],
+    _: Annotated[CurrentUser, Depends(require_permission(PIPELINE_UPDATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PipelineResponse:
     service = PipelineService(db)
     pipeline = service.update_pipeline(
         pipeline_id=pipeline_id,
         organization_id=UUID(current_user.organization_id),
+        current_user=current_user,
         payload=payload,
     )
     return PipelineResponse.model_validate(pipeline)
@@ -79,7 +84,7 @@ def update_pipeline(
 @router.get("/debug/pipelines", response_model=list[PipelineResponse])
 def debug_list_pipelines(
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(require_admin)],
+    _: Annotated[CurrentUser, Depends(require_permission(ORGANIZATION_MANAGE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
     offset: Annotated[int, Query(ge=0)] = 0,

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 export default function SignupPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const [organizationName, setOrganizationName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +32,12 @@ export default function SignupPage() {
       return;
     }
 
+    const trimmedOrg = organizationName.trim();
+    if (!trimmedOrg) {
+      setError("Please enter your organization name.");
+      return;
+    }
+
     if (password.length < 8) {
       setError("Password must be at least 8 characters.");
       return;
@@ -43,7 +50,11 @@ export default function SignupPage() {
 
     setLoading(true);
     try {
-      const data = await signup({ email: normalizedEmail, password });
+      const data = await signup({
+        email: normalizedEmail,
+        password,
+        organization_name: trimmedOrg,
+      });
       setSuccess(data.message || "Account created successfully. You can now sign in.");
       setTimeout(() => {
         router.push("/login");
@@ -73,6 +84,20 @@ export default function SignupPage() {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             required
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-slate-700" htmlFor="organization">
+            Organization name
+          </label>
+          <Input
+            id="organization"
+            type="text"
+            placeholder="Your company or team name"
+            value={organizationName}
+            onChange={(event) => setOrganizationName(event.target.value)}
+            required
+            autoComplete="organization"
           />
         </div>
         <PasswordField

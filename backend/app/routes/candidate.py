@@ -6,7 +6,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user, require_recruiter_or_admin
+from app.core.dependencies import get_current_user, require_permission
+from app.core.permissions import CANDIDATES_CREATE, CANDIDATES_READ, CANDIDATES_UPDATE
 from app.db.session import get_db
 from app.schemas.auth import CurrentUser
 from app.schemas.candidate import CandidateCreate, CandidateResponse, CandidateUpdate
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/candidates", tags=["candidates"])
 def create_candidate(
     payload: CandidateCreate,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(require_recruiter_or_admin)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_CREATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CandidateResponse:
     service = CandidateService(db)
@@ -30,12 +31,18 @@ def create_candidate(
 @router.get("", response_model=list[CandidateResponse])
 def list_candidates(
     db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_READ))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[CandidateResponse]:
     service = CandidateService(db)
-    candidates = service.list_candidates(UUID(current_user.organization_id), limit=limit, offset=offset)
+    candidates = service.list_candidates(
+        UUID(current_user.organization_id),
+        current_user,
+        limit=limit,
+        offset=offset,
+    )
     return [CandidateResponse.model_validate(candidate) for candidate in candidates]
 
 
@@ -43,10 +50,11 @@ def list_candidates(
 def get_candidate(
     candidate_id: UUID,
     db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_READ))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CandidateResponse:
     service = CandidateService(db)
-    candidate = service.get_candidate_by_id(candidate_id, UUID(current_user.organization_id))
+    candidate = service.get_candidate_by_id(candidate_id, UUID(current_user.organization_id), current_user)
     return CandidateResponse.model_validate(candidate)
 
 
@@ -55,13 +63,14 @@ def update_candidate(
     candidate_id: UUID,
     payload: CandidateUpdate,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(require_recruiter_or_admin)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CandidateResponse:
     service = CandidateService(db)
     candidate = service.update_candidate(
         candidate_id=candidate_id,
         organization_id=UUID(current_user.organization_id),
+        current_user=current_user,
         payload=payload,
     )
     return CandidateResponse.model_validate(candidate)

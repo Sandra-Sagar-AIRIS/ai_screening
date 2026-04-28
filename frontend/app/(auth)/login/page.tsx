@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { login } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { useAuthStore } from "@/store/auth-store";
@@ -13,11 +13,13 @@ import { Button } from "@/components/ui/button";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const setAuth = useAuthStore((state) => state.setAuth);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const inviteAccepted = searchParams.get("inviteAccepted") === "1";
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,7 +39,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const data = await login({ email: normalizedEmail, password });
-      setAuth(data.access_token, data.role, data.organization_id);
+      setAuth(data.access_token, data.role, data.user_type, data.organization_id, data.permissions);
       router.push("/");
     } catch (err) {
       if (err instanceof ApiError) {
@@ -67,6 +69,11 @@ export default function LoginPage() {
           />
         </div>
         <PasswordField id="password" label="Password" value={password} onChange={setPassword} />
+        {inviteAccepted ? (
+          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            Invite accepted successfully. You can now log in.
+          </p>
+        ) : null}
         {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
         <Button className="w-full" type="submit" disabled={loading}>
           {loading ? "Signing in..." : "Sign in"}

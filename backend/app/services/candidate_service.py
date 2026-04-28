@@ -7,12 +7,16 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.models.candidate import Candidate
+from app.models.pipeline import Pipeline
+from app.schemas.auth import CurrentUser
 from app.schemas.candidate import CandidateCreate, CandidateUpdate
+from app.services.access_scope_service import AccessScopeService
 
 
 class CandidateService:
     def __init__(self, db: Session) -> None:
         self.db = db
+        self._scope = AccessScopeService(db)
 
     def create_candidate(self, organization_id: UUID, payload: CandidateCreate) -> Candidate:
         candidate = Candidate(
@@ -31,7 +35,13 @@ class CandidateService:
         self.db.refresh(candidate)
         return candidate
 
-    def list_candidates(self, organization_id: UUID, limit: int = 50, offset: int = 0) -> list[Candidate]:
+    def list_candidates(
+        self,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Candidate]:
         stmt: Select[tuple[Candidate]] = (
             select(Candidate)
             .where(
@@ -42,14 +52,30 @@ class CandidateService:
             .offset(offset)
             .limit(limit)
         )
+        allowed_job_ids = self._scope.allowed_job_ids(current_user)
+        if self._scope.is_client_user(current_user):
+            if not allowed_job_ids:
+                return []
+            stmt = stmt.where(
+                Candidate.id.in_(
+                    select(Pipeline.candidate_id).where(Pipeline.job_id.in_(allowed_job_ids))
+                )
+            )
         return list(self.db.scalars(stmt))
 
-    def get_candidate_by_id(self, candidate_id: UUID, organization_id: UUID) -> Candidate:
+    def get_candidate_by_id(self, candidate_id: UUID, organization_id: UUID, current_user: CurrentUser) -> Candidate:
         stmt: Select[tuple[Candidate]] = select(Candidate).where(
             Candidate.id == candidate_id,
             Candidate.organization_id == organization_id,
             Candidate.is_deleted.is_(False),
         )
+        allowed_job_ids = self._scope.allowed_job_ids(current_user)
+        if self._scope.is_client_user(current_user):
+            stmt = stmt.where(
+                Candidate.id.in_(
+                    select(Pipeline.candidate_id).where(Pipeline.job_id.in_(allowed_job_ids))
+                )
+            )
         candidate = self.db.scalar(stmt)
         if candidate is None:
             raise HTTPException(
@@ -62,9 +88,10 @@ class CandidateService:
         self,
         candidate_id: UUID,
         organization_id: UUID,
+        current_user: CurrentUser,
         payload: CandidateUpdate,
     ) -> Candidate:
-        candidate = self.get_candidate_by_id(candidate_id, organization_id)
+        candidate = self.get_candidate_by_id(candidate_id, organization_id, current_user)
 
         update_data = payload.model_dump(exclude_unset=True)
         if "email" in update_data and update_data["email"] is not None:

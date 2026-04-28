@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { getPipelines } from "@/lib/api/pipeline";
-import { hasAccess, WRITE_ROLES } from "@/lib/rbac";
+import { PIPELINE_UPDATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import type { Pipeline, PipelineStage } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ const STAGES: PipelineStage[] = ["applied", "screening", "interview", "offer", "
 export default function PipelinePage() {
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const role = useAuthStore((state) => state.role);
+  const permissions = useAuthStore((state) => state.permissions);
 
   useEffect(() => {
     async function loadData() {
@@ -43,7 +43,7 @@ export default function PipelinePage() {
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Pipeline</h1>
-        {hasAccess(role, WRITE_ROLES) ? <Button>Move candidate</Button> : null}
+        {hasPermission(permissions, PIPELINE_UPDATE_PERMISSION) ? <Button>Move candidate</Button> : null}
       </div>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

@@ -7,7 +7,9 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.models.job import Job
+from app.schemas.auth import CurrentUser
 from app.schemas.job import JobCreate, JobStatus, JobUpdate
+from app.services.access_scope_service import AccessScopeService
 from app.services.client_service import ClientService
 
 
@@ -15,6 +17,7 @@ class JobService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self._clients = ClientService(db)
+        self._scope = AccessScopeService(db)
 
     def create_job(self, organization_id: UUID, payload: JobCreate) -> Job:
         self._clients.get_client_by_id(payload.client_id, organization_id)
@@ -34,6 +37,7 @@ class JobService:
     def list_jobs(
         self,
         organization_id: UUID,
+        current_user: CurrentUser,
         *,
         limit: int = 50,
         offset: int = 0,
@@ -45,14 +49,22 @@ class JobService:
             stmt = stmt.where(Job.status == status.value)
         if client_id is not None:
             stmt = stmt.where(Job.client_id == client_id)
+        allowed_job_ids = self._scope.allowed_job_ids(current_user)
+        if self._scope.is_client_user(current_user):
+            if not allowed_job_ids:
+                return []
+            stmt = stmt.where(Job.id.in_(allowed_job_ids))
         stmt = stmt.order_by(Job.created_at.desc()).offset(offset).limit(limit)
         return list(self.db.scalars(stmt))
 
-    def get_job_by_id(self, job_id: UUID, organization_id: UUID) -> Job:
+    def get_job_by_id(self, job_id: UUID, organization_id: UUID, current_user: CurrentUser | None = None) -> Job:
         stmt: Select[tuple[Job]] = select(Job).where(
             Job.id == job_id,
             Job.organization_id == organization_id,
         )
+        if current_user is not None and self._scope.is_client_user(current_user):
+            allowed_job_ids = self._scope.allowed_job_ids(current_user)
+            stmt = stmt.where(Job.id.in_(allowed_job_ids))
         job = self.db.scalar(stmt)
         if job is None:
             raise HTTPException(
@@ -65,9 +77,10 @@ class JobService:
         self,
         job_id: UUID,
         organization_id: UUID,
+        current_user: CurrentUser,
         payload: JobUpdate,
     ) -> Job:
-        job = self.get_job_by_id(job_id, organization_id)
+        job = self.get_job_by_id(job_id, organization_id, current_user)
 
         update_data = payload.model_dump(exclude_unset=True)
         if "client_id" in update_data:

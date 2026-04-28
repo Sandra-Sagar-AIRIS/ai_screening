@@ -1,5 +1,5 @@
 import { apiRequest } from "@/lib/api/client";
-import type { LoginPayload, SignupPayload, SignupResponse, TokenResponse } from "@/lib/api/types";
+import type { LoginPayload, MePermissionsResponse, SignupPayload, SignupResponse, TokenResponse } from "@/lib/api/types";
 
 export async function login(payload: LoginPayload) {
   return apiRequest<TokenResponse>("/auth/login", {
@@ -15,4 +15,8 @@ export async function signup(payload: SignupPayload) {
     body: JSON.stringify(payload),
     auth: false,
   });
+}
+
+export async function getMyPermissions() {
+  return apiRequest<MePermissionsResponse>("/me/permissions");
 }

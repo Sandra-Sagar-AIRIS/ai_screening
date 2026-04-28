@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { getJobs } from "@/lib/api/jobs";
-import { hasAccess, WRITE_ROLES } from "@/lib/rbac";
+import { JOBS_CREATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import type { Job } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const role = useAuthStore((state) => state.role);
+  const permissions = useAuthStore((state) => state.permissions);
 
   useEffect(() => {
     async function loadData() {
@@ -35,7 +35,7 @@ export default function JobsPage() {
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Jobs</h1>
-        {hasAccess(role, WRITE_ROLES) ? <Button>Create job</Button> : null}
+        {hasPermission(permissions, JOBS_CREATE_PERMISSION) ? <Button>Create job</Button> : null}
       </div>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       <Card>

@@ -44,6 +44,28 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CORS_ORIGINS", "cors_origins"),
     )
 
+    # Frontend base URL for invite links (no trailing slash required).
+    frontend_url: str = Field(
+        default="http://localhost:3000",
+        validation_alias=AliasChoices("FRONTEND_URL", "frontend_url"),
+    )
+
+    # Brevo SMTP (https://developers.brevo.com/docs/send-transactional-emails-using-smtp-relay)
+    smtp_host: str = Field(
+        default="smtp-relay.brevo.com",
+        validation_alias=AliasChoices("SMTP_HOST", "smtp_host"),
+    )
+    smtp_port: int = Field(default=587, validation_alias=AliasChoices("SMTP_PORT", "smtp_port"))
+    smtp_user: str | None = Field(default=None, validation_alias=AliasChoices("SMTP_USER", "smtp_user"))
+    smtp_password: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SMTP_PASSWORD", "smtp_password"),
+    )
+    smtp_from: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SMTP_FROM", "smtp_from"),
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
