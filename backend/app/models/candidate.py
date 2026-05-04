@@ -1,14 +1,28 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import Boolean, DateTime, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+
+class CandidateSourceType(StrEnum):
+    INTERNAL = "internal"
+    VENDOR = "vendor"
+
+
+candidate_source_type_enum = sa.Enum(
+    CandidateSourceType.INTERNAL.value,
+    CandidateSourceType.VENDOR.value,
+    name="candidate_source_type",
+    create_type=False,
+)
 
 
 class Candidate(Base):
@@ -20,6 +34,18 @@ class Candidate(Base):
         server_default=sa.text("gen_random_uuid()"),
     )
     organization_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+
+    created_by: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_type: Mapped[str] = mapped_column(
+        candidate_source_type_enum,
+        nullable=False,
+        server_default=sa.text("'internal'"),
+    )
 
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)

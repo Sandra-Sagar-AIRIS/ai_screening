@@ -26,7 +26,14 @@ class Profile(Base):
         index=True,
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
-    role: Mapped[str] = mapped_column(String(32), nullable=False, server_default=sa.text("'recruiter'"))
+    # Denormalized slug matching OrganizationRole.key (JWT / invite payloads).
+    role: Mapped[str] = mapped_column(String(64), nullable=False, server_default=sa.text("'recruiter'"))
+    role_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("organization_roles.id"),
+        nullable=False,
+        index=True,
+    )
     type: Mapped[str] = mapped_column(String(32), nullable=False, server_default=sa.text("'internal'"))
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

@@ -14,7 +14,12 @@ from app.db.base import Base
 class RolePermission(Base):
     __tablename__ = "role_permissions"
     __table_args__ = (
-        UniqueConstraint("organization_id", "role", "permission", name="uq_role_permissions_org_role_permission"),
+        UniqueConstraint(
+            "organization_id",
+            "role_id",
+            "permission",
+            name="uq_role_permissions_org_role_id_permission",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -28,7 +33,12 @@ class RolePermission(Base):
         nullable=False,
         index=True,
     )
-    role: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    role_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("organization_roles.id"),
+        nullable=False,
+        index=True,
+    )
     permission: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

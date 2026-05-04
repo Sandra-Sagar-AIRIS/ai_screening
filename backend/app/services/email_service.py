@@ -22,18 +22,20 @@ def _invite_link(token: str) -> str:
 
 def send_invite_email(to_email: str, token: str) -> None:
     """
-    Send invite email via SMTP (STARTTLS). Errors are logged and not raised.
+    Send invite email via SMTP (STARTTLS).
 
     Requires SMTP_USER, SMTP_PASSWORD, SMTP_FROM, and FRONTEND_URL in settings.
     SMTP_FROM must match a verified sender in Brevo.
     """
     settings = get_settings()
     if not settings.smtp_user or not settings.smtp_password:
-        logger.warning("SMTP_USER or SMTP_PASSWORD not set; skipping invite email to %s", to_email)
-        return
+        message = "SMTP_USER or SMTP_PASSWORD not set."
+        logger.error("%s Cannot send invite email to %s", message, to_email)
+        raise RuntimeError(message)
     if not settings.smtp_from:
-        logger.warning("SMTP_FROM not set; skipping invite email to %s", to_email)
-        return
+        message = "SMTP_FROM not set."
+        logger.error("%s Cannot send invite email to %s", message, to_email)
+        raise RuntimeError(message)
 
     link = _invite_link(token)
     body_text = (
@@ -55,3 +57,4 @@ def send_invite_email(to_email: str, token: str) -> None:
         logger.info("Invite email sent to %s", to_email)
     except Exception:
         logger.exception("Failed to send invite email to %s", to_email)
+        raise

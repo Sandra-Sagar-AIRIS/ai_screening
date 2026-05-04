@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
+import { listOrganizationRoles } from "@/lib/api/roles";
 import { getUsers, updateUserRole } from "@/lib/api/users";
-import type { OrganizationUser, UserRoleOption } from "@/lib/api/types";
+import type { OrganizationRole, OrganizationUser, UserRoleOption } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
-
-const roleOptions: UserRoleOption[] = ["admin", "recruiter", "client_viewer"];
 
 export default function UsersPage() {
   const [users, setUsers] = useState<OrganizationUser[]>([]);
+  const [roleChoices, setRoleChoices] = useState<OrganizationRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
@@ -28,8 +28,9 @@ export default function UsersPage() {
       }
 
       try {
-        const data = await getUsers();
+        const [data, roles] = await Promise.all([getUsers(), listOrganizationRoles()]);
         setUsers(data);
+        setRoleChoices(roles);
       } catch (err) {
         if (err instanceof ApiError) {
           setError(err.message);
@@ -99,9 +100,9 @@ export default function UsersPage() {
                           disabled={updatingUserId === user.id}
                           onChange={(event) => onRoleChange(user.id, event.target.value as UserRoleOption)}
                         >
-                          {roleOptions.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
+                          {roleChoices.map((option) => (
+                            <option key={option.id} value={option.key}>
+                              {option.name} ({option.key})
                             </option>
                           ))}
                         </select>
