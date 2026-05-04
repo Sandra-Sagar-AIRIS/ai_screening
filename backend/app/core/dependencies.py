@@ -12,9 +12,11 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.permissions import normalize_permissions
 from app.db.session import get_db
+from app.models.organization_role import OrganizationRole
 from app.models.profile import Profile
 from app.models.role_permission import RolePermission
 from app.schemas.auth import CurrentUser, UserType
+from app.services.permission_service import PermissionService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
@@ -44,7 +46,22 @@ def _parse_user_type(raw_type: str | None) -> str:
         ) from exc
 
 
-def get_user_permissions(db: Session, organization_id: str, role: str | None) -> list[str]:
+def get_user_permissions(
+    db: Session,
+    organization_id: str,
+    role: str | None,
+    user_id: str | None = None,
+) -> list[str]:
+    """
+    Effective permissions from role_permissions only.
+
+    Prefer `user_id` when available (resolves the user's org role via profile.role_id).
+    Legacy path uses `role` as organization_roles.key for the org.
+    """
+
+    if user_id is not None:
+        return PermissionService(db).get_user_permissions(user_id)
+
     if role is None:
         return []
     role_key = role.strip().lower()
@@ -54,9 +71,19 @@ def get_user_permissions(db: Session, organization_id: str, role: str | None) ->
         org_uuid = UUID(organization_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid organization in auth context.") from exc
+
+    role_row_id = db.scalar(
+        select(OrganizationRole.id).where(
+            OrganizationRole.organization_id == org_uuid,
+            OrganizationRole.key == role_key,
+        )
+    )
+    if role_row_id is None:
+        return []
+
     stmt = select(RolePermission.permission).where(
         RolePermission.organization_id == org_uuid,
-        func.lower(RolePermission.role) == role_key,
+        RolePermission.role_id == role_row_id,
     )
     values = [permission for permission in db.scalars(stmt)]
     normalized = normalize_permissions(values)
@@ -174,10 +201,31 @@ def require_permission(permission: str):
         current_user: CurrentUser = Depends(get_current_user),
         db: Session = Depends(get_db),
     ) -> CurrentUser:
-        permissions = get_user_permissions(db, current_user.organization_id, current_user.role)
-        if permission not in permissions:
+        permission_service = PermissionService(db)
+        if not permission_service.can_user(current_user.user_id, current_user.organization_id, permission):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: insufficient permissions.")
         return current_user
+
+    return _dependency
+
+
+def require_any_permissions(*permissions: str):
+    """
+    Allows access if the user has at least one of the provided permissions.
+
+    Useful for legacy endpoints where we need to support both "read all" and "read own".
+    """
+
+    permissions_normalized = tuple(p for p in permissions if p)
+    def _dependency(
+        current_user: CurrentUser = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> CurrentUser:
+        permission_service = PermissionService(db)
+        for permission in permissions_normalized:
+            if permission_service.can_user(current_user.user_id, current_user.organization_id, permission):
+                return current_user
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: insufficient permissions.")
 
     return _dependency
 

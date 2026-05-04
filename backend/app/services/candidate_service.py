@@ -18,7 +18,22 @@ class CandidateService:
         self.db = db
         self._scope = AccessScopeService(db)
 
-    def create_candidate(self, organization_id: UUID, payload: CandidateCreate) -> Candidate:
+    def create_candidate(
+        self,
+        organization_id: UUID,
+        payload: CandidateCreate,
+        *,
+        current_user: CurrentUser | None = None,
+        auto_commit: bool = True,
+    ) -> Candidate:
+        """
+        Create a candidate.
+
+        Security: vendor access is enforced in query filters (list/get) by scoping to `created_by`.
+        """
+        created_by = UUID(current_user.user_id) if current_user is not None else None
+        source_type = "vendor" if (current_user is not None and (current_user.role or "").strip().lower() == "vendor") else "internal"
+
         candidate = Candidate(
             organization_id=organization_id,
             first_name=payload.first_name.strip(),
@@ -29,9 +44,14 @@ class CandidateService:
             experience_summary=payload.experience_summary,
             education=payload.education,
             notes=payload.notes,
+            created_by=created_by,
+            source_type=source_type,
         )
         self.db.add(candidate)
-        self.db.commit()
+        if auto_commit:
+            self.db.commit()
+        else:
+            self.db.flush()
         self.db.refresh(candidate)
         return candidate
 
@@ -52,15 +72,17 @@ class CandidateService:
             .offset(offset)
             .limit(limit)
         )
-        allowed_job_ids = self._scope.allowed_job_ids(current_user)
         if self._scope.is_client_user(current_user):
-            if not allowed_job_ids:
-                return []
             stmt = stmt.where(
                 Candidate.id.in_(
-                    select(Pipeline.candidate_id).where(Pipeline.job_id.in_(allowed_job_ids))
+                    select(Pipeline.candidate_id).where(
+                        Pipeline.job_id.in_(self._scope.allowed_job_ids_subquery(current_user))
+                    )
                 )
             )
+        elif self._scope.is_vendor_user(current_user):
+            # Vendors can see only candidates they submitted.
+            stmt = stmt.where(Candidate.created_by == UUID(current_user.user_id))
         return list(self.db.scalars(stmt))
 
     def get_candidate_by_id(self, candidate_id: UUID, organization_id: UUID, current_user: CurrentUser) -> Candidate:
@@ -69,13 +91,16 @@ class CandidateService:
             Candidate.organization_id == organization_id,
             Candidate.is_deleted.is_(False),
         )
-        allowed_job_ids = self._scope.allowed_job_ids(current_user)
         if self._scope.is_client_user(current_user):
             stmt = stmt.where(
                 Candidate.id.in_(
-                    select(Pipeline.candidate_id).where(Pipeline.job_id.in_(allowed_job_ids))
+                    select(Pipeline.candidate_id).where(
+                        Pipeline.job_id.in_(self._scope.allowed_job_ids_subquery(current_user))
+                    )
                 )
             )
+        elif self._scope.is_vendor_user(current_user):
+            stmt = stmt.where(Candidate.created_by == UUID(current_user.user_id))
         candidate = self.db.scalar(stmt)
         if candidate is None:
             raise HTTPException(

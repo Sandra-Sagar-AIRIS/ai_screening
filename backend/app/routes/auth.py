@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_user_permissions
 from app.core.signup_permissions import seed_default_role_permissions
+from app.services.organization_role_service import get_role_id_by_key
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models.organization import Organization
@@ -39,12 +40,19 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> SignupRespo
 
     # Default RBAC rows for this org (admin / recruiter / client) — same transaction as profile
     seed_default_role_permissions(db, organization.id)
+    admin_role_id = get_role_id_by_key(db, organization.id, "admin")
+    if admin_role_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Default admin role is missing; cannot complete signup.",
+        )
 
     # 3) First user for this org: admin, internal
     profile = Profile(
         organization_id=organization.id,
         email=normalized_email,
         role="admin",
+        role_id=admin_role_id,
         type=UserType.INTERNAL,
         password_hash=hash_password(payload.password),
     )
@@ -80,7 +88,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
             "organization_id": str(profile.organization_id),
         },
     )
-    permissions = get_user_permissions(db, str(profile.organization_id), profile.role)
+    permissions = get_user_permissions(db, str(profile.organization_id), profile.role, user_id=str(profile.id))
     return TokenResponse(
         access_token=token,
         token_type="bearer",

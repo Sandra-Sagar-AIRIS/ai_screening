@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
-
-InviteRole = Literal["admin", "recruiter", "client_viewer"]
 
 
 class InviteCreate(BaseModel):
     email: EmailStr
-    role: InviteRole = "recruiter"
+    # organization_roles.key (system or custom) for the target org
+    role: str = Field(default="recruiter", min_length=1, max_length=64)
     expires_in_days: int = Field(default=7, ge=1, le=30)
 
 
@@ -28,6 +26,19 @@ class InviteCreateResponse(BaseModel):
     message: str
     invite: InviteResponse
     token: str
+
+
+class InviteListItem(BaseModel):
+    id: str
+    email: str
+    role: str
+    status: str
+    created_at: datetime
+    expires_at: datetime
+
+
+class InviteResendResponse(BaseModel):
+    message: str
 
 
 class InviteAcceptRequest(BaseModel):
