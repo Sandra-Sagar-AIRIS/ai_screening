@@ -92,6 +92,15 @@ export type Candidate = {
   email: string;
   phone: string | null;
   location: string | null;
+  role: string | null;
+  stage?: "applied" | "screening" | "shortlisted" | "interview" | "offered" | "hired" | "rejected";
+  job_id?: string | null;
+  recruiter_id?: string | null;
+  resume_s3_key?: string | null;
+  resume_file_name?: string | null;
+  source?: "manual" | "resume_upload" | "bulk_upload" | "referral" | "agency" | "import" | "merge";
+  status?: "active" | "archived" | "deleted";
+  years_experience: number | null;
   experience_summary: string | null;
   education: string | null;
   notes: string | null;
@@ -99,17 +108,74 @@ export type Candidate = {
   updated_at: string;
 };
 
-export type JobStatus = "draft" | "open" | "closed" | "filled";
+export type JobStatus = "draft" | "open" | "on_hold" | "closed" | "cancelled" | "filled";
 
 export type Job = {
   id: string;
   organization_id: string;
-  client_id: string;
+  client_id?: string | null;
   title: string;
   description: string | null;
   status: JobStatus;
+  location?: string | null;
+  salary_min?: number | null;
+  salary_max?: number | null;
+  salary_currency?: string | null;
+  experience_min_years?: number | null;
+  experience_max_years?: number | null;
+  employment_type?: string | null;
+  urgency?: string | null;
+  required_skills?: string[];
+  preferred_skills?: string[];
+  raw_jd_text?: string | null;
+  parsing_source?: string | null;
+  parsing_status?: string | null;
+  created_by?: string | null;
+  filled_at?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type JobSubmissionStatus = "pending" | "shortlisted" | "rejected" | "interviewing" | "offered" | "hired";
+
+export type JobSubmission = {
+  id: string;
+  job_id: string;
+  candidate_id: string;
+  submission_status: JobSubmissionStatus;
+  submitted_at: string;
+  submitted_by: string;
+  notes: string | null;
+};
+
+export type JobMatchCategoryScores = {
+  skills_overlap: number;
+  location_compatibility: number;
+  experience_fit: number;
+};
+
+export type JobMatchEntry = {
+  rank: number;
+  candidate_id: string;
+  fit_score: number;
+  category_scores: JobMatchCategoryScores;
+  already_submitted: boolean;
+};
+
+export type JobMatchTriggerResponse = {
+  job_id: string;
+  match_count: number;
+  generated_at: string;
+  refresh_requested: boolean;
+};
+
+export type JobMatchesResponse = {
+  job_id: string;
+  matches: JobMatchEntry[];
+  total_count: number;
+  generated_at: string;
+  limit: number;
+  offset: number;
 };
 
 export type PipelineStage = "applied" | "screening" | "interview" | "offer" | "placed" | "rejected";

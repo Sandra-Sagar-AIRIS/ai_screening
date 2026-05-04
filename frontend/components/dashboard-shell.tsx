@@ -79,7 +79,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen overflow-x-hidden bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <p className="text-lg font-semibold">AIRIS</p>
@@ -94,7 +94,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 py-6 md:grid-cols-[220px_1fr]">
-        <aside className="rounded-lg border border-slate-200 bg-white p-2">
+        <aside className="rounded-lg border border-slate-200 bg-white p-2 h-fit">
           <nav className="space-y-1">
             {navItems.map((item) => (
               <Link
@@ -115,7 +115,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </p>
           ) : null}
         </aside>
-        <main>
+        <main className="min-w-0 overflow-hidden">
           {canAccessPage() ? (
             children
           ) : (

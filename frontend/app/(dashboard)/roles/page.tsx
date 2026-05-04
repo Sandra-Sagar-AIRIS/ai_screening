@@ -95,15 +95,15 @@ function formatLabel(value: string) {
 
 function buildPermissionGroups(): PermissionGroup[] {
   return (Object.keys(PERMISSION_CONFIG) as ModuleKey[]).map((moduleKey) => {
-    const module = PERMISSION_CONFIG[moduleKey];
-    const permissions = Object.entries(module.actions).map(([actionKey, description]) => ({
+    const mod = PERMISSION_CONFIG[moduleKey];
+    const permissions = Object.entries(mod.actions).map(([actionKey, description]) => ({
       value: `${moduleKey}:${actionKey}`,
       actionLabel: formatLabel(actionKey),
       description,
     }));
     return {
       moduleKey,
-      moduleLabel: module.label,
+      moduleLabel: mod.label,
       permissions,
     };
   });
@@ -181,6 +181,7 @@ export default function RolesPage() {
     }
 
     void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
   function togglePermission(roleKey: RoleKey, permission: string, checked: boolean) {
@@ -357,7 +358,7 @@ export default function RolesPage() {
                           <span>{group.moduleLabel} (select all)</span>
                           {partiallySelected ? <span className="text-xs font-normal text-slate-500">Partially selected</span> : null}
                         </label>
-                        <Button variant="ghost" size="sm" onClick={() => toggleModuleExpanded(roleKey, group.moduleKey)}>
+                        <Button variant="ghost" onClick={() => toggleModuleExpanded(roleKey, group.moduleKey)}>
                           {isExpanded ? "Collapse" : "Expand"}
                         </Button>
                       </div>

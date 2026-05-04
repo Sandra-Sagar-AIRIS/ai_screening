@@ -60,6 +60,8 @@ def _is_integration_test(request: pytest.FixtureRequest) -> bool:
 @pytest.fixture(scope="session")
 def setup_test_database() -> Generator[None, None, None]:
     from tests.db import test_engine
+    if test_engine is None:
+        pytest.skip("TEST_DATABASE_URL is required for DB integration tests.")
 
     _load_test_env()
     with test_engine.begin() as conn:

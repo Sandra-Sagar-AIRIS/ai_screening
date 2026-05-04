@@ -64,3 +64,36 @@ pnpm-debug.log*
 *.pid.lock
 tmp/
 temp/
+
+# ----------------------------
+# Python Environments (extra)
+# ----------------------------
+.venv311/
+
+# ----------------------------
+# AI Tools / Agents
+# ----------------------------
+.cursor/
+.claude/
+.junie/
+skills-lock.json
+
+# ----------------------------
+# Scratch & Debug Scripts
+# ----------------------------
+scratch/
+backend/scratch/
+frontend/scratch_refactor.txt
+frontend/diff.txt
+frontend/fix.py
+frontend/fix2.py
+frontend/refactor.py
+frontend/refactor_create.py
+
+# ----------------------------
+# Documents & Specs
+# ----------------------------
+*.docx
+*.pdf
+_docx_unpacked/
+AIRIS PRD/

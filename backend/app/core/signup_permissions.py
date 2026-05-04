@@ -14,6 +14,7 @@ from app.models.role_permission import RolePermission
 # User-specified defaults for non-admin roles (MVP).
 _RECRUITER_DEFAULTS: tuple[str, ...] = (
     "jobs:read",
+    "jobs:update",
     "candidates:create",
     "candidates:read",
     "pipeline:update",
@@ -31,8 +32,10 @@ def iter_default_role_permission_pairs() -> Iterable[tuple[str, str]]:
     for permission in _RECRUITER_DEFAULTS:
         yield ("recruiter", permission)
     for permission in _CLIENT_DEFAULTS:
-        yield ("client", permission)
+        yield ("client_viewer", permission)
 
+
+from app.models.organization_role import OrganizationRole
 
 def seed_default_role_permissions(db: Session, organization_id: UUID) -> None:
     """
@@ -44,22 +47,33 @@ def seed_default_role_permissions(db: Session, organization_id: UUID) -> None:
         print(f"[signup_permissions] organization_id={organization_id} inserted=0")
         return
 
+    # 1. Get all roles for this organization
+    roles = db.scalars(select(OrganizationRole).where(OrganizationRole.organization_id == organization_id)).all()
+    role_map = {r.key: r.id for r in roles}
+
+    # 2. Get existing permissions
     existing_pairs = set(
         db.execute(
-            select(RolePermission.role, RolePermission.permission).where(
-                RolePermission.organization_id == organization_id
-            )
+            select(OrganizationRole.key, RolePermission.permission)
+            .join(OrganizationRole, RolePermission.role_id == OrganizationRole.id)
+            .where(RolePermission.organization_id == organization_id)
         ).all()
     )
 
     inserted_count = 0
-    for role, permission in desired_pairs:
-        if (role, permission) in existing_pairs:
+    for role_key, permission in desired_pairs:
+        if (role_key, permission) in existing_pairs:
             continue
+        
+        role_id = role_map.get(role_key)
+        if not role_id:
+            # Fallback: if role doesn't exist, we skip it (or we could create it, but usually roles should exist)
+            continue
+
         db.add(
             RolePermission(
                 organization_id=organization_id,
-                role=role,
+                role_id=role_id,
                 permission=permission,
             )
         )

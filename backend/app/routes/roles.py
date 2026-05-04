@@ -17,6 +17,10 @@ from app.schemas.auth import CurrentUser
 router = APIRouter()
 
 ROLE_KEYS: tuple[str, ...] = ("admin", "recruiter", "client_viewer")
+ROLE_ALIASES: dict[str, tuple[str, ...]] = {
+    "client_viewer": ("client_viewer", "client"),
+    "client": ("client", "client_viewer"),
+}
 
 
 class RolePermissionsUpdateRequest(BaseModel):
@@ -25,6 +29,8 @@ class RolePermissionsUpdateRequest(BaseModel):
 
 def _normalize_role(role: str) -> str:
     normalized = role.strip().lower()
+    if normalized == "client":
+        normalized = "client_viewer"
     if normalized not in ROLE_KEYS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid role.")
     return normalized
@@ -42,6 +48,8 @@ def _normalize_requested_permissions(values: list[str]) -> list[str]:
     return normalized
 
 
+from app.models.organization_role import OrganizationRole
+
 @router.get("", response_model=dict[str, list[str]])
 def get_role_permissions(
     db: Annotated[Session, Depends(get_db)],
@@ -49,15 +57,19 @@ def get_role_permissions(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> dict[str, list[str]]:
     org_id = UUID(current_user.organization_id)
-    stmt = select(RolePermission.role, RolePermission.permission).where(RolePermission.organization_id == org_id)
+    stmt = (
+        select(OrganizationRole.key, RolePermission.permission)
+        .join(OrganizationRole, RolePermission.role_id == OrganizationRole.id)
+        .where(RolePermission.organization_id == org_id)
+    )
     rows = db.execute(stmt).all()
 
     grouped = {role: [] for role in ROLE_KEYS}
-    for role, permission in rows:
-        role_key = role.strip().lower()
+    for role_key, permission in rows:
+        normalized_key = _normalize_role(role_key)
         permission_key = permission.strip().lower()
-        if role_key in grouped and permission_key not in grouped[role_key]:
-            grouped[role_key].append(permission_key)
+        if normalized_key in grouped and permission_key not in grouped[normalized_key]:
+            grouped[normalized_key].append(permission_key)
 
     for role in grouped:
         grouped[role].sort()
@@ -77,15 +89,25 @@ def update_role_permissions(
     role_key = _normalize_role(role)
     permissions = _normalize_requested_permissions(payload.permissions)
 
+    # Resolve role_id
+    role_obj = db.scalar(
+        select(OrganizationRole).where(
+            OrganizationRole.organization_id == org_id,
+            OrganizationRole.key == role_key
+        )
+    )
+    if not role_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found for this organization.")
+
     db.execute(
         delete(RolePermission).where(
             RolePermission.organization_id == org_id,
-            RolePermission.role == role_key,
+            RolePermission.role_id == role_obj.id,
         )
     )
 
     for permission in permissions:
-        db.add(RolePermission(organization_id=org_id, role=role_key, permission=permission))
+        db.add(RolePermission(organization_id=org_id, role_id=role_obj.id, permission=permission))
 
     db.commit()
     return {role_key: permissions}

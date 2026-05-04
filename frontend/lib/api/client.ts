@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
 export class ApiError extends Error {
   status: number;
@@ -9,6 +9,40 @@ export class ApiError extends Error {
     this.status = status;
     this.detail = detail;
   }
+}
+
+function toErrorMessage(detail: unknown, status: number): string {
+  if (!detail) {
+    return `Request failed with status ${status}`;
+  }
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (typeof detail === "object") {
+    if ("detail" in detail) {
+      const raw = (detail as { detail: unknown }).detail;
+      if (typeof raw === "string") {
+        return raw;
+      }
+      if (raw && typeof raw === "object") {
+        if ("error" in raw) {
+          return String((raw as { error: unknown }).error);
+        }
+        try {
+          return JSON.stringify(raw);
+        } catch {
+          return "Request failed";
+        }
+      }
+      return String(raw);
+    }
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return `Request failed with status ${status}`;
+    }
+  }
+  return `Request failed with status ${status}`;
 }
 
 type RequestOptions = RequestInit & {
@@ -42,10 +76,8 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     } catch {
       detail = await response.text();
     }
-    const message =
-      typeof detail === "object" && detail !== null && "detail" in detail
-        ? String((detail as { detail: unknown }).detail)
-        : `Request failed with status ${response.status}`;
+    const message = toErrorMessage(detail, response.status);
+    console.error(`[API Error] ${response.status} ${path}:`, detail);
     throw new ApiError(message, response.status, detail);
   }
 

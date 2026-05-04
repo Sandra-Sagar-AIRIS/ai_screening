@@ -19,6 +19,11 @@ from app.schemas.auth import CurrentUser, UserType
 bearer_scheme = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
 
+ROLE_ALIASES: dict[str, tuple[str, ...]] = {
+    "client_viewer": ("client_viewer", "client"),
+    "client": ("client", "client_viewer"),
+}
+
 
 def _parse_role(raw_role: str | None) -> str | None:
     if raw_role is None:
@@ -44,6 +49,8 @@ def _parse_user_type(raw_type: str | None) -> str:
         ) from exc
 
 
+from app.models.organization_role import OrganizationRole
+
 def get_user_permissions(db: Session, organization_id: str, role: str | None) -> list[str]:
     if role is None:
         return []
@@ -54,17 +61,22 @@ def get_user_permissions(db: Session, organization_id: str, role: str | None) ->
         org_uuid = UUID(organization_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid organization in auth context.") from exc
-    stmt = select(RolePermission.permission).where(
-        RolePermission.organization_id == org_uuid,
-        func.lower(RolePermission.role) == role_key,
+    role_keys = ROLE_ALIASES.get(role_key, (role_key,))
+    stmt = (
+        select(RolePermission.permission)
+        .join(OrganizationRole, RolePermission.role_id == OrganizationRole.id)
+        .where(
+            RolePermission.organization_id == org_uuid,
+            func.lower(OrganizationRole.key).in_(role_keys),
+        )
     )
     values = [permission for permission in db.scalars(stmt)]
     normalized = normalize_permissions(values)
     logger.debug(
-        "get_user_permissions org_id=%s role_in=%s role_key=%s raw_rows=%s normalized=%s",
+        "get_user_permissions org_id=%s role_in=%s role_keys=%s raw_rows=%s normalized=%s",
         organization_id,
         role,
-        role_key,
+        role_keys,
         len(values),
         len(normalized),
     )

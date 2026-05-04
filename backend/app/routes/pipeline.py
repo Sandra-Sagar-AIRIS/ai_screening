@@ -15,6 +15,7 @@ from app.schemas.pipeline import PipelineCreate, PipelineResponse, PipelineStage
 from app.services.pipeline_service import PipelineService
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
+pipeline_router = APIRouter(prefix="/pipeline", tags=["pipelines"])
 
 
 @router.post("", response_model=PipelineResponse, status_code=status.HTTP_201_CREATED)
@@ -37,6 +38,7 @@ def list_pipelines(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     job_id: Annotated[UUID | None, Query()] = None,
+    candidate_id: Annotated[UUID | None, Query()] = None,
     stage: Annotated[PipelineStage | None, Query()] = None,
 ) -> list[PipelineResponse]:
     service = PipelineService(db)
@@ -46,6 +48,7 @@ def list_pipelines(
         limit=limit,
         offset=offset,
         job_id=job_id,
+        candidate_id=candidate_id,
         stage=stage,
     )
     return [PipelineResponse.model_validate(p) for p in pipelines]
@@ -65,6 +68,25 @@ def get_pipeline(
 
 @router.put("/{pipeline_id}", response_model=PipelineResponse)
 def update_pipeline(
+    pipeline_id: UUID,
+    payload: PipelineUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(PIPELINE_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> PipelineResponse:
+    service = PipelineService(db)
+    pipeline = service.update_pipeline(
+        pipeline_id=pipeline_id,
+        organization_id=UUID(current_user.organization_id),
+        current_user=current_user,
+        payload=payload,
+    )
+    return PipelineResponse.model_validate(pipeline)
+
+
+@router.patch("/{pipeline_id}", response_model=PipelineResponse)
+@pipeline_router.patch("/{pipeline_id}", response_model=PipelineResponse)
+def patch_pipeline(
     pipeline_id: UUID,
     payload: PipelineUpdate,
     db: Annotated[Session, Depends(get_db)],
