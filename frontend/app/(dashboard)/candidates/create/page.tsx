@@ -72,7 +72,9 @@ export default function CandidatesPage() {
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvResumeKeys, setCsvResumeKeys] = useState("");
   const [bulkFiles, setBulkFiles] = useState<File[]>([]);
-  const [bulkStatus, setBulkStatus] = useState<Array<{ name: string; status: "pending" | "parsing" | "success" | "error"; error?: string }>>([]);
+  const [bulkStatus, setBulkStatus] = useState<
+    Array<{ name: string; status: "pending" | "parsing" | "success" | "duplicate" | "error"; error?: string }>
+  >([]);
   const [bulkJob, setBulkJob] = useState<BulkUploadJobStatus | null>(null);
   const [draftCandidate, setDraftCandidate] = useState<CandidateDraft | null>(null);
   const [parseResult, setParseResult] = useState<CandidateManagementParseResult | null>(null);
@@ -357,10 +359,12 @@ export default function CandidatesPage() {
         });
         setBulkStatus(prev => prev.map((s, idx) => idx === i ? { ...s, status: "success" } : s));
       } catch (err) {
-        const msg = (err instanceof ApiError && err.status === 409) 
-          ? "Already exists" 
-          : (err instanceof Error ? err.message : String(err));
-        setBulkStatus(prev => prev.map((s, idx) => idx === i ? { ...s, status: "error", error: msg } : s));
+        if (err instanceof ApiError && err.status === 409) {
+          setBulkStatus((prev) => prev.map((s, idx) => (idx === i ? { ...s, status: "duplicate", error: "Already exists" } : s)));
+          continue;
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        setBulkStatus((prev) => prev.map((s, idx) => (idx === i ? { ...s, status: "error", error: msg } : s)));
       }
     }
     setBulkCreating(false);
@@ -656,6 +660,7 @@ export default function CandidatesPage() {
                       <div className="flex items-center gap-2">
                         {item.status === "parsing" && <span className="text-blue-600 animate-pulse">Parsing...</span>}
                         {item.status === "success" && <span className="text-green-600">✓ Success</span>}
+                        {item.status === "duplicate" && <span className="text-amber-600">↺ Already exists</span>}
                         {item.status === "error" && <span className="text-red-600" title={item.error}>✕ Failed</span>}
                         {item.status === "pending" && <span className="text-slate-400">Pending</span>}
                       </div>

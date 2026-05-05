@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
+import time
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -20,6 +23,24 @@ from app.services.permission_service import PermissionService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
+_DEBUG_LOG_PATH = Path(__file__).resolve().parents[2] / "debug-f65d2f.log"
+
+
+def _debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    payload = {
+        "sessionId": "f65d2f",
+        "runId": "pre-fix",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
 
 ROLE_ALIASES: dict[str, tuple[str, ...]] = {
     "client_viewer": ("client_viewer", "client"),
@@ -117,6 +138,14 @@ def get_current_user(
     """
     state_user = getattr(request.state, "user", None)
     if state_user is not None:
+        # region agent log
+        _debug_log(
+            "H1",
+            "backend/app/core/dependencies.py:get_current_user:state_user",
+            "Resolved auth from request.state.user",
+            {"has_role": bool(getattr(state_user, "role", None)), "has_org": bool(getattr(state_user, "organization_id", None))},
+        )
+        # endregion
         return CurrentUser(
             user_id=str(state_user.user_id),
             organization_id=str(state_user.organization_id),
@@ -144,6 +173,18 @@ def get_current_user(
         profile = db.scalar(select(Profile).where(Profile.id == user_uuid))
         if profile is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authenticated user not found.")
+        # region agent log
+        _debug_log(
+            "H1",
+            "backend/app/core/dependencies.py:get_current_user:jwt_profile",
+            "Resolved auth from JWT and DB profile",
+            {
+                "has_profile": True,
+                "profile_has_role": bool(profile.role),
+                "profile_has_role_id": bool(getattr(profile, "role_id", None)),
+            },
+        )
+        # endregion
 
         if x_organization_id and x_organization_id != str(profile.organization_id):
             raise HTTPException(
@@ -168,6 +209,14 @@ def get_current_user(
             detail="Missing authenticated user context.",
         )
 
+    # region agent log
+    _debug_log(
+        "H1",
+        "backend/app/core/dependencies.py:get_current_user:header_fallback",
+        "Resolved auth from X-* fallback headers",
+        {"has_user_id": bool(x_user_id), "has_org_id": bool(x_organization_id), "has_role": bool(x_user_role)},
+    )
+    # endregion
     return CurrentUser(
         user_id=x_user_id,
         organization_id=x_organization_id,
@@ -201,7 +250,16 @@ def require_permission(permission: str):
         db: Session = Depends(get_db),
     ) -> CurrentUser:
         permission_service = PermissionService(db)
-        if not permission_service.can_user(current_user.user_id, current_user.organization_id, permission):
+        allowed = permission_service.can_user(current_user.user_id, current_user.organization_id, permission)
+        # region agent log
+        _debug_log(
+            "H2",
+            "backend/app/core/dependencies.py:require_permission",
+            "Permission gate evaluated",
+            {"permission": permission, "allowed": allowed, "role": current_user.role or ""},
+        )
+        # endregion
+        if not allowed:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: insufficient permissions.")
         return current_user
 

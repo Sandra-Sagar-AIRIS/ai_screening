@@ -6,6 +6,7 @@ import { ApiError } from "@/lib/api/client";
 import { getCandidates } from "@/lib/api/candidates";
 import { getJobs } from "@/lib/api/jobs";
 import { getPipelines } from "@/lib/api/pipeline";
+import { useAuthStore } from "@/store/auth-store";
 
 type DashboardStats = {
   candidates: number;
@@ -16,11 +17,17 @@ type DashboardStats = {
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const permissions = useAuthStore((state) => state.permissions);
+  const canReadCandidates = permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [candidates, jobs, pipelines] = await Promise.all([getCandidates(200, 0), getJobs(200, 0), getPipelines(200, 0)]);
+        const [candidates, jobs, pipelines] = await Promise.all([
+          canReadCandidates ? getCandidates(200, 0) : Promise.resolve([]),
+          getJobs(200, 0),
+          getPipelines(200, 0),
+        ]);
         setStats({
           candidates: candidates.length,
           jobs: jobs.length,
@@ -35,7 +42,7 @@ export default function DashboardPage() {
       }
     }
     loadData();
-  }, []);
+  }, [canReadCandidates]);
 
   if (error) {
     return <p className="text-sm text-red-600">{error}</p>;
