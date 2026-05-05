@@ -28,7 +28,8 @@
       "Bash(python -c \"import sys; sys.stdout.reconfigure\\(encoding='utf-8'\\); [print\\(l,end=''\\) for l in sys.stdin]\")",
       "Bash(NODE_PATH=\"C:/Users/sandr/AppData/Roaming/npm/node_modules\" node build_prd.js)",
       "Bash(python create_airis_excel.py)",
-      "Bash(del \"C:\\\\Users\\\\sandr\\\\Documents\\\\Interview_platform\\\\AIRIS\\\\create_airis_excel.py\")"
+      "Bash(del \"C:\\\\Users\\\\sandr\\\\Documents\\\\Interview_platform\\\\AIRIS\\\\create_airis_excel.py\")",
+      "Read(//c/Users/sandr/Downloads/**)"
     ]
   }
 }

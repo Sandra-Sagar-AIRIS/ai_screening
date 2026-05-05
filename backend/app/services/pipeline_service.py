@@ -91,11 +91,8 @@ class PipelineService:
             stmt = stmt.where(Pipeline.candidate_id == candidate_id)
         if stage is not None:
             stmt = stmt.where(Pipeline.stage == stage.value)
-        allowed_job_ids = self._scope.allowed_job_ids(current_user)
-        if self._scope.is_client_user(current_user):
-            if not allowed_job_ids:
-                return []
-            stmt = stmt.where(Pipeline.job_id.in_(allowed_job_ids))
+        if self._scope.is_scoped_user(current_user):
+            stmt = stmt.where(Pipeline.job_id.in_(self._scope.allowed_job_ids_subquery(current_user)))
         stmt = stmt.order_by(Pipeline.created_at.desc()).offset(offset).limit(limit)
         pipelines = list(self.db.scalars(stmt))
         logger.info(
@@ -118,9 +115,8 @@ class PipelineService:
             Pipeline.id == pipeline_id,
             Pipeline.organization_id == organization_id,
         )
-        if current_user is not None and self._scope.is_client_user(current_user):
-            allowed_job_ids = self._scope.allowed_job_ids(current_user)
-            stmt = stmt.where(Pipeline.job_id.in_(allowed_job_ids))
+        if current_user is not None and self._scope.is_scoped_user(current_user):
+            stmt = stmt.where(Pipeline.job_id.in_(self._scope.allowed_job_ids_subquery(current_user)))
         pipeline = self.db.scalar(stmt)
         if pipeline is None:
             other_org_pipeline = self.db.scalar(select(Pipeline.organization_id).where(Pipeline.id == pipeline_id))

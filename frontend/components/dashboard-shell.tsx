@@ -12,8 +12,10 @@ const navItems = [
   { href: "/", label: "Dashboard" },
   { href: "/candidates", label: "Candidates" },
   { href: "/jobs", label: "Jobs" },
+  { href: "/vendor/jobs", label: "My Jobs" },
   { href: "/pipeline", label: "Pipeline" },
   { href: "/invite", label: "Invite" },
+  { href: "/invites", label: "Invites" },
   { href: "/users", label: "Users" },
   { href: "/roles", label: "Roles" },
 ];
@@ -58,10 +60,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   function canAccessPage() {
     if (pathname.startsWith("/candidates")) {
-      return permissions.includes("candidates:read");
+      return permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
     }
     if (pathname.startsWith("/jobs")) {
       return permissions.includes("jobs:read");
+    }
+    if (pathname.startsWith("/vendor/jobs")) {
+      return permissions.includes("jobs:read_limited");
     }
     if (pathname.startsWith("/pipeline")) {
       return permissions.includes("pipeline:read");

@@ -4,41 +4,40 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user, require_admin
-from app.core.permissions import ALL_PERMISSIONS
+from app.core.dependencies import get_current_user, get_user_permissions, require_admin
+from app.core.permissions import ALL_PERMISSIONS, USERS_INVITE
 from app.db.session import get_db
+from app.models.organization_role import OrganizationRole
 from app.models.role_permission import RolePermission
 from app.schemas.auth import CurrentUser
+from app.services.organization_role_service import make_unique_role_key, slugify_role_name
+from app.services.permission_service import invalidate_permission_cache
 
 router = APIRouter()
+class OrganizationRoleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
-ROLE_KEYS: tuple[str, ...] = ("admin", "recruiter", "client_viewer")
-ROLE_ALIASES: dict[str, tuple[str, ...]] = {
-    "client_viewer": ("client_viewer", "client"),
-    "client": ("client", "client_viewer"),
-}
+    id: UUID
+    organization_id: UUID
+    name: str
+    key: str
 
 
-class RolePermissionsUpdateRequest(BaseModel):
+class CreateOrganizationRoleRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+
+
+class RolePermissionsPayload(BaseModel):
     permissions: list[str]
-
-
-def _normalize_role(role: str) -> str:
-    normalized = role.strip().lower()
-    if normalized == "client":
-        normalized = "client_viewer"
-    if normalized not in ROLE_KEYS:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid role.")
-    return normalized
 
 
 def _normalize_requested_permissions(values: list[str]) -> list[str]:
     allowed = set(ALL_PERMISSIONS)
-    normalized = sorted({value.strip().lower() for value in values if value.strip()})
+    normalized = sorted({value.strip().lower() for value in values if value and value.strip()})
     invalid = [permission for permission in normalized if permission not in allowed]
     if invalid:
         raise HTTPException(
@@ -48,14 +47,30 @@ def _normalize_requested_permissions(values: list[str]) -> list[str]:
     return normalized
 
 
-from app.models.organization_role import OrganizationRole
+def _require_admin_or_invite(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> CurrentUser:
+    """List roles for user-assignment UI (admins + users with users:invite)."""
+    if current_user.role == "admin":
+        return current_user
+    if (current_user.role or "").strip().lower() == "vendor":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden.")
+    permissions = get_user_permissions(db, current_user.organization_id, current_user.role, user_id=current_user.user_id)
+    if USERS_INVITE in permissions:
+        return current_user
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden.")
 
-@router.get("", response_model=dict[str, list[str]])
-def get_role_permissions(
+
+@router.get("/legacy-permissions-map", response_model=dict[str, list[str]])
+def get_legacy_role_permissions_map(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[CurrentUser, Depends(require_admin)],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> dict[str, list[str]]:
+    """
+    Legacy map shape preserved for backward compatibility with older admin clients.
+    """
     org_id = UUID(current_user.organization_id)
     stmt = (
         select(OrganizationRole.key, RolePermission.permission)
@@ -63,51 +78,120 @@ def get_role_permissions(
         .where(RolePermission.organization_id == org_id)
     )
     rows = db.execute(stmt).all()
-
-    grouped = {role: [] for role in ROLE_KEYS}
+    grouped: dict[str, list[str]] = {}
     for role_key, permission in rows:
-        normalized_key = _normalize_role(role_key)
-        permission_key = permission.strip().lower()
-        if normalized_key in grouped and permission_key not in grouped[normalized_key]:
-            grouped[normalized_key].append(permission_key)
-
-    for role in grouped:
-        grouped[role].sort()
-
+        key = (role_key or "").strip().lower()
+        if key == "client":
+            key = "client_viewer"
+        grouped.setdefault(key, [])
+        perm = (permission or "").strip().lower()
+        if perm and perm not in grouped[key]:
+            grouped[key].append(perm)
+    for key in grouped:
+        grouped[key].sort()
     return grouped
 
 
-@router.put("/{role}", response_model=dict[str, list[str]])
-def update_role_permissions(
-    role: str,
-    payload: RolePermissionsUpdateRequest,
+def _get_org_role_for_org(
+    db: Session,
+    *,
+    organization_id: UUID,
+    role_id: UUID,
+) -> OrganizationRole:
+    role = db.scalar(
+        select(OrganizationRole).where(
+            OrganizationRole.id == role_id,
+            OrganizationRole.organization_id == organization_id,
+        )
+    )
+    if role is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found.")
+    return role
+
+
+@router.get("", response_model=list[OrganizationRoleOut])
+def list_organization_roles(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[CurrentUser, Depends(_require_admin_or_invite)],
+) -> list[OrganizationRole]:
+    org_id = UUID(current_user.organization_id)
+    return list(
+        db.scalars(
+            select(OrganizationRole)
+            .where(OrganizationRole.organization_id == org_id)
+            .order_by(OrganizationRole.name.asc())
+        ).all()
+    )
+
+
+@router.post("", response_model=OrganizationRoleOut, status_code=status.HTTP_201_CREATED)
+def create_organization_role(
+    payload: CreateOrganizationRoleRequest,
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[CurrentUser, Depends(require_admin)],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> dict[str, list[str]]:
+) -> OrganizationRole:
     org_id = UUID(current_user.organization_id)
-    role_key = _normalize_role(role)
-    permissions = _normalize_requested_permissions(payload.permissions)
-
-    # Resolve role_id
-    role_obj = db.scalar(
-        select(OrganizationRole).where(
-            OrganizationRole.organization_id == org_id,
-            OrganizationRole.key == role_key
-        )
+    base_key = slugify_role_name(payload.name)
+    key = make_unique_role_key(db, org_id, base_key)
+    row = OrganizationRole(
+        organization_id=org_id,
+        name=payload.name.strip(),
+        key=key,
     )
-    if not role_obj:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found for this organization.")
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    invalidate_permission_cache()
+    return row
+
+
+@router.get("/{role_id}/permissions", response_model=list[str])
+def get_role_permission_codes(
+    role_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_admin)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> list[str]:
+    org_id = UUID(current_user.organization_id)
+    _get_org_role_for_org(db, organization_id=org_id, role_id=role_id)
+    stmt = select(RolePermission.permission).where(
+        RolePermission.organization_id == org_id,
+        RolePermission.role_id == role_id,
+    )
+    codes = sorted({p for p in db.scalars(stmt).all()})
+    return codes
+
+
+@router.post("/{role_id}/permissions", response_model=list[str])
+def replace_role_permissions(
+    role_id: UUID,
+    payload: RolePermissionsPayload,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_admin)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> list[str]:
+    """
+    Replace all permissions assigned to this role (tenant-isolated).
+    """
+    org_id = UUID(current_user.organization_id)
+    _get_org_role_for_org(db, organization_id=org_id, role_id=role_id)
+    permissions = _normalize_requested_permissions(payload.permissions)
 
     db.execute(
         delete(RolePermission).where(
             RolePermission.organization_id == org_id,
-            RolePermission.role_id == role_obj.id,
+            RolePermission.role_id == role_id,
         )
     )
-
-    for permission in permissions:
-        db.add(RolePermission(organization_id=org_id, role_id=role_obj.id, permission=permission))
-
+    for code in permissions:
+        db.add(
+            RolePermission(
+                organization_id=org_id,
+                role_id=role_id,
+                permission=code,
+            )
+        )
     db.commit()
-    return {role_key: permissions}
+    invalidate_permission_cache()
+    return permissions

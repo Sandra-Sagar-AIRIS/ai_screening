@@ -1,48 +1,71 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api/client";
 import { createInvite } from "@/lib/api/invites";
-import type { InviteRole } from "@/lib/api/types";
-
-const roleOptions: Array<{ value: InviteRole; label: string }> = [
-  { value: "recruiter", label: "Recruiter" },
-  { value: "client_viewer", label: "Client" },
-];
+import { listOrganizationRoles } from "@/lib/api/roles";
 
 export default function InvitePage() {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<InviteRole>("recruiter");
-  const [token, setToken] = useState<string | null>(null);
+  const [role, setRole] = useState<string>("");
+  const [roleChoices, setRoleChoices] = useState<{ key: string; name: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingRoles, setLoadingRoles] = useState(true);
+
+  useEffect(() => {
+    async function loadRoles() {
+      try {
+        const roles = await listOrganizationRoles();
+        const choices = roles
+          .filter((r) => r.key !== "admin")
+          .map((r) => ({ key: r.key, name: r.name }));
+        setRoleChoices(choices);
+        setRole((prev) => {
+          if (prev) {
+            return prev;
+          }
+          const recruiter = choices.find((c) => c.key === "recruiter");
+          return recruiter?.key ?? choices[0]?.key ?? "";
+        });
+      } catch {
+        setError("Unable to load roles for invite.");
+      } finally {
+        setLoadingRoles(false);
+      }
+    }
+    void loadRoles();
+  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSuccess(null);
-    setToken(null);
 
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) {
       setError("Please enter an email address.");
       return;
     }
+    if (!role) {
+      setError("Select a role.");
+      return;
+    }
 
     setLoading(true);
     try {
-      const data = await createInvite({
+      await createInvite({
         email: normalizedEmail,
         role,
       });
-      setSuccess(data.message ?? "Invite created successfully.");
-      setToken(data.token);
+      setSuccess("Invite sent successfully");
       setEmail("");
-      setRole("recruiter");
+      const recruiter = roleChoices.find((c) => c.key === "recruiter");
+      setRole(recruiter?.key ?? roleChoices[0]?.key ?? "");
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -84,11 +107,12 @@ export default function InvitePage() {
                 id="invite-role"
                 className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 value={role}
-                onChange={(event) => setRole(event.target.value as InviteRole)}
+                disabled={loadingRoles || roleChoices.length === 0}
+                onChange={(event) => setRole(event.target.value)}
               >
-                {roleOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
+                {roleChoices.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.name} ({option.key})
                   </option>
                 ))}
               </select>
@@ -96,14 +120,8 @@ export default function InvitePage() {
 
             {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
             {success ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</p> : null}
-            {token ? (
-              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-600">Invite token</p>
-                <p className="mt-1 break-all text-sm text-slate-900">{token}</p>
-              </div>
-            ) : null}
 
-            <Button type="submit" disabled={loading}>
+            <Button type="submit" disabled={loading || loadingRoles || !role}>
               {loading ? "Creating invite..." : "Create invite"}
             </Button>
           </form>

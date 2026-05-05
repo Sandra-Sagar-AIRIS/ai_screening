@@ -113,13 +113,12 @@ class InterviewService:
         stmt: Select[tuple[Interview]] = select(Interview).where(Interview.organization_id == organization_id)
         if pipeline_id is not None:
             stmt = stmt.where(Interview.pipeline_id == pipeline_id)
-        allowed_job_ids = self._scope.allowed_job_ids(current_user)
-        if self._scope.is_client_user(current_user):
-            if not allowed_job_ids:
-                return []
+        if self._scope.is_scoped_user(current_user):
             stmt = stmt.where(
                 Interview.pipeline_id.in_(
-                    select(Pipeline.id).where(Pipeline.job_id.in_(allowed_job_ids))
+                    select(Pipeline.id).where(
+                        Pipeline.job_id.in_(self._scope.allowed_job_ids_subquery(current_user))
+                    )
                 )
             )
         stmt = stmt.order_by(Interview.scheduled_at.desc()).offset(offset).limit(limit)
@@ -130,11 +129,12 @@ class InterviewService:
             Interview.id == interview_id,
             Interview.organization_id == organization_id,
         )
-        allowed_job_ids = self._scope.allowed_job_ids(current_user)
-        if self._scope.is_client_user(current_user):
+        if self._scope.is_scoped_user(current_user):
             stmt = stmt.where(
                 Interview.pipeline_id.in_(
-                    select(Pipeline.id).where(Pipeline.job_id.in_(allowed_job_ids))
+                    select(Pipeline.id).where(
+                        Pipeline.job_id.in_(self._scope.allowed_job_ids_subquery(current_user))
+                    )
                 )
             )
         interview = self.db.scalar(stmt)

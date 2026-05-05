@@ -15,10 +15,12 @@ from app.routes.invites import router as invites_router
 from app.routes.job import router as job_router
 from app.routes.me import router as me_router
 from app.routes.pipeline import pipeline_router as pipeline_singular_router
+from app.routes.permission_catalog import router as permission_catalog_router
 from app.routes.pipeline import router as pipeline_router
 from app.routes.application import router as application_router
 from app.routes.roles import router as roles_router
 from app.routes.users import router as users_router
+from app.routes.vendor import router as vendor_router
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -96,6 +98,8 @@ app.include_router(pipeline_singular_router, prefix="/api/v1")
 app.include_router(application_router, prefix="/api/v1")
 app.include_router(interview_router, prefix="/api/v1")
 app.include_router(invites_router, prefix="/api/v1/invites", tags=["invites"])
+app.include_router(permission_catalog_router, prefix="/api/v1")
 app.include_router(roles_router, prefix="/api/v1/roles", tags=["roles"])
 app.include_router(users_router, prefix="/api/v1/users", tags=["users"])
+app.include_router(vendor_router, prefix="/api/v1")
 

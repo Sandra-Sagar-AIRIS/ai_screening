@@ -73,7 +73,7 @@ function LoginForm() {
         <PasswordField id="password" label="Password" value={password} onChange={setPassword} />
         {inviteAccepted ? (
           <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            Invite accepted successfully. You can now log in.
+            Your account has been created. You can now log in.
           </p>
         ) : null}
         {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}

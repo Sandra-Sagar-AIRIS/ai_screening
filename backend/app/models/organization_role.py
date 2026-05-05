@@ -1,14 +1,24 @@
 from __future__ import annotations
+
 from datetime import datetime
 from uuid import UUID
+
 import sqlalchemy as sa
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
+
 from app.db.base import Base
 
+
 class OrganizationRole(Base):
+    """
+    Tenant-defined role (system defaults + custom).
+    `key` is a stable slug used in APIs and JWT (`profile.role` mirrors this).
+    """
+
     __tablename__ = "organization_roles"
+    __table_args__ = (UniqueConstraint("organization_id", "key", name="uq_organization_roles_org_key"),)
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),

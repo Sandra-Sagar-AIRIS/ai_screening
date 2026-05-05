@@ -12,8 +12,11 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_user, get_user_permissions
 from app.core.permissions import USERS_INVITE
 from app.db.session import get_db
+from app.models.organization_role import OrganizationRole
 from app.models.profile import Profile
 from app.schemas.auth import CurrentUser
+from app.services.organization_role_service import get_role_id_by_key
+from app.services.permission_service import PermissionService, invalidate_permission_cache
 
 router = APIRouter()
 
@@ -36,8 +39,10 @@ def _require_users_manage_access(
 ) -> CurrentUser:
     if current_user.role == "admin":
         return current_user
+    if current_user.role == "vendor":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: vendor cannot manage users/roles.")
 
-    permissions = get_user_permissions(db, current_user.organization_id, current_user.role)
+    permissions = get_user_permissions(db, current_user.organization_id, current_user.role, user_id=current_user.user_id)
     if USERS_INVITE in permissions:
         return current_user
 
@@ -85,14 +90,27 @@ def update_user_role(
     if profile is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
-    role = payload.role.strip().lower()
-    if not role:
+    role_key = payload.role.strip().lower()
+    if not role_key:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="role must not be empty.")
 
-    profile.role = role
+    role_id = get_role_id_by_key(db, org_id, role_key)
+    if role_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unknown role for this organization.",
+        )
+
+    org_role = db.get(OrganizationRole, role_id)
+    if org_role is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown role for this organization.")
+
+    profile.role_id = role_id
+    profile.role = org_role.key
     db.add(profile)
     db.commit()
     db.refresh(profile)
+    invalidate_permission_cache(user_id=profile.id)
 
     return UserListItem(
         id=str(profile.id),
@@ -125,3 +143,17 @@ def delete_user(
     db.delete(profile)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{user_id}/permissions", response_model=list[str])
+def get_effective_user_permissions(
+    user_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[CurrentUser, Depends(_require_users_manage_access)],
+) -> list[str]:
+    org_id = UUID(current_user.organization_id)
+    profile = db.scalar(select(Profile).where(Profile.id == user_id, Profile.organization_id == org_id))
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    return PermissionService(db).get_user_permissions(str(user_id))

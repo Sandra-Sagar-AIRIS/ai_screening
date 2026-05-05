@@ -31,7 +31,8 @@ export type SignupResponse = {
   message: string;
 };
 
-export type InviteRole = "recruiter" | "client_viewer";
+/** Role key must exist as organization_roles.key for the tenant (built-in or custom). */
+export type InviteRole = string;
 
 export type CreateInvitePayload = {
   email: string;
@@ -62,7 +63,21 @@ export type InviteAcceptResponse = {
   message: string;
 };
 
-export type UserRoleOption = "admin" | "recruiter" | "client_viewer";
+export type InviteListItem = {
+  id: string;
+  email: string;
+  role: string;
+  status: "pending" | "accepted";
+  created_at: string;
+  expires_at: string;
+};
+
+export type InviteResendResponse = {
+  message: string;
+};
+
+/** Must match an organization_roles.key in the current organization. */
+export type UserRoleOption = string;
 
 export type OrganizationUser = {
   id: string;
@@ -76,11 +91,24 @@ export type UpdateUserRolePayload = {
   role: UserRoleOption;
 };
 
-export type RoleKey = "admin" | "recruiter" | "client_viewer";
+export type OrganizationRole = {
+  id: string;
+  organization_id: string;
+  name: string;
+  key: string;
+};
 
-export type RolePermissionsResponse = Record<RoleKey, string[]>;
+export type PermissionCatalogItem = {
+  code: string;
+  display_name: string;
+};
 
-export type UpdateRolePermissionsPayload = {
+export type PermissionModuleGroup = {
+  module: string;
+  permissions: PermissionCatalogItem[];
+};
+
+export type ReplaceRolePermissionsPayload = {
   permissions: string[];
 };
 
@@ -109,6 +137,16 @@ export type Candidate = {
 };
 
 export type JobStatus = "draft" | "open" | "on_hold" | "closed" | "cancelled" | "filled";
+export type CandidateCreatePayload = {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string;
+  location?: string;
+  experience_summary?: string;
+  education?: string;
+  notes?: string;
+};
 
 export type Job = {
   id: string;

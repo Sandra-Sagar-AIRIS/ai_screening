@@ -14,7 +14,12 @@ from app.db.base import Base
 class RolePermission(Base):
     __tablename__ = "role_permissions"
     __table_args__ = (
-        UniqueConstraint("organization_id", "role_id", "permission", name="uq_role_permissions_org_role_permission"),
+        UniqueConstraint(
+            "organization_id",
+            "role_id",
+            "permission",
+            name="uq_role_permissions_org_role_id_permission",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(

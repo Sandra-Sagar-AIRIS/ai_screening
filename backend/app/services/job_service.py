@@ -192,11 +192,8 @@ class JobService:
             stmt = stmt.where(Job.status == status.value)
         if client_id is not None:
             stmt = stmt.where(Job.client_id == client_id)
-        allowed_job_ids = self._scope.allowed_job_ids(current_user)
-        if self._scope.is_client_user(current_user):
-            if not allowed_job_ids:
-                return []
-            stmt = stmt.where(Job.id.in_(allowed_job_ids))
+        if self._scope.is_scoped_user(current_user):
+            stmt = stmt.where(Job.id.in_(self._scope.allowed_job_ids_subquery(current_user)))
         stmt = stmt.order_by(Job.created_at.desc()).offset(offset).limit(limit)
         jobs = list(self.db.scalars(stmt))
         return [self._get_job_response(job) for job in jobs]
@@ -206,9 +203,8 @@ class JobService:
             Job.id == job_id,
             Job.organization_id == organization_id,
         )
-        if current_user is not None and self._scope.is_client_user(current_user):
-            allowed_job_ids = self._scope.allowed_job_ids(current_user)
-            stmt = stmt.where(Job.id.in_(allowed_job_ids))
+        if current_user is not None and self._scope.is_scoped_user(current_user):
+            stmt = stmt.where(Job.id.in_(self._scope.allowed_job_ids_subquery(current_user)))
         job = self.db.scalar(stmt)
         if job is None:
             raise HTTPException(

@@ -20,7 +20,7 @@ def get_me_permissions(
 ) -> MePermissionsResponse:
     if current_user.role is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: user role is required.")
-    permissions = get_user_permissions(db, current_user.organization_id, current_user.role)
+    permissions = get_user_permissions(db, current_user.organization_id, current_user.role, user_id=current_user.user_id)
     return MePermissionsResponse(
         role=current_user.role,
         permissions=permissions,
