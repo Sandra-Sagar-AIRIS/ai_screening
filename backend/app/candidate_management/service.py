@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -112,9 +113,9 @@ class CandidateManagementService:
                 },
             )
 
-        first_name = payload.first_name.strip()
-        last_name = payload.last_name.strip()
-        full_name = (payload.full_name or f"{first_name} {last_name}").strip()
+        first_name = self._sanitize_text(payload.first_name).strip()
+        last_name = self._sanitize_text(payload.last_name).strip()
+        full_name = self._sanitize_text(payload.full_name or f"{first_name} {last_name}").strip()
 
         candidate = Candidate(
             org_id=org_id,
@@ -123,19 +124,19 @@ class CandidateManagementService:
             last_name=last_name,
             full_name=full_name,
             email=normalized_email,
-            phone=payload.phone,
-            location=payload.location,
+            phone=self._normalized_optional_phone(payload.phone),
+            location=self._optional_str(payload.location),
             years_experience=payload.years_experience,
-            headline=payload.headline,
-            summary=payload.summary,
+            headline=self._optional_str(payload.headline),
+            summary=self._optional_str(payload.summary),
             source=CandidateSource(payload.source.value),
             stage=payload.stage.value,
             job_id=getattr(payload, "job_id", None),
             recruiter_id=payload.recruiter_id,
-            resume_s3_key=payload.resume_s3_key,
-            resume_file_name=payload.resume_file_name,
+            resume_s3_key=self._optional_str(payload.resume_s3_key),
+            resume_file_name=self._optional_str(payload.resume_file_name),
             parse_confidence=payload.parse_confidence,
-            parsed_resume_data=payload.parsed_resume_data,
+            parsed_resume_data=self._sanitize_json_value(payload.parsed_resume_data),
             created_by=actor_user_id,
             updated_by=actor_user_id,
             status=CandidateStatus.ACTIVE,
@@ -178,7 +179,7 @@ class CandidateManagementService:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI service is unavailable.")
 
         parse_result = self.ai_service.parse_resume(resume_s3_key=request.resume_s3_key)
-        parsed = parse_result.parsed_resume_data or {}
+        parsed = self._sanitize_json_value(parse_result.parsed_resume_data or {})
         parsed_email = self._normalized_optional_email(parsed.get("email"))
         parsed_phone = self._normalized_optional_phone(parsed.get("phone"))
 
@@ -205,12 +206,12 @@ class CandidateManagementService:
                 candidate_id=request.candidate_id,
             )
             updates: dict[str, Any] = {
-                "resume_s3_key": request.resume_s3_key,
-                "resume_file_name": request.resume_file_name,
+                "resume_s3_key": self._optional_str(request.resume_s3_key),
+                "resume_file_name": self._optional_str(request.resume_file_name),
                 "resume_uploaded_at": datetime.now(timezone.utc),
                 "parse_confidence": parse_result.parse_confidence,
                 "ai_parse_version": parse_result.ai_parse_version,
-                "parsed_resume_data": parse_result.parsed_resume_data,
+                "parsed_resume_data": parsed,
                 "updated_by": actor_user_id,
             }
             self.repository.update_candidate_fields(candidate, updates)
@@ -234,12 +235,12 @@ class CandidateManagementService:
                 summary=self._optional_str(parsed.get("summary")),
                 source=CandidateSource.RESUME_UPLOAD,
                 stage="applied",
-                resume_s3_key=request.resume_s3_key,
-                resume_file_name=request.resume_file_name,
+                resume_s3_key=self._optional_str(request.resume_s3_key),
+                resume_file_name=self._optional_str(request.resume_file_name),
                 resume_uploaded_at=datetime.now(timezone.utc),
                 parse_confidence=parse_result.parse_confidence,
                 ai_parse_version=parse_result.ai_parse_version,
-                parsed_resume_data=parse_result.parsed_resume_data,
+                parsed_resume_data=parsed,
                 created_by=actor_user_id,
                 updated_by=actor_user_id,
                 status=CandidateStatus.ACTIVE,
@@ -267,7 +268,10 @@ class CandidateManagementService:
             action="resume_parsed",
             field_name="resume",
             old_value=None,
-            new_value={"resume_s3_key": request.resume_s3_key, "parse_confidence": parse_result.parse_confidence},
+            new_value={
+                "resume_s3_key": self._optional_str(request.resume_s3_key),
+                "parse_confidence": parse_result.parse_confidence,
+            },
         )
         self.db.commit()
         return self._require_candidate(org_id=org_id, workspace_id=workspace_id, candidate_id=candidate.id), parse_result
@@ -418,6 +422,22 @@ class CandidateManagementService:
             old_value=None,
             new_value={"value": candidate.deleted_at.isoformat() if candidate.deleted_at else None},
         )
+        self.db.commit()
+
+    def hard_delete_candidate(
+        self,
+        *,
+        org_id: UUID,
+        workspace_id: UUID,
+        candidate_id: UUID,
+    ) -> None:
+        deleted_count = self.repository.hard_delete_candidate(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            candidate_id=candidate_id,
+        )
+        if deleted_count == 0:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found.")
         self.db.commit()
 
     def bulk_update_stage(
@@ -1032,7 +1052,7 @@ class CandidateManagementService:
     def _optional_str(value: Any) -> str | None:
         if value is None:
             return None
-        text = str(value).strip()
+        text = CandidateManagementService._sanitize_text(value).strip()
         return text or None
 
     @staticmethod
@@ -1049,7 +1069,15 @@ class CandidateManagementService:
         if value is None:
             return None
         text = str(value).strip().lower()
-        return text or None
+        if not text:
+            return None
+        # Ignore common parser placeholders so they don't trigger false duplicate checks.
+        if text in {"na", "n/a", "none", "null", "nil", "-", "--", "not provided", "unknown"}:
+            return None
+        # Treat malformed values as absent rather than a dedupe key.
+        if "@" not in text or text.startswith("@") or text.endswith("@"):
+            return None
+        return text
 
     @staticmethod
     def _normalize_candidate(candidate: Candidate) -> dict[str, Any]:
@@ -1183,7 +1211,20 @@ class CandidateManagementService:
         if value is None:
             return None
         text = str(value).strip()
-        return text or None
+        if not text:
+            return None
+        lowered = text.lower()
+        if lowered in {"na", "n/a", "none", "null", "nil", "-", "--", "not provided", "unknown"}:
+            return None
+        # Normalize to digits (and optional leading +) to avoid duplicate conflicts on formatting noise.
+        normalized = re.sub(r"[^\d+]", "", text)
+        if normalized.startswith("++"):
+            normalized = normalized.lstrip("+")
+        # Very short numbers are usually placeholders/noise.
+        digit_count = len(re.sub(r"\D", "", normalized))
+        if digit_count < 7:
+            return None
+        return normalized
 
     @staticmethod
     def _json_safe(value: Any) -> Any:
@@ -1191,6 +1232,24 @@ class CandidateManagementService:
             return str(value)
         if isinstance(value, datetime):
             return value.isoformat()
+        return value
+
+    @staticmethod
+    def _sanitize_text(value: Any) -> str:
+        # PostgreSQL text/json fields reject NUL bytes; strip them defensively.
+        return str(value).replace("\x00", "")
+
+    @staticmethod
+    def _sanitize_json_value(value: Any) -> Any:
+        if isinstance(value, str):
+            return CandidateManagementService._sanitize_text(value)
+        if isinstance(value, list):
+            return [CandidateManagementService._sanitize_json_value(item) for item in value]
+        if isinstance(value, dict):
+            return {
+                CandidateManagementService._sanitize_text(key): CandidateManagementService._sanitize_json_value(val)
+                for key, val in value.items()
+            }
         return value
 
     def _sync_candidate_pipeline(self, *, candidate: Candidate, actor_user_id: UUID | None) -> None:

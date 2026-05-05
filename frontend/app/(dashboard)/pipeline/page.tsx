@@ -183,14 +183,20 @@ export default function PipelinePage() {
   const [movingPipelineId, setMovingPipelineId] = useState<string | null>(null);
   const [activePipelineId, setActivePipelineId] = useState<string | null>(null);
   const canUpdatePipeline = hasPermission(permissions, PIPELINE_UPDATE_PERMISSION);
+  const canReadCandidates = permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   useEffect(() => {
     async function loadInitialData() {
       try {
-        const [candidateData, jobData] = await Promise.all([getCandidates(500, 0, { status: "active" }), getJobs(200, 0)]);
+        const [candidateData, jobData] = await Promise.all([
+          canReadCandidates ? getCandidates(500, 0, { status: "active" }) : Promise.resolve([]),
+          getJobs(200, 0),
+        ]);
         setCandidates(candidateData);
-        setJobs(jobData.filter((job) => job.status === "open"));
+        // Keep pipeline job selector aligned with jobs page:
+        // exclude terminal states, but allow draft/open/on_hold.
+        setJobs(jobData.filter((job) => job.status !== "cancelled" && job.status !== "filled" && job.status !== "closed"));
       } catch (err) {
         if (err instanceof ApiError) {
           setError(err.message);
@@ -200,7 +206,7 @@ export default function PipelinePage() {
       }
     }
     void loadInitialData();
-  }, []);
+  }, [canReadCandidates]);
 
   async function loadPipelines(jobId: string) {
     setLoading(true);
