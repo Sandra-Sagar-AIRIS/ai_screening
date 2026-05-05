@@ -25,6 +25,8 @@ INTERVIEWS_UPDATE = "interviews:update"
 
 ORGANIZATION_MANAGE = "organization:manage"
 USERS_INVITE = "users:invite"
+USERS_UPDATE_ROLE = "users:update_role"
+USERS_DELETE = "users:delete"
 
 CLIENTS_CREATE = "clients:create"
 CLIENTS_READ = "clients:read"
@@ -53,6 +55,8 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     INTERVIEWS_UPDATE,
     ORGANIZATION_MANAGE,
     USERS_INVITE,
+    USERS_UPDATE_ROLE,
+    USERS_DELETE,
     CLIENTS_CREATE,
     CLIENTS_READ,
     CLIENTS_UPDATE,

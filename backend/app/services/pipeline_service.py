@@ -8,6 +8,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.candidate import Candidate
 from app.models.pipeline import Pipeline
 from app.models.job import Job
 from app.core.config import get_settings
@@ -105,6 +106,37 @@ class PipelineService:
             },
         )
         return pipelines
+
+    def list_pipeline_candidates_for_job(
+        self,
+        job_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[tuple[UUID, Candidate]]:
+        """
+        Pipelines for a single job with candidate rows (one round-trip in SQL).
+        Enforces the same org + access-scope rules as list_pipelines + candidate visibility.
+        """
+        stmt: Select[tuple[UUID, Candidate]] = (
+            select(Pipeline.id, Candidate)
+            .join(Candidate, Candidate.id == Pipeline.candidate_id)
+            .where(
+                Pipeline.organization_id == organization_id,
+                Pipeline.job_id == job_id,
+                Candidate.is_deleted.is_(False),
+            )
+        )
+        if self._scope.is_scoped_user(current_user):
+            stmt = stmt.where(Pipeline.job_id.in_(self._scope.allowed_job_ids_subquery(current_user)))
+        if self._scope.is_vendor_user(current_user):
+            stmt = stmt.where(Candidate.created_by == UUID(current_user.user_id))
+
+        stmt = stmt.order_by(Pipeline.created_at.desc()).offset(offset).limit(limit)
+        rows = self.db.execute(stmt).all()
+        return [(row[0], row[1]) for row in rows]
 
     def get_pipeline_by_id(self, pipeline_id: UUID, organization_id: UUID, current_user: CurrentUser | None = None) -> Pipeline:
         logger.info(

@@ -1,5 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
+<<<<<<< HEAD
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -871,4 +872,9 @@ export default function JobsPage() {
       ) : null}
     </section>
   );
+=======
+/** Legacy route; recruiter job list lives under `/dashboard/jobs`. */
+export default function JobsPageRedirect() {
+  redirect("/dashboard/jobs");
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 }

@@ -1,5 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
+<<<<<<< HEAD
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
@@ -666,4 +667,10 @@ export default function JobDetailPage() {
       )}
     </div>
   );
+=======
+/** Legacy route; job detail lives under `/dashboard/jobs/[id]`. */
+export default async function JobDetailRedirect({ params }: { params: Promise<{ jobId: string }> }) {
+  const { jobId } = await params;
+  redirect(`/dashboard/jobs/${jobId}`);
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 }

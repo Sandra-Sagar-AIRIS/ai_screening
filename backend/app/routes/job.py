@@ -5,15 +5,34 @@ import json
 from typing import Annotated
 from uuid import UUID
 
+<<<<<<< HEAD
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
+=======
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, select
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+import logging
 
+<<<<<<< HEAD
 from app.core.config import get_settings
 from app.core.dependencies import get_current_user, require_permission
 from app.core.permissions import JOBS_CREATE, JOBS_READ, JOBS_UPDATE, SUBMISSIONS_CREATE
+=======
+from app.core.dependencies import get_current_user, require_any_permissions, require_permission
+from app.core.permissions import (
+    CANDIDATES_READ,
+    CANDIDATES_READ_OWN,
+    JOBS_CREATE,
+    JOBS_READ,
+    JOBS_UPDATE,
+    PIPELINE_READ,
+    SUBMISSIONS_CREATE,
+)
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 from app.db.session import get_db
 from app.schemas.auth import CurrentUser
 from app.schemas.job import (
@@ -35,16 +54,127 @@ from app.schemas.candidate import CandidateCreate, CandidateResponse
 from app.models.job_vendor import JobVendor
 from app.models.job import Job
 from app.models.pipeline import Pipeline
+from app.models.candidate import Candidate
 from app.models.profile import Profile
 from sqlalchemy.exc import IntegrityError
 from app.services.candidate_service import CandidateService
 from app.services.job_service import JobService
+from app.services.pipeline_service import PipelineService
+from app.services.access_scope_service import AccessScopeService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+logger = logging.getLogger(__name__)
 
 
 class JobVendorAssignRequest(BaseModel):
     vendor_id: UUID
+
+
+class JobVendorItem(BaseModel):
+    vendor_id: UUID
+    email: str
+
+
+class JobPipelineCandidateItem(BaseModel):
+    """Candidate rows for a job via application pipeline (one entry per pipeline row)."""
+
+    pipeline_id: UUID
+    id: UUID
+    first_name: str
+    last_name: str
+    email: str
+    source_type: str
+
+
+class JobMetricsItem(BaseModel):
+    job_id: UUID
+    vendor_count: int
+    candidate_count: int
+
+
+@router.get("/{job_id}/candidates", response_model=list[JobPipelineCandidateItem])
+def list_job_candidates(
+    job_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[CurrentUser, Depends(require_permission(PIPELINE_READ))],
+    _cand_read: Annotated[CurrentUser, Depends(require_any_permissions(CANDIDATES_READ, CANDIDATES_READ_OWN))],
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[JobPipelineCandidateItem]:
+    org_id = UUID(current_user.organization_id)
+    job_service = JobService(db)
+    job_service.get_job_by_id(job_id, org_id, current_user)
+
+    rows = PipelineService(db).list_pipeline_candidates_for_job(
+        job_id,
+        org_id,
+        current_user,
+        limit=limit,
+        offset=offset,
+    )
+    return [
+        JobPipelineCandidateItem(
+            pipeline_id=pid,
+            id=candidate.id,
+            first_name=candidate.first_name,
+            last_name=candidate.last_name,
+            email=candidate.email,
+            source_type=candidate.source_type,
+        )
+        for pid, candidate in rows
+    ]
+
+
+@router.get("/{job_id}/vendors", response_model=list[JobVendorItem])
+def list_job_vendors(
+    job_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(JOBS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> list[JobVendorItem]:
+    org_id = UUID(current_user.organization_id)
+    job_service = JobService(db)
+    job_service.get_job_by_id(job_id, org_id, current_user)
+
+    rows = db.execute(
+        select(JobVendor.vendor_id, Profile.email)
+        .join(Profile, Profile.id == JobVendor.vendor_id)
+        .where(
+            JobVendor.job_id == job_id,
+            Profile.organization_id == org_id,
+        )
+        .order_by(Profile.email.asc())
+    ).all()
+    return [JobVendorItem(vendor_id=row[0], email=row[1]) for row in rows]
+
+
+@router.delete("/{job_id}/vendors/{vendor_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_vendor_from_job(
+    job_id: UUID,
+    vendor_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(JOBS_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> Response:
+    if (current_user.role or "").strip().lower() == "vendor":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: vendor cannot remove vendor assignments.")
+
+    org_id = UUID(current_user.organization_id)
+    job_service = JobService(db)
+    job_service.get_job_by_id(job_id, org_id, current_user)
+
+    jv = db.scalar(
+        select(JobVendor).where(
+            JobVendor.job_id == job_id,
+            JobVendor.vendor_id == vendor_id,
+        )
+    )
+    if jv is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor assignment not found.")
+
+    db.delete(jv)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{job_id}/vendors", status_code=status.HTTP_201_CREATED)
@@ -80,10 +210,88 @@ def assign_vendor_to_job(
     try:
         db.add(JobVendor(job_id=job_id, vendor_id=vendor_id))
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
+        constraint_name = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = getattr(constraint_name, "constraint_name", None)
+        # Duplicate job-vendor assignment is idempotent success.
+        if constraint_name in {"job_vendors_pkey", "uq_job_vendors_job_vendor"}:
+            logger.info(
+                "Job vendor assignment already exists",
+                extra={"job_id": str(job_id), "vendor_id": str(vendor_id), "organization_id": str(org_id)},
+            )
+        else:
+            logger.exception(
+                "Failed assigning vendor to job",
+                extra={"job_id": str(job_id), "vendor_id": str(vendor_id), "organization_id": str(org_id)},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Unable to assign vendor to job.",
+            ) from None
 
     return {"job_id": str(job_id), "vendor_id": str(vendor_id)}
+
+
+@router.get("/metrics", response_model=list[JobMetricsItem])
+def get_jobs_metrics(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(JOBS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> list[JobMetricsItem]:
+    org_id = UUID(current_user.organization_id)
+    scope = AccessScopeService(db)
+
+    jobs_scope = select(Job.id).where(Job.organization_id == org_id)
+    if scope.is_scoped_user(current_user):
+        jobs_scope = jobs_scope.where(Job.id.in_(scope.allowed_job_ids_subquery(current_user)))
+
+    job_ids_sq = jobs_scope.subquery()
+
+    vendor_counts_sq = (
+        select(
+            JobVendor.job_id.label("job_id"),
+            func.count(func.distinct(JobVendor.vendor_id)).label("vendor_count"),
+        )
+        .where(JobVendor.job_id.in_(select(job_ids_sq.c.id)))
+        .group_by(JobVendor.job_id)
+        .subquery()
+    )
+
+    candidate_counts_sq = (
+        select(
+            Pipeline.job_id.label("job_id"),
+            func.count(func.distinct(Pipeline.candidate_id)).label("candidate_count"),
+        )
+        .join(Candidate, Candidate.id == Pipeline.candidate_id)
+        .where(
+            Pipeline.job_id.in_(select(job_ids_sq.c.id)),
+            Candidate.is_deleted.is_(False),
+        )
+    )
+    if scope.is_vendor_user(current_user):
+        candidate_counts_sq = candidate_counts_sq.where(Candidate.created_by == UUID(current_user.user_id))
+    candidate_counts_sq = candidate_counts_sq.group_by(Pipeline.job_id).subquery()
+
+    rows = db.execute(
+        select(
+            job_ids_sq.c.id.label("job_id"),
+            func.coalesce(vendor_counts_sq.c.vendor_count, 0).label("vendor_count"),
+            func.coalesce(candidate_counts_sq.c.candidate_count, 0).label("candidate_count"),
+        )
+        .select_from(job_ids_sq)
+        .outerjoin(vendor_counts_sq, vendor_counts_sq.c.job_id == job_ids_sq.c.id)
+        .outerjoin(candidate_counts_sq, candidate_counts_sq.c.job_id == job_ids_sq.c.id)
+        .order_by(job_ids_sq.c.id.asc())
+    ).all()
+    return [
+        JobMetricsItem(
+            job_id=row.job_id,
+            vendor_count=int(row.vendor_count or 0),
+            candidate_count=int(row.candidate_count or 0),
+        )
+        for row in rows
+    ]
 
 
 @router.post("/{job_id}/candidates", response_model=CandidateResponse, status_code=status.HTTP_201_CREATED)

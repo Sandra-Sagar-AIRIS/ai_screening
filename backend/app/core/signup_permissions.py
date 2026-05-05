@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from uuid import UUID
 
@@ -15,11 +16,16 @@ from app.services.organization_role_service import (
     get_role_id_by_key,
 )
 
+logger = logging.getLogger(__name__)
+
 _RECRUITER_DEFAULTS: tuple[str, ...] = (
     "jobs:read",
     "jobs:update",
     "candidates:create",
     "candidates:read",
+    # Listing pipelines (dashboard, job detail candidates) requires read; update alone is not enough.
+    "pipeline:read",
+    "pipeline:create",
     "pipeline:update",
 )
 _CLIENT_DEFAULTS: tuple[str, ...] = (
@@ -90,4 +96,10 @@ def seed_default_role_permissions(db: Session, organization_id: UUID) -> None:
         existing_pairs.add((role_id, permission))
         inserted_count += 1
 
-    print(f"[signup_permissions] organization_id={organization_id} inserted={inserted_count}")
+    logger.info(
+        "Seeded default role permissions",
+        extra={
+            "organization_id": str(organization_id),
+            "inserted_count": inserted_count,
+        },
+    )

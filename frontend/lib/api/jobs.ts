@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { apiRequest, ApiError, API_BASE_URL } from "@/lib/api/client";
 import type { Job, JobStatus, JobSubmission, JobSubmissionStatus, JobMatchesResponse } from "@/lib/api/types";
 
@@ -61,6 +62,10 @@ export async function parseJD(
 
   return (await response.json()) as JobParseResult;
 }
+=======
+import { apiRequest } from "@/lib/api/client";
+import type { Job, JobMetrics } from "@/lib/api/types";
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 
 export async function getJobs(limit = 50, offset = 0) {
   return apiRequest<Job[]>(`/jobs?limit=${limit}&offset=${offset}`);
@@ -70,6 +75,7 @@ export async function getJobById(jobId: string) {
   return apiRequest<Job>(`/jobs/${jobId}`);
 }
 
+<<<<<<< HEAD
 export async function submitCandidateToJob(
   jobId: string,
   candidateId: string,
@@ -158,4 +164,8 @@ export async function updateJobSubmissionStatus(jobId: string, submissionId: str
     method: "PATCH",
     body: JSON.stringify({ status }),
   });
+=======
+export async function getJobsMetrics() {
+  return apiRequest<JobMetrics[]>("/jobs/metrics");
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 }

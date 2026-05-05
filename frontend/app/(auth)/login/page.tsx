@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { login } from "@/lib/api/auth";
@@ -11,8 +11,11 @@ import { PasswordField } from "@/components/auth/password-field";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
+<<<<<<< HEAD
 import { Suspense } from "react";
 
+=======
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -93,7 +96,11 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
+<<<<<<< HEAD
     <Suspense fallback={<p>Loading...</p>}>
+=======
+    <Suspense fallback={<p className="p-6 text-sm text-slate-600">Loading…</p>}>
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
       <LoginForm />
     </Suspense>
   );

@@ -11,6 +11,7 @@ export class ApiError extends Error {
   }
 }
 
+<<<<<<< HEAD
 function toErrorMessage(detail: unknown, status: number): string {
   if (!detail) {
     return `Request failed with status ${status}`;
@@ -43,6 +44,23 @@ function toErrorMessage(detail: unknown, status: number): string {
     }
   }
   return `Request failed with status ${status}`;
+=======
+/** Maps HTTP status to short, user-facing copy (403/401-aware). */
+export function formatApiErrorForUser(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 403) {
+      return "You don't have permission to perform this action.";
+    }
+    if (err.status === 401) {
+      return "Your session expired. Please sign in again.";
+    }
+    return err.message;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return "Something went wrong. Please try again.";
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 }
 
 type RequestOptions = RequestInit & {
@@ -70,6 +88,14 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   });
 
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem("airis_access_token");
+      } catch {
+        /* ignore */
+      }
+      window.location.assign("/login");
+    }
     let detail: unknown = null;
     try {
       detail = await response.json();

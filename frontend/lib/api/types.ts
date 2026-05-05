@@ -115,6 +115,8 @@ export type ReplaceRolePermissionsPayload = {
 export type Candidate = {
   id: string;
   organization_id: string;
+  /** Present when API exposes candidate provenance (vendor vs internal submission). */
+  source_type?: "internal" | "vendor";
   first_name: string;
   last_name: string;
   email: string;
@@ -136,7 +138,32 @@ export type Candidate = {
   updated_at: string;
 };
 
+<<<<<<< HEAD
 export type JobStatus = "draft" | "open" | "on_hold" | "closed" | "cancelled" | "filled";
+=======
+/** Assigned vendor on a job (GET /jobs/:id/vendors). */
+export type JobVendorAssignment = {
+  vendor_id: string;
+  email: string;
+};
+
+/** Row from GET /jobs/:jobId/candidates (single request). */
+export type JobCandidateListItem = {
+  pipeline_id: string;
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  source_type: "internal" | "vendor";
+};
+
+/** Candidate submitted to a job (UI row). */
+export type JobCandidateRow = {
+  pipeline_id: string;
+  candidate: Candidate;
+};
+
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 export type CandidateCreatePayload = {
   first_name: string;
   last_name: string;
@@ -174,6 +201,7 @@ export type Job = {
   updated_at: string;
 };
 
+<<<<<<< HEAD
 export type JobSubmissionStatus = "pending" | "shortlisted" | "rejected" | "interviewing" | "offered" | "hired";
 
 export type JobSubmission = {
@@ -214,6 +242,12 @@ export type JobMatchesResponse = {
   generated_at: string;
   limit: number;
   offset: number;
+=======
+export type JobMetrics = {
+  job_id: string;
+  vendor_count: number;
+  candidate_count: number;
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 };
 
 export type PipelineStage = "applied" | "screening" | "interview" | "offer" | "placed" | "rejected";

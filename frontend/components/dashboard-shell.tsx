@@ -2,23 +2,17 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import {
+  SIDEBAR_NAV_ITEMS,
+  canAccessPathname,
+  isAdminRole,
+  matchesSidebarNavItem,
+  navAccessRuleForPathname,
+} from "@/lib/dashboard-nav";
 import { useAuthStore } from "@/store/auth-store";
-
-const navItems = [
-  { href: "/", label: "Dashboard" },
-  { href: "/candidates", label: "Candidates" },
-  { href: "/jobs", label: "Jobs" },
-  { href: "/vendor/jobs", label: "My Jobs" },
-  { href: "/pipeline", label: "Pipeline" },
-  { href: "/invite", label: "Invite" },
-  { href: "/invites", label: "Invites" },
-  { href: "/users", label: "Users" },
-  { href: "/roles", label: "Roles" },
-];
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -29,6 +23,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const hydrate = useAuthStore((state) => state.hydrate);
   const refreshPermissions = useAuthStore((state) => state.refreshPermissions);
   const clearToken = useAuthStore((state) => state.clearToken);
+
+  const filteredMenu = useMemo(
+    () =>
+      SIDEBAR_NAV_ITEMS.filter(
+        (item) => item.showInSidebar !== false && matchesSidebarNavItem(role, permissions, item)
+      ),
+    [role, permissions]
+  );
 
   useEffect(() => {
     hydrate();
@@ -53,35 +55,29 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     }
   }, [role, router, token]);
 
+  /** Redirect off routes the user cannot use (replaces in-page "Access restricted" card). */
+  useEffect(() => {
+    if (token === null) {
+      return;
+    }
+    const rule = navAccessRuleForPathname(pathname);
+    const accessReady = permissions.length > 0 || isAdminRole(role) || !rule;
+    if (!accessReady) {
+      return;
+    }
+    if (!canAccessPathname(pathname, role, permissions)) {
+      router.replace("/");
+    }
+  }, [pathname, permissions, role, router, token]);
+
   function onLogout() {
     clearToken();
     router.push("/login");
   }
 
-  function canAccessPage() {
-    if (pathname.startsWith("/candidates")) {
-      return permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
-    }
-    if (pathname.startsWith("/jobs")) {
-      return permissions.includes("jobs:read");
-    }
-    if (pathname.startsWith("/vendor/jobs")) {
-      return permissions.includes("jobs:read_limited");
-    }
-    if (pathname.startsWith("/pipeline")) {
-      return permissions.includes("pipeline:read");
-    }
-    if (pathname.startsWith("/invite")) {
-      return role === "admin" || permissions.includes("users:invite");
-    }
-    if (pathname.startsWith("/users")) {
-      return role === "admin" || permissions.includes("users:invite");
-    }
-    if (pathname.startsWith("/roles")) {
-      return role === "admin";
-    }
-    return true;
-  }
+  const rule = navAccessRuleForPathname(pathname);
+  const accessReady = permissions.length > 0 || isAdminRole(role) || !rule;
+  const pageAllowed = canAccessPathname(pathname, role, permissions);
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-slate-50">
@@ -101,18 +97,24 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 py-6 md:grid-cols-[220px_1fr]">
         <aside className="rounded-lg border border-slate-200 bg-white p-2 h-fit">
           <nav className="space-y-1">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                className={cn(
-                  "block rounded-md px-3 py-2 text-sm transition-colors",
-                  pathname === item.href ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
-                )}
-                href={item.href}
-              >
-                {item.label}
-              </Link>
-            ))}
+            {filteredMenu.map((item) => {
+              const active =
+                item.path === "/"
+                  ? pathname === "/"
+                  : pathname === item.path || pathname.startsWith(`${item.path}/`);
+              return (
+                <Link
+                  key={item.path}
+                  className={cn(
+                    "block rounded-md px-3 py-2 text-sm transition-colors",
+                    active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+                  )}
+                  href={item.path}
+                >
+                  {item.name}
+                </Link>
+              );
+            })}
           </nav>
           {permissions.length === 0 ? (
             <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -120,18 +122,18 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </p>
           ) : null}
         </aside>
+<<<<<<< HEAD
         <main className="min-w-0 overflow-hidden">
           {canAccessPage() ? (
+=======
+        <main>
+          {!accessReady ? (
+            <p className="text-sm text-slate-600">Loading workspace…</p>
+          ) : pageAllowed ? (
+>>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
             children
           ) : (
-            <Card>
-              <CardHeader>
-                <CardTitle>Access restricted</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-slate-600">
-                You do not have permission to view this page.
-              </CardContent>
-            </Card>
+            <p className="text-sm text-slate-500">Redirecting…</p>
           )}
         </main>
       </div>

@@ -45,8 +45,8 @@ def _add_role_permission(db_session, *, org_id, role_id, permission_code: str) -
 
 
 def test_role_permission_grants_access(db_session):
-    org, user, role_id = _create_org_and_user(db_session, role_key="recruiter")
-    _add_role_permission(db_session, org_id=org.id, role_id=role_id, permission_code=CANDIDATES_CREATE)
+    """Recruiter seed includes candidates:create; PermissionService reflects role_permissions."""
+    org, user, _role_id = _create_org_and_user(db_session, role_key="recruiter")
 
     service = PermissionService(db_session)
     effective = service.get_user_permissions(str(user.id))
@@ -57,7 +57,8 @@ def test_role_permission_grants_access(db_session):
 
 def test_no_override_grant_role_only(db_session):
     """User-level overrides removed: extra permissions require role_permissions rows."""
-    org, user, role_id = _create_org_and_user(db_session, role_key="recruiter")
+    # Vendor defaults omit CANDIDATES_CREATE and JOBS_READ (vendor uses jobs:read_limited only).
+    org, user, role_id = _create_org_and_user(db_session, role_key="vendor")
     _add_role_permission(db_session, org_id=org.id, role_id=role_id, permission_code=CANDIDATES_CREATE)
 
     service = PermissionService(db_session)

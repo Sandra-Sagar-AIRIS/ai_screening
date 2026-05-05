@@ -96,7 +96,7 @@ export default function InvitesPage() {
                         <td className="px-2 py-2">{new Date(invite.created_at).toLocaleString()}</td>
                         <td className="px-2 py-2">
                           <Button
-                            size="sm"
+                            className="h-8 px-3 text-xs"
                             variant="outline"
                             disabled={isAccepted || resendingId === invite.id}
                             onClick={() => onResend(invite.id)}
