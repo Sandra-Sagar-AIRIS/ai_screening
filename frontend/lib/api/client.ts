@@ -104,7 +104,13 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       detail = await response.text();
     }
     const message = toErrorMessage(detail, response.status);
-    if (!shouldSuppressApiErrorLog(path, response.status)) {
+    const expectedCandidateConflict =
+      response.status === 409 && path.includes("/candidate-management/candidates");
+
+    if (expectedCandidateConflict) {
+      // Expected domain conflict; avoid noisy dev overlay.
+      console.warn(`[API Conflict] ${response.status} ${path}: candidate already exists or conflicting payload`);
+    } else {
       console.error(`[API Error] ${response.status} ${path}:`, detail);
     }
     throw new ApiError(message, response.status, detail);

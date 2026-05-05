@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import os
 import traceback
+import json
+import time
 from pathlib import Path
 from typing import Annotated, Any
 from uuid import UUID
@@ -55,6 +57,24 @@ from app.services.candidate_service import CandidateService as LegacyCandidateSe
 
 router = APIRouter(tags=["candidate-management"])
 logger = logging.getLogger(__name__)
+_DEBUG_LOG_PATH = Path(__file__).resolve().parents[2] / "debug-f65d2f.log"
+
+
+def _debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    payload = {
+        "sessionId": "f65d2f",
+        "runId": "pre-fix",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
 
 
 class _NoopTaskEnqueuer(TaskEnqueuerPort):
@@ -63,6 +83,14 @@ class _NoopTaskEnqueuer(TaskEnqueuerPort):
 
 
 def _workspace_id_header(x_workspace_id: str | None = Header(default=None, alias="X-Workspace-Id")) -> UUID:
+    # region agent log
+    _debug_log(
+        "H5",
+        "backend/app/candidate_management/api.py:_workspace_id_header",
+        "Workspace header received",
+        {"workspace_header_present": bool(x_workspace_id)},
+    )
+    # endregion
     if not x_workspace_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Workspace-Id header is required.")
     try:
@@ -581,12 +609,10 @@ def delete_candidate(
     workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
 ) -> ApiResponse[dict[str, Any]]:
     service = _service(db)
-    service.soft_delete_candidate(
+    service.hard_delete_candidate(
         org_id=UUID(current_user.organization_id),
         workspace_id=workspace_id,
         candidate_id=candidate_id,
-        actor_user_id=UUID(current_user.user_id),
-        actor_role=current_user.role,
     )
     return _success({"deleted": True, "candidate_id": str(candidate_id)})
 

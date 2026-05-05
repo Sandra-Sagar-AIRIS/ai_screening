@@ -100,6 +100,7 @@ export default function CandidatesPage() {
   const permissions = useAuthStore((state) => state.permissions);
   const searchParams = useSearchParams();
   const canCreate = hasPermission(permissions, CANDIDATES_CREATE_PERMISSION);
+  const canReadCandidates = hasPermission(permissions, "candidates:read") || hasPermission(permissions, "candidates:read_own");
   const [showFilters, setShowFilters] = useState(false);
   const [submitModalCandidateId, setSubmitModalCandidateId] = useState<string | null>(null);
   const [submitModalJobId, setSubmitModalJobId] = useState("");
@@ -219,6 +220,14 @@ export default function CandidatesPage() {
   }
 
   useEffect(() => {
+    if (!canReadCandidates) {
+      setCandidates([]);
+      setPipelines([]);
+      setJobs([]);
+      setUsers([]);
+      setError("Forbidden: insufficient permissions.");
+      return;
+    }
     const jobIdFromQuery = searchParams.get("jobId");
     if (jobIdFromQuery) {
       setSelectedJobId(jobIdFromQuery);
@@ -226,7 +235,7 @@ export default function CandidatesPage() {
     void loadCandidates();
     void loadJobs();
     void loadUsers();
-  }, [loadCandidates, searchParams]);
+  }, [canReadCandidates, loadCandidates, searchParams]);
 
   async function handleCreateCandidate() {
     if (!requireJobSelection()) return;

@@ -7,8 +7,11 @@ import { formatApiErrorForUser } from "@/lib/api/client";
 import { getCandidates } from "@/lib/api/candidates";
 import { getJobs } from "@/lib/api/jobs";
 import { getPipelines } from "@/lib/api/pipeline";
+<<<<<<< HEAD
 import { NAV_PERMISSION_CODES, isAdminRole } from "@/lib/dashboard-nav";
 import { createHasPermission } from "@/lib/rbac";
+=======
+>>>>>>> origin/main
 import { useAuthStore } from "@/store/auth-store";
 
 type SectionKey = "candidates" | "jobs" | "pipelines";
@@ -21,6 +24,7 @@ function isRecruiter(role: string | null | undefined) {
 }
 
 export default function DashboardPage() {
+<<<<<<< HEAD
   const role = useAuthStore((s) => s.role);
   const permissions = useAuthStore((s) => s.permissions);
   const refreshPermissions = useAuthStore((s) => s.refreshPermissions);
@@ -39,6 +43,36 @@ export default function DashboardPage() {
   useEffect(() => {
     void refreshPermissions();
   }, [refreshPermissions]);
+=======
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const permissions = useAuthStore((state) => state.permissions);
+  const canReadCandidates = permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const [candidates, jobs, pipelines] = await Promise.all([
+          canReadCandidates ? getCandidates(200, 0) : Promise.resolve([]),
+          getJobs(200, 0),
+          getPipelines(200, 0),
+        ]);
+        setStats({
+          candidates: candidates.length,
+          jobs: jobs.length,
+          pipelines: pipelines.length,
+        });
+      } catch (err) {
+        if (err instanceof ApiError) {
+          setError(err.message);
+        } else {
+          setError("Unable to load dashboard");
+        }
+      }
+    }
+    loadData();
+  }, [canReadCandidates]);
+>>>>>>> origin/main
 
   useEffect(() => {
     if (!permissionsReady) {
