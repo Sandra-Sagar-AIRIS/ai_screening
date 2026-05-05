@@ -1,12 +1,12 @@
-import { redirect } from "next/navigation";
+"use client";
 
-<<<<<<< HEAD
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { createJob, getJobs, updateJob, deleteJob, parseJD, type JobParseResult } from "@/lib/api/jobs";
 import { JOBS_CREATE_PERMISSION, hasPermission } from "@/lib/rbac";
+import { isAdminRole } from "@/lib/dashboard-nav";
 import type { Job, JobStatus } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
@@ -210,7 +210,7 @@ function JDInputModal({
         {error && (
           <div className="mt-4 flex items-center justify-between bg-red-50 p-3 rounded-md border border-red-200">
             <p className="text-sm text-red-600">{error}</p>
-            <Button variant="outline" size="sm" onClick={handleParse} className="text-red-700 border-red-200 hover:bg-red-100">
+            <Button variant="outline" onClick={handleParse} className="text-red-700 border-red-200 hover:bg-red-100">
               Retry
             </Button>
           </div>
@@ -404,6 +404,8 @@ export default function JobsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "draft" | "closed">("all");
   const permissions = useAuthStore((state) => state.permissions);
+  const role = useAuthStore((state) => state.role);
+  const canCreateJobs = hasPermission(permissions, JOBS_CREATE_PERMISSION) || isAdminRole(role);
 
   // regular create form
   const [creating, setCreating] = useState(false);
@@ -504,7 +506,7 @@ export default function JobsPage() {
     <section className="relative space-y-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Jobs</h1>
-        {hasPermission(permissions, JOBS_CREATE_PERMISSION) ? (
+        {canCreateJobs ? (
           <div className="flex gap-2">
             <Button variant="outline" onClick={handleImportClick}>
               ✨ Import from JD
@@ -872,9 +874,4 @@ export default function JobsPage() {
       ) : null}
     </section>
   );
-=======
-/** Legacy route; recruiter job list lives under `/dashboard/jobs`. */
-export default function JobsPageRedirect() {
-  redirect("/dashboard/jobs");
->>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 }

@@ -2,26 +2,17 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 from typing import Annotated
 from uuid import UUID
 
-<<<<<<< HEAD
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from sqlalchemy import select
-=======
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func, select
->>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-import logging
 
-<<<<<<< HEAD
 from app.core.config import get_settings
-from app.core.dependencies import get_current_user, require_permission
-from app.core.permissions import JOBS_CREATE, JOBS_READ, JOBS_UPDATE, SUBMISSIONS_CREATE
-=======
 from app.core.dependencies import get_current_user, require_any_permissions, require_permission
 from app.core.permissions import (
     CANDIDATES_READ,
@@ -32,7 +23,6 @@ from app.core.permissions import (
     PIPELINE_READ,
     SUBMISSIONS_CREATE,
 )
->>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 from app.db.session import get_db
 from app.schemas.auth import CurrentUser
 from app.schemas.job import (
@@ -548,8 +538,13 @@ async def parse_job_description(
             detail=f"Groq request failed: {exc}",
         ) from exc
 
-    # ── Return only known fields (ignore any extra keys Groq may add) ────────
-    return JobParseResponse(**{k: parsed.get(k) for k in JobParseResponse.model_fields})
+    # ── Return normalized payload with schema-safe defaults ────────────────────
+    payload: dict[str, object] = {k: parsed.get(k) for k in JobParseResponse.model_fields}
+    payload["salary_currency"] = payload.get("salary_currency") or "USD"
+    payload["urgency"] = payload.get("urgency") or "normal"
+    payload["required_skills"] = payload.get("required_skills") or []
+    payload["preferred_skills"] = payload.get("preferred_skills") or []
+    return JobParseResponse.model_validate(payload)
 
 
 @router.get("/{job_id}", response_model=JobResponse)

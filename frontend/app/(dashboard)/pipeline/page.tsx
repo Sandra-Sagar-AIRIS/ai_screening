@@ -98,14 +98,13 @@ function DraggableCandidateCard({
   canDrag: boolean;
   isMoving: boolean;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: pipeline.id,
     disabled: !canDrag,
   });
 
   const style = {
     transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-    transition,
   };
 
   return (
@@ -186,9 +185,24 @@ export default function PipelinePage() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   useEffect(() => {
+    async function fetchActiveCandidates() {
+      const pageSize = 200; // backend enforces le=200 on /candidates limit
+      let offset = 0;
+      const all: Candidate[] = [];
+      while (true) {
+        const batch = await getCandidates(pageSize, offset, { status: "active" });
+        all.push(...batch);
+        if (batch.length < pageSize) {
+          break;
+        }
+        offset += pageSize;
+      }
+      return all;
+    }
+
     async function loadInitialData() {
       try {
-        const [candidateData, jobData] = await Promise.all([getCandidates(500, 0, { status: "active" }), getJobs(200, 0)]);
+        const [candidateData, jobData] = await Promise.all([fetchActiveCandidates(), getJobs(200, 0)]);
         setCandidates(candidateData);
         setJobs(jobData.filter((job) => job.status === "open"));
       } catch (err) {

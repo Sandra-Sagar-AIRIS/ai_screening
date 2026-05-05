@@ -138,9 +138,6 @@ export type Candidate = {
   updated_at: string;
 };
 
-<<<<<<< HEAD
-export type JobStatus = "draft" | "open" | "on_hold" | "closed" | "cancelled" | "filled";
-=======
 /** Assigned vendor on a job (GET /jobs/:id/vendors). */
 export type JobVendorAssignment = {
   vendor_id: string;
@@ -163,7 +160,6 @@ export type JobCandidateRow = {
   candidate: Candidate;
 };
 
->>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 export type CandidateCreatePayload = {
   first_name: string;
   last_name: string;
@@ -174,6 +170,8 @@ export type CandidateCreatePayload = {
   education?: string;
   notes?: string;
 };
+
+export type JobStatus = "draft" | "open" | "on_hold" | "closed" | "cancelled" | "filled";
 
 export type Job = {
   id: string;
@@ -201,53 +199,33 @@ export type Job = {
   updated_at: string;
 };
 
-<<<<<<< HEAD
-export type JobSubmissionStatus = "pending" | "shortlisted" | "rejected" | "interviewing" | "offered" | "hired";
-
-export type JobSubmission = {
-  id: string;
-  job_id: string;
-  candidate_id: string;
-  submission_status: JobSubmissionStatus;
-  submitted_at: string;
-  submitted_by: string;
-  notes: string | null;
-};
-
-export type JobMatchCategoryScores = {
-  skills_overlap: number;
-  location_compatibility: number;
-  experience_fit: number;
-};
-
-export type JobMatchEntry = {
-  rank: number;
-  candidate_id: string;
-  fit_score: number;
-  category_scores: JobMatchCategoryScores;
-  already_submitted: boolean;
-};
-
-export type JobMatchTriggerResponse = {
-  job_id: string;
-  match_count: number;
-  generated_at: string;
-  refresh_requested: boolean;
-};
-
-export type JobMatchesResponse = {
-  job_id: string;
-  matches: JobMatchEntry[];
-  total_count: number;
-  generated_at: string;
-  limit: number;
-  offset: number;
-=======
 export type JobMetrics = {
   job_id: string;
   vendor_count: number;
   candidate_count: number;
->>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
+};
+
+export type JobSubmissionStatus = "pending" | "shortlisted" | "rejected" | "interviewing" | "offered" | "hired";
+
+export type JobSubmission = {
+  id: string;
+  candidate_id: string;
+  job_id: string;
+  submission_status: JobSubmissionStatus;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type JobMatchEntry = {
+  candidate_id: string;
+  score: number;
+  reasons?: string[];
+};
+
+export type JobMatchesResponse = {
+  matches: JobMatchEntry[];
+  total: number;
 };
 
 export type PipelineStage = "applied" | "screening" | "interview" | "offer" | "placed" | "rejected";

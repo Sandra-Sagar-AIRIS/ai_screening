@@ -17,6 +17,7 @@ import { useAuthStore } from "@/store/auth-store";
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const hydrated = useAuthStore((state) => state.hydrated);
   const token = useAuthStore((state) => state.token);
   const role = useAuthStore((state) => state.role);
   const permissions = useAuthStore((state) => state.permissions);
@@ -44,20 +45,26 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }, [token, permissions.length, refreshPermissions]);
 
   useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
     if (token === null) {
       router.replace("/login");
     }
-  }, [router, token]);
+  }, [hydrated, router, token]);
 
   useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
     if (token && role === null) {
       router.replace("/login");
     }
-  }, [role, router, token]);
+  }, [hydrated, role, router, token]);
 
   /** Redirect off routes the user cannot use (replaces in-page "Access restricted" card). */
   useEffect(() => {
-    if (token === null) {
+    if (!hydrated || token === null) {
       return;
     }
     const rule = navAccessRuleForPathname(pathname);
@@ -68,7 +75,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     if (!canAccessPathname(pathname, role, permissions)) {
       router.replace("/");
     }
-  }, [pathname, permissions, role, router, token]);
+  }, [hydrated, pathname, permissions, role, router, token]);
 
   function onLogout() {
     clearToken();
@@ -122,18 +129,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </p>
           ) : null}
         </aside>
-<<<<<<< HEAD
-        <main className="min-w-0 overflow-hidden">
-          {canAccessPage() ? (
-=======
         <main>
           {!accessReady ? (
-            <p className="text-sm text-slate-600">Loading workspace…</p>
+            <p className="text-sm text-slate-600">Loading workspace...</p>
           ) : pageAllowed ? (
->>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
             children
           ) : (
-            <p className="text-sm text-slate-500">Redirecting…</p>
+            <p className="text-sm text-slate-500">Redirecting...</p>
           )}
         </main>
       </div>

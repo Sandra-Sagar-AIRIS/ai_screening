@@ -11,7 +11,6 @@ export class ApiError extends Error {
   }
 }
 
-<<<<<<< HEAD
 function toErrorMessage(detail: unknown, status: number): string {
   if (!detail) {
     return `Request failed with status ${status}`;
@@ -20,31 +19,23 @@ function toErrorMessage(detail: unknown, status: number): string {
     return detail;
   }
   if (typeof detail === "object") {
-    if ("detail" in detail) {
-      const raw = (detail as { detail: unknown }).detail;
-      if (typeof raw === "string") {
-        return raw;
-      }
-      if (raw && typeof raw === "object") {
-        if ("error" in raw) {
-          return String((raw as { error: unknown }).error);
-        }
-        try {
-          return JSON.stringify(raw);
-        } catch {
-          return "Request failed";
-        }
-      }
-      return String(raw);
+    const record = detail as { detail?: unknown; message?: unknown };
+    if (typeof record.detail === "string") {
+      return record.detail;
     }
-    try {
-      return JSON.stringify(detail);
-    } catch {
-      return `Request failed with status ${status}`;
+    if (Array.isArray(record.detail) && record.detail.length > 0) {
+      const first = record.detail[0] as { msg?: unknown };
+      if (typeof first?.msg === "string") {
+        return first.msg;
+      }
+    }
+    if (typeof record.message === "string") {
+      return record.message;
     }
   }
   return `Request failed with status ${status}`;
-=======
+}
+
 /** Maps HTTP status to short, user-facing copy (403/401-aware). */
 export function formatApiErrorForUser(err: unknown): string {
   if (err instanceof ApiError) {
@@ -60,7 +51,6 @@ export function formatApiErrorForUser(err: unknown): string {
     return err.message;
   }
   return "Something went wrong. Please try again.";
->>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 }
 
 type RequestOptions = RequestInit & {
@@ -72,6 +62,17 @@ function getAuthToken() {
     return null;
   }
   return window.localStorage.getItem("airis_access_token");
+}
+
+function shouldSuppressApiErrorLog(path: string, status: number): boolean {
+  // Legacy candidates can exist without candidate-management timeline rows.
+  if (
+    status === 404 &&
+    /^\/candidate-management\/candidates\/[^/]+\/interactions(?:\?|$)/.test(path)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -103,7 +104,9 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       detail = await response.text();
     }
     const message = toErrorMessage(detail, response.status);
-    console.error(`[API Error] ${response.status} ${path}:`, detail);
+    if (!shouldSuppressApiErrorLog(path, response.status)) {
+      console.error(`[API Error] ${response.status} ${path}:`, detail);
+    }
     throw new ApiError(message, response.status, detail);
   }
 

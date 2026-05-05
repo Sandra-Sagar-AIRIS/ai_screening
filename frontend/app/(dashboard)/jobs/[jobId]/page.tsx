@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
+"use client";
 
-<<<<<<< HEAD
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
@@ -283,7 +282,7 @@ export default function JobDetailPage() {
         <div className="max-w-md">
           <p className="text-gray-900 font-semibold mb-2">Something went wrong</p>
           <p className="text-gray-500 text-sm mb-6">{error}</p>
-          <Button onClick={loadData} variant="outline" size="sm">Retry Loading</Button>
+          <Button onClick={loadData} variant="outline">Retry Loading</Button>
         </div>
       </div>
     );
@@ -426,7 +425,7 @@ export default function JobDetailPage() {
                     </div>
                     <div className="flex justify-between items-center pb-3 border-b border-gray-100">
                       <span className="text-sm text-gray-500 flex items-center gap-2"><Banknote className="w-4 h-4" /> Salary</span>
-                      <span className="text-sm font-semibold text-gray-900">{formatSalary(job.salary_min, job.salary_currency)} {job.salary_max ? `- ${formatSalary(job.salary_max, job.salary_currency)}` : ''}</span>
+                      <span className="text-sm font-semibold text-gray-900">{formatSalary(job.salary_min ?? null, job.salary_currency ?? null)} {job.salary_max ? `- ${formatSalary(job.salary_max ?? null, job.salary_currency ?? null)}` : ''}</span>
                     </div>
                     <div className="flex justify-between items-center pb-3 border-b border-gray-100">
                       <span className="text-sm text-gray-500 flex items-center gap-2"><Clock className="w-4 h-4" /> Experience</span>
@@ -462,7 +461,7 @@ export default function JobDetailPage() {
                     <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                        <FileText className="w-5 h-5 text-indigo-500" /> Raw Job Description
                     </h2>
-                    <Button variant="outline" size="sm" onClick={handleCopyJD} className="text-xs font-medium border-gray-300 text-gray-700 h-8 gap-2 hover:bg-gray-50">
+                    <Button variant="outline" onClick={handleCopyJD} className="text-xs font-medium border-gray-300 text-gray-700 h-8 gap-2 hover:bg-gray-50">
                       <Clipboard className="w-3.5 h-3.5" />
                       Copy Text
                     </Button>
@@ -667,10 +666,4 @@ export default function JobDetailPage() {
       )}
     </div>
   );
-=======
-/** Legacy route; job detail lives under `/dashboard/jobs/[id]`. */
-export default async function JobDetailRedirect({ params }: { params: Promise<{ jobId: string }> }) {
-  const { jobId } = await params;
-  redirect(`/dashboard/jobs/${jobId}`);
->>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 }

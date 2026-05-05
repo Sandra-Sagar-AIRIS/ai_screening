@@ -35,7 +35,7 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
   },
   {
     name: "Jobs",
-    path: "/dashboard/jobs",
+    path: "/jobs",
     anyOfPermissions: [NAV_PERMISSION_CODES.JOBS_READ],
   },
   {
@@ -67,8 +67,8 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     adminMayAccess: true,
   },
   { name: "Roles", path: "/roles", adminOnly: true },
-  // Same RBAC as above, for alternate URLs that still use DashboardShell
-  { name: "Jobs (legacy path)", path: "/jobs", anyOfPermissions: [NAV_PERMISSION_CODES.JOBS_READ], showInSidebar: false },
+  // Same RBAC as above, for alternate URLs that still use DashboardShell.
+  { name: "Jobs (dashboard path)", path: "/dashboard/jobs", anyOfPermissions: [NAV_PERMISSION_CODES.JOBS_READ], showInSidebar: false },
   {
     name: "Users (dashboard path)",
     path: "/dashboard/users",

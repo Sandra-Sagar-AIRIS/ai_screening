@@ -8,11 +8,6 @@ import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api/client";
 import { acceptInvite } from "@/lib/api/invites";
 
-<<<<<<< HEAD
-import { Suspense } from "react";
-
-=======
->>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
 function AcceptInviteForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -70,11 +65,7 @@ function AcceptInviteForm() {
 
 export default function AcceptInvitePage() {
   return (
-<<<<<<< HEAD
     <Suspense fallback={<p>Loading...</p>}>
-=======
-    <Suspense fallback={<p className="p-6 text-sm text-slate-600">Loading…</p>}>
->>>>>>> 3b3e2c07 (new roles and recruiter dashboard)
       <AcceptInviteForm />
     </Suspense>
   );

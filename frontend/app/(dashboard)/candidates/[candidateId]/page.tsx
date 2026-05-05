@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { ApiError, API_BASE_URL } from "@/lib/api/client";
+import { getMyPermissions } from "@/lib/api/auth";
 import {
   addCandidateInteraction,
   assignCandidateRecruiter,
@@ -61,16 +62,16 @@ export default function CandidateDetailPage() {
     }
     async function loadData() {
       try {
-        const [data, timeline, linkedPipelines, interviewList] = await Promise.all([
-          getCandidateById(params.candidateId),
+        const data = await getCandidateById(params.candidateId);
+        const [timelineResult, pipelinesResult, interviewResult] = await Promise.allSettled([
           getCandidateInteractions(params.candidateId, 100, 0),
           getPipelines(200, 0, undefined, params.candidateId),
           getCandidateInterviews(params.candidateId),
         ]);
         setCandidate(data);
-        setInteractions(timeline);
-        setPipelines(linkedPipelines);
-        setInterviews(interviewList);
+        setInteractions(timelineResult.status === "fulfilled" ? timelineResult.value : []);
+        setPipelines(pipelinesResult.status === "fulfilled" ? pipelinesResult.value : []);
+        setInterviews(interviewResult.status === "fulfilled" ? interviewResult.value : []);
         setFirstName(data.first_name);
         setLastName(data.last_name);
         setEmail(data.email);
@@ -79,6 +80,7 @@ export default function CandidateDetailPage() {
         setRole(data.role ?? "");
         setYearsExperience(data.years_experience !== null && data.years_experience !== undefined ? String(data.years_experience) : "");
         setSelectedRecruiterId(data.recruiter_id ?? "");
+        setError(null);
       } catch (err) {
         if (err instanceof ApiError) {
           setError(err.message);
@@ -93,6 +95,11 @@ export default function CandidateDetailPage() {
   useEffect(() => {
     async function loadUsers() {
       try {
+        const me = await getMyPermissions();
+        if (!me.permissions.includes("users:invite")) {
+          setUsers([]);
+          return;
+        }
         const data = await getUsers();
         setUsers(data.filter((user) => user.role === "recruiter" || user.role === "admin"));
       } catch {
@@ -494,8 +501,8 @@ export default function CandidateDetailPage() {
               <div className="flex gap-2">
                 {candidate.resume_s3_key ? (
                   <>
-                    <Button size="sm" variant="outline" onClick={() => handleResumeAction("open")}>Open</Button>
-                    <Button size="sm" onClick={() => handleResumeAction("download")}>⬇ Download</Button>
+                    <Button variant="outline" onClick={() => handleResumeAction("open")}>Open</Button>
+                    <Button onClick={() => handleResumeAction("download")}>⬇ Download</Button>
                   </>
                 ) : (
                   <span className="text-xs text-slate-400">File unavailable</span>
