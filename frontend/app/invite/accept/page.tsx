@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api/client";
 import { acceptInvite } from "@/lib/api/invites";
 
-export default function AcceptInvitePage() {
+import { Suspense } from "react";
+
+function AcceptInviteForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = useMemo(() => searchParams.get("token")?.trim() ?? "", [searchParams]);
@@ -60,5 +62,13 @@ export default function AcceptInvitePage() {
         </Button>
       </form>
     </AuthShell>
+  );
+}
+
+export default function AcceptInvitePage() {
+  return (
+    <Suspense fallback={<p>Loading...</p>}>
+      <AcceptInviteForm />
+    </Suspense>
   );
 }

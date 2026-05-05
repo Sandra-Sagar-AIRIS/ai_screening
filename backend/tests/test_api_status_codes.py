@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -97,6 +98,40 @@ def test_409_when_creating_duplicate_pipeline(client, force_auth, monkeypatch):
     )
     assert response.status_code == 409
     assert response.json()["detail"] == "A pipeline already exists for this candidate and job."
+
+
+def test_patch_pipeline_stage_returns_updated_record(client, force_auth, monkeypatch):
+    pipeline_id = uuid4()
+    organization_id = uuid4()
+    candidate_id = uuid4()
+    job_id = uuid4()
+    now = datetime.now(timezone.utc)
+
+    pipeline = SimpleNamespace(
+        id=pipeline_id,
+        organization_id=organization_id,
+        candidate_id=candidate_id,
+        job_id=job_id,
+        stage="screening",
+        status="active",
+        notes=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+    def _update_pipeline(self, pipeline_id, organization_id, current_user, payload):
+        return pipeline
+
+    monkeypatch.setattr(PipelineService, "update_pipeline", _update_pipeline)
+
+    response = client.patch(
+        f"/api/v1/pipeline/{pipeline_id}",
+        json={"stage": "Screening"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == str(pipeline_id)
+    assert body["stage"] == "screening"
 
 
 def test_422_when_payload_is_invalid(client, auth_headers):

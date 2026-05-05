@@ -21,6 +21,11 @@ from app.services.permission_service import PermissionService
 bearer_scheme = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
 
+ROLE_ALIASES: dict[str, tuple[str, ...]] = {
+    "client_viewer": ("client_viewer", "client"),
+    "client": ("client", "client_viewer"),
+}
+
 
 def _parse_role(raw_role: str | None) -> str | None:
     if raw_role is None:
@@ -61,7 +66,6 @@ def get_user_permissions(
 
     if user_id is not None:
         return PermissionService(db).get_user_permissions(user_id)
-
     if role is None:
         return []
     role_key = role.strip().lower()
@@ -71,27 +75,22 @@ def get_user_permissions(
         org_uuid = UUID(organization_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid organization in auth context.") from exc
-
-    role_row_id = db.scalar(
-        select(OrganizationRole.id).where(
-            OrganizationRole.organization_id == org_uuid,
-            OrganizationRole.key == role_key,
+    role_keys = ROLE_ALIASES.get(role_key, (role_key,))
+    stmt = (
+        select(RolePermission.permission)
+        .join(OrganizationRole, RolePermission.role_id == OrganizationRole.id)
+        .where(
+            RolePermission.organization_id == org_uuid,
+            func.lower(OrganizationRole.key).in_(role_keys),
         )
-    )
-    if role_row_id is None:
-        return []
-
-    stmt = select(RolePermission.permission).where(
-        RolePermission.organization_id == org_uuid,
-        RolePermission.role_id == role_row_id,
     )
     values = [permission for permission in db.scalars(stmt)]
     normalized = normalize_permissions(values)
     logger.debug(
-        "get_user_permissions org_id=%s role_in=%s role_key=%s raw_rows=%s normalized=%s",
+        "get_user_permissions org_id=%s role_in=%s role_keys=%s raw_rows=%s normalized=%s",
         organization_id,
         role,
-        role_key,
+        role_keys,
         len(values),
         len(normalized),
     )

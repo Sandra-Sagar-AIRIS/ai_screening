@@ -17,6 +17,7 @@ from app.services.organization_role_service import (
 
 _RECRUITER_DEFAULTS: tuple[str, ...] = (
     "jobs:read",
+    "jobs:update",
     "candidates:create",
     "candidates:read",
     "pipeline:update",
@@ -46,6 +47,8 @@ def iter_default_role_permission_pairs() -> Iterable[tuple[str, str]]:
         yield ("vendor", permission)
 
 
+from app.models.organization_role import OrganizationRole
+
 def seed_default_role_permissions(db: Session, organization_id: UUID) -> None:
     """
     Create default org roles and role_permissions. Idempotent.
@@ -53,11 +56,14 @@ def seed_default_role_permissions(db: Session, organization_id: UUID) -> None:
     ensure_default_organization_roles(db, organization_id)
     db.flush()
 
+    # 1. Get all roles for this organization
+    roles = db.scalars(select(OrganizationRole).where(OrganizationRole.organization_id == organization_id)).all()
+    role_map = {r.key: r.id for r in roles}
+
+    # 2. Get existing permissions
     existing_pairs = set(
         db.execute(
-            select(RolePermission.role_id, RolePermission.permission).where(
-                RolePermission.organization_id == organization_id
-            )
+            select(RolePermission.role_id, RolePermission.permission).where(RolePermission.organization_id == organization_id)
         ).all()
     )
 
@@ -68,6 +74,12 @@ def seed_default_role_permissions(db: Session, organization_id: UUID) -> None:
             continue
         if (role_id, permission) in existing_pairs:
             continue
+        
+        role_id = role_map.get(role_key)
+        if not role_id:
+            # Fallback: if role doesn't exist, we skip it (or we could create it, but usually roles should exist)
+            continue
+
         db.add(
             RolePermission(
                 organization_id=organization_id,

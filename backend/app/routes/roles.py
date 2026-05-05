@@ -18,8 +18,6 @@ from app.services.organization_role_service import make_unique_role_key, slugify
 from app.services.permission_service import invalidate_permission_cache
 
 router = APIRouter()
-
-
 class OrganizationRoleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -62,6 +60,36 @@ def _require_admin_or_invite(
     if USERS_INVITE in permissions:
         return current_user
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden.")
+
+
+@router.get("/legacy-permissions-map", response_model=dict[str, list[str]])
+def get_legacy_role_permissions_map(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_admin)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict[str, list[str]]:
+    """
+    Legacy map shape preserved for backward compatibility with older admin clients.
+    """
+    org_id = UUID(current_user.organization_id)
+    stmt = (
+        select(OrganizationRole.key, RolePermission.permission)
+        .join(OrganizationRole, RolePermission.role_id == OrganizationRole.id)
+        .where(RolePermission.organization_id == org_id)
+    )
+    rows = db.execute(stmt).all()
+    grouped: dict[str, list[str]] = {}
+    for role_key, permission in rows:
+        key = (role_key or "").strip().lower()
+        if key == "client":
+            key = "client_viewer"
+        grouped.setdefault(key, [])
+        perm = (permission or "").strip().lower()
+        if perm and perm not in grouped[key]:
+            grouped[key].append(perm)
+    for key in grouped:
+        grouped[key].sort()
+    return grouped
 
 
 def _get_org_role_for_org(

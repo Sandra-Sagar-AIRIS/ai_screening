@@ -66,6 +66,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SMTP_FROM", "smtp_from"),
     )
 
+    # Groq API key for AI-powered JD parsing.
+    groq_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GROQ_API_KEY", "groq_api_key"),
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
