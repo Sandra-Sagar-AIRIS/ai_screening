@@ -46,7 +46,7 @@ class JobCreate(BaseModel):
     client_id: UUID | str
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
-    status: JobStatus = JobStatus.DRAFT
+    status: JobStatus = JobStatus.OPEN
 
     # Optional Phase 1 fields (kept optional so current frontend payloads work).
     location: str | None = None

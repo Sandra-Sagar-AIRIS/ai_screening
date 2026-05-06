@@ -72,6 +72,10 @@ function shouldSuppressApiErrorLog(path: string, status: number): boolean {
   ) {
     return true;
   }
+  // Candidate is already submitted to this job (idempotent UX flow).
+  if (status === 409 && /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path)) {
+    return true;
+  }
   return false;
 }
 
@@ -105,7 +109,8 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     }
     const message = toErrorMessage(detail, response.status);
     const expectedCandidateConflict =
-      response.status === 409 && path.includes("/candidate-management/candidates");
+      response.status === 409 &&
+      (path.includes("/candidate-management/candidates") || /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path));
 
     if (expectedCandidateConflict) {
       // Expected domain conflict; avoid noisy dev overlay.

@@ -21,7 +21,7 @@ import {
   updateCandidate,
   uploadResumeForReview,
 } from "@/lib/api/candidates";
-import { getJobs } from "@/lib/api/jobs";
+import { getJobs, submitCandidateToJob } from "@/lib/api/jobs";
 import { getPipelines } from "@/lib/api/pipeline";
 import type { Candidate, Job, OrganizationUser, Pipeline } from "@/lib/api/types";
 import { getUsers } from "@/lib/api/users";
@@ -595,6 +595,11 @@ export default function CandidatesPage() {
   }
 
   async function submitCandidateToPipeline(candidateId: string, jobId: string) {
+    const selectedJob = jobs.find((job) => job.id === jobId);
+    if (selectedJob && selectedJob.status !== "open" && selectedJob.status !== "on_hold") {
+      setError("This job is not open. Move it to Open or On Hold before submitting candidates.");
+      return;
+    }
     const duplicate = pipelines.some((item) => item.candidate_id === candidateId && item.job_id === jobId);
     if (duplicate) {
       setError("Candidate is already submitted to this job.");
@@ -603,20 +608,40 @@ export default function CandidatesPage() {
     setSubmitLoading(true);
     try {
       console.info("[candidate-submit] payload", { candidateId, jobId });
-      await updateCandidate(candidateId, { job_id: jobId });
+      await submitCandidateToJob(jobId, candidateId);
 
       setSubmitModalCandidateId(null);
       setSubmitModalJobId("");
       try {
-        const pipelineData = await getPipelines(200, 0);
-        console.info("[candidate-submit] pipeline refresh count", pipelineData.length);
+        const pipelineData = await getPipelines(200, 0, jobId);
+        console.info("[candidate-submit] pipeline refresh count (job filtered)", pipelineData.length);
         setPipelines(pipelineData);
       } catch {
         setPipelines([]);
       }
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        if (err.status === 409) {
+          const detailValue =
+            typeof err.detail === "string"
+              ? err.detail
+              : err.detail && typeof err.detail === "object" && "detail" in err.detail
+                ? String((err.detail as { detail?: unknown }).detail ?? "")
+                : "";
+          if (detailValue === "JOB_NOT_OPEN") {
+            setError("This job is not open. Move it to Open or On Hold before submitting candidates.");
+          } else {
+            setError("Candidate is already submitted to this job.");
+            try {
+              const pipelineData = await getPipelines(200, 0, jobId);
+              setPipelines(pipelineData);
+            } catch {
+              // Keep the existing list if refresh fails.
+            }
+          }
+        } else {
+          setError(err.message);
+        }
       } else {
         setError("Unable to submit candidate to job.");
       }

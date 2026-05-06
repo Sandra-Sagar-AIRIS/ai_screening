@@ -29,7 +29,12 @@
       "Bash(NODE_PATH=\"C:/Users/sandr/AppData/Roaming/npm/node_modules\" node build_prd.js)",
       "Bash(python create_airis_excel.py)",
       "Bash(del \"C:\\\\Users\\\\sandr\\\\Documents\\\\Interview_platform\\\\AIRIS\\\\create_airis_excel.py\")",
-      "Read(//c/Users/sandr/Downloads/**)"
+      "Read(//c/Users/sandr/Downloads/**)",
+      "mcp__8044e41c-c61e-47ad-9cfc-9629e08e9831__getAccessibleAtlassianResources",
+      "mcp__8044e41c-c61e-47ad-9cfc-9629e08e9831__getJiraProjectIssueTypesMetadata",
+      "mcp__8044e41c-c61e-47ad-9cfc-9629e08e9831__searchJiraIssuesUsingJql",
+      "mcp__8044e41c-c61e-47ad-9cfc-9629e08e9831__getVisibleJiraProjects",
+      "mcp__8044e41c-c61e-47ad-9cfc-9629e08e9831__createJiraIssue"
     ]
   }
 }

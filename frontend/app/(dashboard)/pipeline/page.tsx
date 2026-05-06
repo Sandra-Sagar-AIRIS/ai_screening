@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   closestCorners,
@@ -21,6 +21,7 @@ import { getPipelines, updatePipeline } from "@/lib/api/pipeline";
 import { PIPELINE_UPDATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import type { Candidate, Job, Pipeline } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
+import { Button } from "@/components/ui/button";
 
 type BoardStage = "applied" | "screening" | "interview" | "offered" | "hired";
 
@@ -181,6 +182,7 @@ export default function PipelinePage() {
   const permissions = useAuthStore((state) => state.permissions);
   const [movingPipelineId, setMovingPipelineId] = useState<string | null>(null);
   const [activePipelineId, setActivePipelineId] = useState<string | null>(null);
+  const boardScrollRef = useRef<HTMLDivElement | null>(null);
   const canUpdatePipeline = hasPermission(permissions, PIPELINE_UPDATE_PERMISSION);
   const canReadCandidates = permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -203,14 +205,10 @@ export default function PipelinePage() {
 
     async function loadInitialData() {
       try {
-<<<<<<< HEAD
-        const [candidateData, jobData] = await Promise.all([fetchActiveCandidates(), getJobs(200, 0)]);
-=======
         const [candidateData, jobData] = await Promise.all([
-          canReadCandidates ? getCandidates(500, 0, { status: "active" }) : Promise.resolve([]),
+          canReadCandidates ? fetchActiveCandidates() : Promise.resolve([]),
           getJobs(200, 0),
         ]);
->>>>>>> origin/main
         setCandidates(candidateData);
         // Keep pipeline job selector aligned with jobs page:
         // exclude terminal states, but allow draft/open/on_hold.
@@ -244,6 +242,16 @@ export default function PipelinePage() {
     }
   }
 
+  useEffect(() => {
+    if (!selectedJobId) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      void loadPipelines(selectedJobId);
+    }, 25000);
+    return () => window.clearInterval(interval);
+  }, [selectedJobId]);
+
   const grouped = useMemo(() => {
     const candidateMap = new Map(candidates.map((candidate) => [candidate.id, candidate]));
     return STAGES.reduce<Record<BoardStage, Array<{ pipeline: Pipeline; candidate: Candidate | undefined }>>>((acc, stage) => {
@@ -257,6 +265,16 @@ export default function PipelinePage() {
   const pipelineById = useMemo(() => new Map(pipelines.map((pipeline) => [pipeline.id, pipeline])), [pipelines]);
   const candidateById = useMemo(() => new Map(candidates.map((candidate) => [candidate.id, candidate])), [candidates]);
   const activePipeline = activePipelineId ? pipelineById.get(activePipelineId) : undefined;
+
+  function handleBoardWheel(event: React.WheelEvent<HTMLDivElement>) {
+    const container = boardScrollRef.current;
+    if (!container) return;
+    const hasHorizontalOverflow = container.scrollWidth > container.clientWidth;
+    if (!hasHorizontalOverflow) return;
+    if (event.deltaY === 0) return;
+    event.preventDefault();
+    container.scrollLeft += event.deltaY;
+  }
 
   function resolveStageFromDropId(dropId: string): BoardStage | null {
     if (STAGES.includes(dropId as BoardStage)) {
@@ -310,7 +328,7 @@ export default function PipelinePage() {
   }
 
   return (
-    <section className="space-y-6">
+    <section className="min-w-0 space-y-6">
       <div className="mb-4 space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Pipeline Board</h1>
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
@@ -337,7 +355,20 @@ export default function PipelinePage() {
               ))}
             </select>
           </div>
-          {canUpdatePipeline ? <p className="text-sm text-slate-500">Drag candidates across stages</p> : null}
+          <div className="flex items-center gap-2">
+            {canUpdatePipeline ? <p className="text-sm text-slate-500">Drag candidates across stages</p> : null}
+            <Button
+              variant="outline"
+              className="h-8 px-3 text-xs"
+              disabled={!selectedJobId || loading}
+              onClick={() => {
+                if (!selectedJobId) return;
+                void loadPipelines(selectedJobId);
+              }}
+            >
+              Refresh
+            </Button>
+          </div>
         </div>
       </div>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
@@ -366,8 +397,12 @@ export default function PipelinePage() {
           }}
           onDragCancel={() => setActivePipelineId(null)}
         >
-          <div className="overflow-x-auto pb-3 [scrollbar-color:rgb(203_213_225)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-1.5">
-            <div className="flex min-w-max items-start gap-6 pr-4">
+          <div
+            ref={boardScrollRef}
+            onWheel={handleBoardWheel}
+            className="max-w-full overflow-x-scroll overscroll-x-contain pb-4 touch-pan-x [scrollbar-gutter:stable_both-edges] [scrollbar-color:rgb(148_163_184)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/80 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-2"
+          >
+            <div className="flex min-w-[1500px] items-start gap-6 pr-6">
               {STAGES.map((stage) => (
                 <StageColumn
                   key={stage}

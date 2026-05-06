@@ -26,17 +26,22 @@ class PipelineService:
         self._scope = AccessScopeService(db)
         self._candidates = CandidateService(db)
 
-    def create_pipeline(self, organization_id: UUID, current_user: CurrentUser, payload: PipelineCreate) -> Pipeline:
+    def create_pipeline(
+        self,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        payload: PipelineCreate,
+        *,
+        commit: bool = True,
+    ) -> Pipeline:
         self._candidates.get_candidate_by_id(payload.candidate_id, organization_id, current_user)
 
         # Validate job exists (and scope it for client users) without instantiating JobService
         # to avoid circular construction between JobService <-> PipelineService.
         stmt = select(Job).where(Job.id == payload.job_id, Job.organization_id == organization_id)
         if self._scope.is_client_user(current_user):
-            allowed_job_ids = self._scope.allowed_job_ids(current_user)
-            if not allowed_job_ids:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
-            stmt = stmt.where(Job.id.in_(allowed_job_ids))
+            # Filter by allowed job IDs via SQL subquery (no Python list materialization).
+            stmt = stmt.where(Job.id.in_(self._scope.allowed_job_ids_subquery(current_user)))
 
         job = self.db.scalar(stmt)
         if job is None:
@@ -44,6 +49,7 @@ class PipelineService:
 
         existing = self.db.scalar(
             select(Pipeline.id).where(
+                Pipeline.organization_id == organization_id,
                 Pipeline.candidate_id == payload.candidate_id,
                 Pipeline.job_id == payload.job_id,
             )
@@ -64,13 +70,17 @@ class PipelineService:
         )
         self.db.add(pipeline)
         try:
-            self.db.commit()
+            # Flush instead of committing so callers can atomically create
+            # JobSubmission + Pipeline in a single transaction.
+            self.db.flush()
         except IntegrityError:
             self.db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A pipeline already exists for this candidate and job.",
             ) from None
+        if commit:
+            self.db.commit()
         self.db.refresh(pipeline)
         return pipeline
 
