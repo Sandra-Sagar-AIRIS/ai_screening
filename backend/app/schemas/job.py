@@ -21,6 +21,10 @@ class JobParseResponse(BaseModel):
     description: str | None = None
     required_skills: list[str] = []
     preferred_skills: list[str] = []
+    key_responsibilities: list[str] = []
+    # The raw source text (from paste or extracted from PDF) stored for "Raw JD" view.
+    raw_jd_text: str | None = None
+
 
 
 class JobStatus(StrEnum):
@@ -60,6 +64,7 @@ class JobCreate(BaseModel):
 
     required_skills: list[str] | None = None
     preferred_skills: list[str] | None = None
+    key_responsibilities: list[str] | None = None
 
     # Parsing metadata
     raw_jd_text: str | None = None
@@ -85,6 +90,7 @@ class JobUpdate(BaseModel):
 
     required_skills: list[str] | None = None
     preferred_skills: list[str] | None = None
+    key_responsibilities: list[str] | None = None
 
     raw_jd_text: str | None = None
     parsing_source: str | None = None
@@ -176,6 +182,7 @@ class JobResponse(BaseModel):
     # Embedded skills from job_skills table (Task 4 – pre-fills edit form).
     required_skills: list[str] = Field(default_factory=list)
     preferred_skills: list[str] = Field(default_factory=list)
+    key_responsibilities: list[str] = Field(default_factory=list)
 
     # Parsing metadata
     raw_jd_text: str | None = None

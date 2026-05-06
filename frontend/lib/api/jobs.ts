@@ -14,6 +14,7 @@ export type JobParseResult = {
   description: string | null;
   required_skills: string[];
   preferred_skills: string[];
+  key_responsibilities?: string[];
   raw_jd_text?: string;
   parsing_source?: string;
   parsing_status?: string;
@@ -98,6 +99,7 @@ export async function createJob(payload: {
   urgency?: string | null;
   required_skills?: string[];
   preferred_skills?: string[];
+  key_responsibilities?: string[];
   raw_jd_text?: string | null;
   parsing_source?: string | null;
   parsing_status?: string | null;

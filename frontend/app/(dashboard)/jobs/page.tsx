@@ -11,7 +11,7 @@ import type { Job, JobStatus } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Briefcase, CircleDot, FileEdit, Shield, CheckCircle2 } from "lucide-react";
+import { Briefcase, CircleDot, Shield, CheckCircle2 } from "lucide-react";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -150,7 +150,9 @@ function JDInputModal({
         : await parseJD({ type: "file", file: file! });
       onParsed({
         ...result,
-        raw_jd_text: tab === "paste" ? text : undefined,
+        // raw_jd_text is now returned by the backend for both paste and PDF.
+        // For paste, also use the locally typed text as a fallback.
+        raw_jd_text: result.raw_jd_text ?? (tab === "paste" ? text : undefined),
         parsing_source: tab === "paste" ? "text" : "pdf",
         parsing_status: "success",
       });
@@ -210,7 +212,7 @@ function JDInputModal({
         {error && (
           <div className="mt-4 flex items-center justify-between bg-red-50 p-3 rounded-md border border-red-200">
             <p className="text-sm text-red-600">{error}</p>
-            <Button variant="outline" onClick={handleParse} className="text-red-700 border-red-200 hover:bg-red-100">
+            <Button variant="outline" onClick={handleParse} className="px-3 py-1.5 text-xs text-red-700 border-red-200 hover:bg-red-100">
               Retry
             </Button>
           </div>
@@ -246,11 +248,9 @@ function JDPreviewModal({
   const [employmentType, setEmploymentType] = useState(initial.employment_type ?? "");
   const [expMin, setExpMin] = useState(initial.experience_min_years !== null ? String(initial.experience_min_years) : "");
   const [expMax, setExpMax] = useState(initial.experience_max_years !== null ? String(initial.experience_max_years) : "");
-  const [salaryMin, setSalaryMin] = useState(initial.salary_min !== null ? String(initial.salary_min) : "");
-  const [salaryMax, setSalaryMax] = useState(initial.salary_max !== null ? String(initial.salary_max) : "");
-  const [salaryCurrency, setSalaryCurrency] = useState(initial.salary_currency ?? "USD");
   const [urgency, setUrgency] = useState(initial.urgency ?? "normal");
   const [description, setDescription] = useState(initial.description ?? "");
+  const [keyResponsibilities, setKeyResponsibilities] = useState<string>(initial.key_responsibilities?.join("\n") ?? "");
   const [requiredSkills, setRequiredSkills] = useState<string[]>(initial.required_skills ?? []);
   const [preferredSkills, setPreferredSkills] = useState<string[]>(initial.preferred_skills ?? []);
   const [creating, setCreating] = useState(false);
@@ -267,15 +267,13 @@ function JDPreviewModal({
         description: description.trim() || null,
         status: "open",
         location: location.trim() || undefined,
-        salary_min: salaryMin ? Number(salaryMin) : null,
-        salary_max: salaryMax ? Number(salaryMax) : null,
-        salary_currency: salaryCurrency,
         experience_min_years: expMin ? Number(expMin) : null,
         experience_max_years: expMax ? Number(expMax) : null,
         employment_type: employmentType || null,
         urgency: urgency || "normal",
         required_skills: requiredSkills,
         preferred_skills: preferredSkills,
+        key_responsibilities: keyResponsibilities.split(/[\n]+/g).map((s) => s.trim()).filter(Boolean),
         raw_jd_text: initial.raw_jd_text,
         parsing_source: initial.parsing_source,
         parsing_status: initial.parsing_status,
@@ -354,11 +352,21 @@ function JDPreviewModal({
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-xs text-slate-500 mb-1">Description</label>
+            <label className="block text-xs text-slate-500 mb-1">About This Role</label>
             <textarea
               className="w-full h-32 rounded-md border border-slate-200 p-2 text-sm resize-none"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-xs text-slate-500 mb-1">Key Responsibilities (newline separated)</label>
+            <textarea
+              className="w-full h-32 rounded-md border border-slate-200 p-2 text-sm resize-none"
+              value={keyResponsibilities}
+              onChange={(e) => setKeyResponsibilities(e.target.value)}
+              placeholder="List key responsibilities here..."
             />
           </div>
 
@@ -402,7 +410,7 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "draft" | "closed">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
   const permissions = useAuthStore((state) => state.permissions);
   const role = useAuthStore((state) => state.role);
   const canCreateJobs = hasPermission(permissions, JOBS_CREATE_PERMISSION) || isAdminRole(role);
@@ -417,9 +425,6 @@ export default function JobsPage() {
   const [status, setStatus] = useState<JobStatus>("open");
   const [requiredSkills, setRequiredSkills] = useState("");
   const [preferredSkills, setPreferredSkills] = useState("");
-  const [salaryMin, setSalaryMin] = useState("");
-  const [salaryMax, setSalaryMax] = useState("");
-  const [salaryCurrency, setSalaryCurrency] = useState("USD");
   const [expMin, setExpMin] = useState("");
   const [expMax, setExpMax] = useState("");
   const [employmentType, setEmploymentType] = useState("");
@@ -464,7 +469,6 @@ export default function JobsPage() {
 
   function resetForm() {
     setTitle(""); setDescription(""); setLocation(""); setClientId("");
-    setRequiredSkills(""); setPreferredSkills(""); setSalaryMin(""); setSalaryMax("");
     setExpMin(""); setExpMax(""); setEmploymentType("");
     setStatus("open");
   }
@@ -477,9 +481,6 @@ export default function JobsPage() {
     setStatus(job.status || "open");
     setRequiredSkills(job.required_skills?.join(", ") || "");
     setPreferredSkills(job.preferred_skills?.join(", ") || "");
-    setSalaryMin(job.salary_min?.toString() || "");
-    setSalaryMax(job.salary_max?.toString() || "");
-    setSalaryCurrency(job.salary_currency || "USD");
     setExpMin(job.experience_min_years?.toString() || "");
     setExpMax(job.experience_max_years?.toString() || "");
     setEmploymentType(job.employment_type || "");
@@ -490,13 +491,12 @@ export default function JobsPage() {
 
   function getStatusBadgeClass(jobStatus: JobStatus) {
     if (jobStatus === "open") return "bg-green-100 text-green-700";
-    if (jobStatus === "draft") return "bg-gray-100 text-gray-600";
-    if (jobStatus === "cancelled" || jobStatus === "filled") return "bg-red-100 text-red-600";
+    if (jobStatus === "cancelled" || jobStatus === "filled" || jobStatus === "closed") return "bg-red-100 text-red-600";
     return "bg-slate-100 text-slate-600";
   }
 
   function getStatusLabel(jobStatus: JobStatus) {
-    if (jobStatus === "cancelled" || jobStatus === "filled") return "Closed";
+    if (jobStatus === "cancelled" || jobStatus === "filled" || jobStatus === "closed") return "Closed";
     return jobStatus.replace("_", " ");
   }
 
@@ -504,7 +504,7 @@ export default function JobsPage() {
     const matchesSearch = job.title.toLowerCase().includes(searchQuery.toLowerCase().trim());
     if (!matchesSearch) return false;
     if (statusFilter === "all") return true;
-    if (statusFilter === "closed") return job.status === "cancelled" || job.status === "filled";
+    if (statusFilter === "closed") return job.status === "cancelled" || job.status === "filled" || job.status === "closed";
     return job.status === statusFilter;
   });
 
@@ -532,7 +532,7 @@ export default function JobsPage() {
       {error && !showCreate ? <p className="text-sm text-red-600">{error}</p> : null}
 
       {/* ── KPI Strip ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card className="cursor-pointer border-slate-200 shadow-sm transition-shadow hover:shadow-md">
           <CardContent className="p-4 flex items-center gap-4">
             <div className="p-3 bg-indigo-50 rounded-xl text-indigo-500">
@@ -563,21 +563,6 @@ export default function JobsPage() {
 
         <Card className="cursor-pointer border-slate-200 shadow-sm transition-shadow hover:shadow-md">
           <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-orange-50 rounded-xl text-orange-500">
-              <FileEdit className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-500">Draft Jobs</p>
-              <h3 className="text-xl font-bold text-slate-900">{jobs.filter(j => j.status === "draft").length}</h3>
-              <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                {jobs.length === 0 ? "0.0" : ((jobs.filter(j => j.status === "draft").length / jobs.length) * 100).toFixed(1)}% of total
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="cursor-pointer border-slate-200 shadow-sm transition-shadow hover:shadow-md">
-          <CardContent className="p-4 flex items-center gap-4">
             <div className="p-3 bg-blue-50 rounded-xl text-blue-500">
               <Shield className="w-5 h-5" />
             </div>
@@ -598,9 +583,9 @@ export default function JobsPage() {
             </div>
             <div>
               <p className="text-xs font-medium text-slate-500">Closed</p>
-              <h3 className="text-xl font-bold text-slate-900">{jobs.filter(j => j.status === "cancelled" || j.status === "filled").length}</h3>
+              <h3 className="text-xl font-bold text-slate-900">{jobs.filter(j => j.status === "cancelled" || j.status === "filled" || j.status === "closed").length}</h3>
               <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                {jobs.length === 0 ? "0.0" : ((jobs.filter(j => j.status === "cancelled" || j.status === "filled").length / jobs.length) * 100).toFixed(1)}% of total
+                {jobs.length === 0 ? "0.0" : ((jobs.filter(j => j.status === "cancelled" || j.status === "filled" || j.status === "closed").length / jobs.length) * 100).toFixed(1)}% of total
               </p>
             </div>
           </CardContent>
@@ -622,7 +607,7 @@ export default function JobsPage() {
               onChange={(event) => setSearchQuery(event.target.value)}
             />
             <div className="flex items-center gap-2">
-              {(["all", "open", "draft", "closed"] as const).map((filter) => (
+              {(["all", "open", "closed"] as const).map((filter) => (
                 <button
                   key={filter}
                   type="button"
@@ -638,33 +623,35 @@ export default function JobsPage() {
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filteredJobs.map((job) => (
-            <div
-              key={job.id}
-              className="group rounded-xl bg-white p-4 shadow-sm transition-all duration-150 hover:scale-[1.01] hover:shadow-md"
-            >
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="min-w-0 space-y-2">
-                  <p className="truncate text-base font-semibold text-slate-900">{job.title}</p>
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${getStatusBadgeClass(job.status)}`}>
-                    {getStatusLabel(job.status)}
-                  </span>
+            <div key={job.id} className="relative group transition-transform duration-300 hover:-translate-y-1.5 cursor-pointer">
+              <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 opacity-0 blur transition duration-300 group-hover:opacity-30"></div>
+              <Link
+                href={`/jobs/${job.id}`}
+                className="relative flex h-full flex-col rounded-xl bg-white p-5 border border-slate-200 shadow-sm transition-colors duration-300 group-hover:border-indigo-200/50"
+              >
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-2">
+                    <p className="truncate text-base font-semibold text-slate-900 group-hover:text-indigo-900 transition-colors duration-300">{job.title}</p>
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${getStatusBadgeClass(job.status)}`}>
+                      {getStatusLabel(job.status)}
+                    </span>
+                  </div>
                 </div>
-              </div>
 
-              <div className="mb-4 flex items-center gap-3 text-sm text-slate-500">
-                {job.location ? <span>📍 {job.location}</span> : <span>📍 Location TBD</span>}
-                {(job.experience_min_years !== null || job.experience_max_years !== null) ? (
-                  <span>🎓 {job.experience_min_years ?? 0}-{job.experience_max_years ?? "+"} yrs</span>
-                ) : (
-                  <span>🎓 Experience TBD</span>
-                )}
-              </div>
+                <div className="mb-4 flex items-center gap-3 text-sm text-slate-500">
+                  {job.location ? <span>📍 {job.location}</span> : <span>📍 Location TBD</span>}
+                  {(job.experience_min_years !== null || job.experience_max_years !== null) ? (
+                    <span>🎓 {job.experience_min_years ?? 0}-{job.experience_max_years ?? "+"} yrs</span>
+                  ) : (
+                    <span>🎓 Experience TBD</span>
+                  )}
+                </div>
 
-              <div className="pt-1">
-                <Link className="text-sm font-medium text-blue-600 hover:underline" href={`/jobs/${job.id}`}>
-                  View →
-                </Link>
-              </div>
+                <div className="mt-auto pt-4 border-t border-slate-100 flex items-center justify-between text-sm font-medium text-indigo-600 opacity-0 transition-all duration-300 group-hover:opacity-100">
+                  <span>View Details</span>
+                  <span className="transform transition-transform duration-300 group-hover:translate-x-1">→</span>
+                </div>
+              </Link>
             </div>
           ))}
           {!filteredJobs.length ? (
@@ -697,9 +684,7 @@ export default function JobsPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
-                  <select className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" value={status} onChange={(e) => setStatus(e.target.value as JobStatus)}>
-                    <option value="draft">Draft</option><option value="open">Open</option><option value="on_hold">On Hold</option><option value="cancelled">Cancelled</option><option value="filled">Filled</option>
-                  </select>
+                  <Input value="Open" disabled />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Description</label>
@@ -738,7 +723,7 @@ export default function JobsPage() {
                     client_id: clientId.trim(),
                     title: title.trim(),
                     description: description.trim() || null,
-                    status,
+                    status: "open",
                     location: location.trim() || undefined,
                     experience_min_years: expMin ? Number(expMin) : null,
                     experience_max_years: expMax ? Number(expMax) : null,
@@ -771,7 +756,7 @@ export default function JobsPage() {
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
                   <select className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" value={status} onChange={(e) => setStatus(e.target.value as JobStatus)}>
-                    <option value="draft">Draft</option><option value="open">Open</option><option value="on_hold">On Hold</option><option value="cancelled">Cancelled</option><option value="filled">Filled</option>
+                    <option value="open">Open</option><option value="on_hold">On Hold</option><option value="closed">Closed</option><option value="cancelled">Cancelled</option><option value="filled">Filled</option>
                   </select>
                 </div>
                 <div>

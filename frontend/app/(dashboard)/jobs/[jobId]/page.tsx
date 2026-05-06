@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
-import { getJobById, getJobSubmissions, updateJob } from "@/lib/api/jobs";
+import { getJobById, getJobSubmissions, updateJob, deleteJob } from "@/lib/api/jobs";
 import { getPipelines } from "@/lib/api/pipeline";
 import type { Job, JobSubmission, JobStatus, Pipeline } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
@@ -27,10 +27,11 @@ import {
   Layers,
   Briefcase,
   Edit3,
+  Trash2,
   MoreVertical,
   MapPin,
-  Banknote,
-  Clock
+  Clock,
+  Download
 } from "lucide-react";
 
 // ─── components ─────────────────────────────────────────────────────────────
@@ -45,14 +46,6 @@ function Badge({ children, className }: { children: React.ReactNode; className?:
 
 // ─── formatting helpers ─────────────────────────────────────────────────────
 
-const formatSalary = (amt: number | null, currency: string | null) => {
-  if (amt === null) return "Not specified";
-  if (currency === "INR" && amt >= 100000) {
-    const lakhs = amt / 100000;
-    return `₹${lakhs.toFixed(amt % 100000 === 0 ? 0 : 1)}L`;
-  }
-  return `${amt.toLocaleString()} ${currency || "USD"}`;
-};
 
 const formatDate = (d: string | null | undefined) => {
   if (!d) return "Not available";
@@ -62,7 +55,7 @@ const formatDate = (d: string | null | undefined) => {
 
 // ─── components ─────────────────────────────────────────────────────────────
 
-function ActionMenu({ onEdit }: { onEdit: () => void }) {
+function ActionMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -101,6 +94,13 @@ function ActionMenu({ onEdit }: { onEdit: () => void }) {
           >
             <Edit3 className="w-4 h-4" /> Edit Job
           </button>
+          <button 
+            onClick={() => { setOpen(false); onDelete(); }}
+            className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors flex items-center gap-2"
+            role="menuitem"
+          >
+            <Trash2 className="w-4 h-4" /> Delete Job
+          </button>
         </div>
       )}
     </div>
@@ -129,18 +129,31 @@ export default function JobDetailPage() {
   // Edit Job State
   const [showEdit, setShowEdit] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDeleteConfirm() {
+    if (!params.jobId) return;
+    try {
+      setDeleting(true);
+      await deleteJob(params.jobId);
+      router.push("/jobs");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Unable to delete job.");
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  }
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editLocation, setEditLocation] = useState("");
   const [editStatus, setEditStatus] = useState<JobStatus>("open");
   const [editRequiredSkills, setEditRequiredSkills] = useState("");
   const [editPreferredSkills, setEditPreferredSkills] = useState("");
-  const [editSalaryMin, setEditSalaryMin] = useState("");
-  const [editSalaryMax, setEditSalaryMax] = useState("");
-  const [editSalaryCurrency, setEditSalaryCurrency] = useState("USD");
   const [editExpMin, setEditExpMin] = useState("");
   const [editExpMax, setEditExpMax] = useState("");
   const [editEmploymentType, setEditEmploymentType] = useState("");
+  const [editKeyResponsibilities, setEditKeyResponsibilities] = useState("");
 
   function openEditPanel() {
     if (!job) return;
@@ -150,12 +163,10 @@ export default function JobDetailPage() {
     setEditStatus(job.status || "open");
     setEditRequiredSkills(job.required_skills?.join(", ") || "");
     setEditPreferredSkills(job.preferred_skills?.join(", ") || "");
-    setEditSalaryMin(job.salary_min?.toString() || "");
-    setEditSalaryMax(job.salary_max?.toString() || "");
-    setEditSalaryCurrency(job.salary_currency || "USD");
     setEditExpMin(job.experience_min_years?.toString() || "");
     setEditExpMax(job.experience_max_years?.toString() || "");
     setEditEmploymentType(job.employment_type || "");
+    setEditKeyResponsibilities(job.key_responsibilities?.join("\n") || "");
     setShowEdit(true);
   }
 
@@ -168,20 +179,19 @@ export default function JobDetailPage() {
       setUpdating(true);
       const req = editRequiredSkills.split(/[\n,]+/g).map((s) => s.trim()).filter(Boolean);
       const pref = editPreferredSkills.split(/[\n,]+/g).map((s) => s.trim()).filter(Boolean);
+      const keyResp = editKeyResponsibilities.split(/[\n]+/g).map((s) => s.trim()).filter(Boolean);
       
       await updateJob(params.jobId, {
         title: editTitle.trim(),
         description: editDescription.trim() || null, 
         status: editStatus,
         location: editLocation.trim() || null,
-        salary_min: editSalaryMin ? Number(editSalaryMin) : null,
-        salary_max: editSalaryMax ? Number(editSalaryMax) : null,
-        salary_currency: editSalaryCurrency,
         experience_min_years: editExpMin ? Number(editExpMin) : null,
         experience_max_years: editExpMax ? Number(editExpMax) : null,
         employment_type: editEmploymentType || null,
         required_skills: req.length ? req : null,
         preferred_skills: pref.length ? pref : null,
+        key_responsibilities: keyResp.length ? keyResp : null,
       });
       
       setShowEdit(false);
@@ -250,6 +260,27 @@ export default function JobDetailPage() {
     }
   };
 
+  const handleOpenJD = () => {
+    if (!job?.raw_jd_text) return;
+    const blob = new Blob([job.raw_jd_text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    // Revoke after a short delay to allow the browser to load it
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
+
+  const handleDownloadJD = () => {
+    if (!job?.raw_jd_text) return;
+    const safeName = (job.title || "job-description").replace(/[^a-z0-9]/gi, "_").toLowerCase();
+    const blob = new Blob([job.raw_jd_text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${safeName}_jd.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
@@ -282,7 +313,7 @@ export default function JobDetailPage() {
         <div className="max-w-md">
           <p className="text-gray-900 font-semibold mb-2">Something went wrong</p>
           <p className="text-gray-500 text-sm mb-6">{error}</p>
-          <Button onClick={loadData} variant="outline">Retry Loading</Button>
+          <Button onClick={loadData} variant="outline" className="px-3 py-1.5 text-sm">Retry Loading</Button>
         </div>
       </div>
     );
@@ -292,7 +323,6 @@ export default function JobDetailPage() {
 
   const statusColors: Record<string, string> = {
     open: "bg-emerald-50 text-emerald-700",
-    draft: "bg-gray-100 text-gray-600",
     on_hold: "bg-amber-50 text-amber-700",
     filled: "bg-blue-50 text-blue-700",
     closed: "bg-gray-100 text-gray-500",
@@ -331,7 +361,7 @@ export default function JobDetailPage() {
                 {job.title}
               </h1>
               <div className="flex items-center gap-2 hidden sm:flex">
-                <Badge className={`${statusColors[job.status] || statusColors.draft} border-none`}>
+                <Badge className={`${statusColors[job.status] || statusColors.open} border-none`}>
                   {job.status.replace("_", " ")}
                 </Badge>
                 {job.urgency && (
@@ -343,7 +373,7 @@ export default function JobDetailPage() {
             </div>
             {/* Mobile badges */}
             <div className="flex items-center gap-2 mt-2 sm:hidden">
-                <Badge className={`${statusColors[job.status] || statusColors.draft} border-none`}>
+                <Badge className={`${statusColors[job.status] || statusColors.open} border-none`}>
                   {job.status.replace("_", " ")}
                 </Badge>
                 {job.urgency && (
@@ -354,7 +384,7 @@ export default function JobDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-3 ml-4">
-            <ActionMenu onEdit={openEditPanel} />
+            <ActionMenu onEdit={openEditPanel} onDelete={() => setShowDeleteConfirm(true)} />
           </div>
         </div>
       </div>
@@ -391,7 +421,7 @@ export default function JobDetailPage() {
               <div className="animate-in fade-in duration-300 space-y-6">
                 <div className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm">
                    <h2 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
-                     <FileText className="w-5 h-5 text-indigo-500" /> Job Description
+                     <FileText className="w-5 h-5 text-indigo-500" /> About This Role
                    </h2>
                    {job.description ? (
                      <div className="text-[15px] text-gray-700 leading-relaxed whitespace-pre-wrap font-medium">
@@ -399,6 +429,19 @@ export default function JobDetailPage() {
                      </div>
                    ) : (
                      <p className="italic text-gray-400 text-sm">No description provided.</p>
+                   )}
+                   
+                   {job.key_responsibilities && job.key_responsibilities.length > 0 && (
+                     <div className="mt-8 pt-6 border-t border-gray-100">
+                       <h3 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2">
+                         <Target className="w-5 h-5 text-indigo-500" /> Key Responsibilities
+                       </h3>
+                       <ul className="list-disc pl-5 space-y-2 text-[14px] text-gray-700">
+                         {job.key_responsibilities.map((resp, i) => (
+                           <li key={i} className="leading-relaxed">{resp}</li>
+                         ))}
+                       </ul>
+                     </div>
                    )}
                    
                    <div className="mt-8 pt-6 border-t border-gray-100 flex items-center gap-4">
@@ -422,10 +465,6 @@ export default function JobDetailPage() {
                     <div className="flex justify-between items-center pb-3 border-b border-gray-100">
                       <span className="text-sm text-gray-500 flex items-center gap-2"><Briefcase className="w-4 h-4" /> Employment Type</span>
                       <span className="text-sm font-semibold text-gray-900 capitalize">{job.employment_type?.replace('_', ' ') || "Not specified"}</span>
-                    </div>
-                    <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-                      <span className="text-sm text-gray-500 flex items-center gap-2"><Banknote className="w-4 h-4" /> Salary</span>
-                      <span className="text-sm font-semibold text-gray-900">{formatSalary(job.salary_min ?? null, job.salary_currency ?? null)} {job.salary_max ? `- ${formatSalary(job.salary_max ?? null, job.salary_currency ?? null)}` : ''}</span>
                     </div>
                     <div className="flex justify-between items-center pb-3 border-b border-gray-100">
                       <span className="text-sm text-gray-500 flex items-center gap-2"><Clock className="w-4 h-4" /> Experience</span>
@@ -461,10 +500,20 @@ export default function JobDetailPage() {
                     <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                        <FileText className="w-5 h-5 text-indigo-500" /> Raw Job Description
                     </h2>
-                    <Button variant="outline" onClick={handleCopyJD} className="text-xs font-medium border-gray-300 text-gray-700 h-8 gap-2 hover:bg-gray-50">
-                      <Clipboard className="w-3.5 h-3.5" />
-                      Copy Text
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="outline" onClick={handleCopyJD} className="text-xs font-medium border-gray-300 text-gray-700 h-8 gap-2 px-3 py-1.5 hover:bg-gray-50" disabled={!job.raw_jd_text}>
+                        <Clipboard className="w-3.5 h-3.5" />
+                        Copy Text
+                      </Button>
+                      <Button variant="outline" onClick={handleOpenJD} className="text-xs font-medium border-gray-300 text-gray-700 h-8 gap-2 px-3 py-1.5 hover:bg-gray-50" disabled={!job.raw_jd_text}>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        Open JD
+                      </Button>
+                      <Button variant="outline" onClick={handleDownloadJD} className="text-xs font-medium border-indigo-200 text-indigo-600 h-8 gap-2 px-3 py-1.5 hover:bg-indigo-50" disabled={!job.raw_jd_text}>
+                        <Download className="w-3.5 h-3.5" />
+                        Download JD
+                      </Button>
+                    </div>
                   </div>
                   <div className="bg-gray-50 rounded-lg p-6 border border-gray-100">
                     {job.raw_jd_text ? (
@@ -567,6 +616,16 @@ export default function JobDetailPage() {
                 </div>
 
                 <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Key Responsibilities (newline separated)</label>
+                  <textarea 
+                    className="w-full h-32 rounded-md border border-slate-200 p-2 text-sm resize-none focus:ring-2 focus:ring-indigo-400 focus:outline-none" 
+                    placeholder="List key responsibilities..."
+                    value={editKeyResponsibilities} 
+                    onChange={(e) => setEditKeyResponsibilities(e.target.value)} 
+                  />
+                </div>
+
+                <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Location</label>
                   <Input placeholder="e.g. Remote, San Francisco" value={editLocation} onChange={(e) => setEditLocation(e.target.value)} />
                 </div>
@@ -582,20 +641,6 @@ export default function JobDetailPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-2">
-                  <label className="block text-xs font-medium text-slate-500">Salary Range</label>
-                  <div className="flex gap-2">
-                    <Input className="flex-1" type="number" placeholder="Min" value={editSalaryMin} onChange={(e) => setEditSalaryMin(e.target.value)} />
-                    <Input className="flex-1" type="number" placeholder="Max" value={editSalaryMax} onChange={(e) => setEditSalaryMax(e.target.value)} />
-                    <select 
-                      className="rounded-md border border-slate-200 px-2 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none" 
-                      value={editSalaryCurrency} 
-                      onChange={(e) => setEditSalaryCurrency(e.target.value)}
-                    >
-                      <option>USD</option><option>INR</option><option>EUR</option>
-                    </select>
-                  </div>
-                </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -605,7 +650,6 @@ export default function JobDetailPage() {
                       value={editStatus} 
                       onChange={(e) => setEditStatus(e.target.value as JobStatus)}
                     >
-                      <option value="draft">Draft</option>
                       <option value="open">Open</option>
                       <option value="on_hold">On Hold</option>
                       <option value="cancelled">Cancelled</option>
@@ -660,6 +704,28 @@ export default function JobDetailPage() {
               >
                 {updating ? "Saving..." : "Save Changes"}
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirmation Modal ─────────────────────────────────── */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6">
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Delete Job</h3>
+              <p className="text-sm text-gray-500 mb-6">
+                Are you sure you want to permanently delete this job? This action cannot be undone and will remove all associated data.
+              </p>
+              <div className="flex items-center justify-end gap-3">
+                <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
+                  Cancel
+                </Button>
+                <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={handleDeleteConfirm} disabled={deleting}>
+                  {deleting ? "Deleting..." : "Delete Permanently"}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

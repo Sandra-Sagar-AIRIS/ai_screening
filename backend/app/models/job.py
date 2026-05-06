@@ -47,6 +47,8 @@ class Job(Base):
     parsing_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
     parsing_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     
+    key_responsibilities: Mapped[list[str] | None] = mapped_column(sa.dialects.postgresql.ARRAY(String), nullable=True)
+    
     filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),

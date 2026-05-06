@@ -445,7 +445,8 @@ Return ONLY valid JSON with these exact fields:
   "urgency": "normal" | "high" | "critical",
   "description": string,
   "required_skills": [array of strings],
-  "preferred_skills": [array of strings]
+  "preferred_skills": [array of strings],
+  "key_responsibilities": [array of strings]
 }}
 No explanation. Only JSON.
 
@@ -538,13 +539,9 @@ async def parse_job_description(
             detail=f"Groq request failed: {exc}",
         ) from exc
 
-    # ── Return normalized payload with schema-safe defaults ────────────────────
-    payload: dict[str, object] = {k: parsed.get(k) for k in JobParseResponse.model_fields}
-    payload["salary_currency"] = payload.get("salary_currency") or "USD"
-    payload["urgency"] = payload.get("urgency") or "normal"
-    payload["required_skills"] = payload.get("required_skills") or []
-    payload["preferred_skills"] = payload.get("preferred_skills") or []
-    return JobParseResponse.model_validate(payload)
+    # ── Return only known fields (ignore any extra keys Groq may add) ────────
+    known_fields = {k: parsed.get(k) for k in JobParseResponse.model_fields if k != "raw_jd_text"}
+    return JobParseResponse(**known_fields, raw_jd_text=text or None)
 
 
 @router.get("/{job_id}", response_model=JobResponse)

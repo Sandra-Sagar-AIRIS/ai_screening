@@ -7,6 +7,7 @@ import { ApiError } from "@/lib/api/client";
 import { getVendorJobs } from "@/lib/api/vendor";
 import type { Job, JobStatus } from "@/lib/api/types";
 import { JobCard } from "@/components/vendor/job-card";
+import { useAuthStore } from "@/store/auth-store";
 
 const PAGE_SIZE = 10;
 
@@ -16,8 +17,17 @@ export default function VendorJobsPage() {
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const role = useAuthStore((state) => state.role);
+  const permissions = useAuthStore((state) => state.permissions);
+  const canReadVendorJobs = role === "vendor" && permissions.includes("jobs:read_limited");
 
   useEffect(() => {
+    if (!canReadVendorJobs) {
+      setJobs([]);
+      setError("You do not have permission to view vendor jobs.");
+      return;
+    }
+
     async function load() {
       setLoading(true);
       setError(null);
@@ -35,7 +45,7 @@ export default function VendorJobsPage() {
       }
     }
     void load();
-  }, [offset, status]);
+  }, [canReadVendorJobs, offset, status]);
 
   return (
     <section className="space-y-4">
@@ -55,7 +65,6 @@ export default function VendorJobsPage() {
             }}
           >
             <option value="">All</option>
-            <option value="draft">Draft</option>
             <option value="open">Open</option>
             <option value="closed">Closed</option>
             <option value="filled">Filled</option>

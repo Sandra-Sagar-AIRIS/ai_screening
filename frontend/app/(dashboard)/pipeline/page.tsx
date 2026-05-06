@@ -63,27 +63,26 @@ function CandidateCard({
   isMoving?: boolean;
 }) {
   return (
-    <div
-      className={`rounded-xl bg-white p-4 text-sm shadow-sm transition duration-200 ${
-        isMoving ? "opacity-70" : "hover:scale-[1.02] hover:shadow-md"
-      } w-full max-w-[240px] cursor-grab active:cursor-grabbing hover:ring-1 hover:ring-slate-200`}
-    >
-      <Link href={`/candidates/${pipeline.candidate_id}`} className="block">
-        <div className="mb-2.5 flex items-center gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-medium text-slate-600">
-            {candidate ? `${candidate.first_name.charAt(0)}${candidate.last_name.charAt(0)}` : "?"}
+    <div className={`relative group transition-transform duration-300 w-full max-w-[240px] cursor-grab active:cursor-grabbing ${isMoving ? 'opacity-70' : 'hover:-translate-y-1.5'}`}>
+      <div className={`absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 opacity-0 blur transition duration-300 ${!isMoving ? 'group-hover:opacity-30' : ''}`}></div>
+      <div className="relative rounded-xl bg-white p-4 text-sm border border-slate-200 shadow-sm transition-colors duration-300 group-hover:border-indigo-200/50 h-full">
+        <Link href={`/candidates/${pipeline.candidate_id}`} className="block">
+          <div className="mb-2.5 flex items-center gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-medium text-slate-600 transition-colors duration-300 group-hover:bg-indigo-50 group-hover:text-indigo-600">
+              {candidate ? `${candidate.first_name.charAt(0)}${candidate.last_name.charAt(0)}` : "?"}
+            </div>
+            <p className="text-sm font-medium leading-tight text-slate-900 group-hover:text-indigo-900 transition-colors duration-300">
+              {candidate ? `${candidate.first_name} ${candidate.last_name}` : "Unknown candidate"}
+            </p>
           </div>
-          <p className="text-sm font-medium leading-tight text-slate-900">
-            {candidate ? `${candidate.first_name} ${candidate.last_name}` : "Unknown candidate"}
+          <p className="text-sm leading-snug text-slate-500">{candidate?.role ?? "Role not specified"}</p>
+          <p className="mt-1.5 text-xs text-slate-400">
+            Experience:{" "}
+            {candidate?.years_experience !== null && candidate?.years_experience !== undefined ? `${candidate.years_experience}y` : "-"}
           </p>
-        </div>
-        <p className="text-sm leading-snug text-slate-500">{candidate?.role ?? "Role not specified"}</p>
-        <p className="mt-1.5 text-xs text-slate-400">
-          Experience:{" "}
-          {candidate?.years_experience !== null && candidate?.years_experience !== undefined ? `${candidate.years_experience}y` : "-"}
-        </p>
-      </Link>
-      {isMoving ? <p className="mt-1 text-xs text-blue-600">Updating stage...</p> : null}
+        </Link>
+        {isMoving ? <p className="mt-2 text-xs text-blue-600">Updating stage...</p> : null}
+      </div>
     </div>
   );
 }
@@ -142,13 +141,15 @@ function StageColumn({
   const isDraggingAny = Boolean(activePipelineId);
 
   return (
-    <div
-      ref={setNodeRef}
-      className={`min-h-[420px] min-w-[280px] rounded-xl bg-white/70 p-3 shadow-sm ring-1 ring-slate-200/70 transition duration-200 ${
-        isDropTarget ? "bg-blue-50/90 ring-blue-200 shadow-md" : "hover:bg-slate-100/40"
-      }`}
-    >
-      <div className="rounded-xl bg-slate-50 p-3">
+    <div className="relative group transition-transform duration-300 hover:-translate-y-1.5 cursor-default">
+      <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 opacity-0 blur transition duration-300 group-hover:opacity-30"></div>
+      <div
+        ref={setNodeRef}
+        className={`relative flex flex-col min-h-[420px] min-w-[280px] rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 ${
+          isDropTarget ? "bg-blue-50/90 ring-blue-200 shadow-md" : "group-hover:ring-indigo-200/50"
+        }`}
+      >
+        <div className="flex-1 rounded-xl bg-slate-50 p-3">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-white/80 backdrop-blur">
           <div className="flex min-w-0 items-center gap-2.5">
             <span className={`h-2 w-2 shrink-0 rounded-full ${STAGE_ACCENT[stage]}`} />
@@ -168,6 +169,7 @@ function StageColumn({
           {children}
         </div>
       </div>
+    </div>
     </div>
   );
 }

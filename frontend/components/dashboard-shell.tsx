@@ -88,40 +88,51 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     router.push("/login");
   }
 
-  const rule = navAccessRuleForPathname(pathname);
-  const accessReady = permissions.length > 0 || isAdminRole(role) || !rule;
-  const pageAllowed = canAccessPathname(pathname, role, permissions);
+  function canAccessPage() {
+    if (pathname.startsWith("/candidates")) {
+      return permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
+    }
+    if (pathname.startsWith("/jobs")) {
+      return permissions.includes("jobs:read");
+    }
+    if (pathname.startsWith("/vendor/jobs")) {
+      return role === "vendor" && permissions.includes("jobs:read_limited");
+    }
+    if (pathname.startsWith("/pipeline")) {
+      return permissions.includes("pipeline:read");
+    }
+    if (pathname.startsWith("/invite")) {
+      return role === "admin" || permissions.includes("users:invite");
+    }
+    if (pathname.startsWith("/users")) {
+      return role === "admin" || permissions.includes("users:invite");
+    }
+    if (pathname.startsWith("/roles")) {
+      return role === "admin";
+    }
+    return true;
+  }
 
-  function renderNav() {
-    return (
-      <>
-        <nav className="space-y-1">
-          {filteredMenu.map((item) => {
-            const active =
-              item.path === "/"
-                ? pathname === "/"
-                : pathname === item.path || pathname.startsWith(`${item.path}/`);
-            return (
-              <Link
-                key={item.path}
-                className={cn(
-                  "block rounded-md px-3 py-2 text-sm transition-colors",
-                  active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
-                )}
-                href={item.path}
-              >
-                {item.name}
-              </Link>
-            );
-          })}
-        </nav>
-        {permissions.length === 0 ? (
-          <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
-            No assigned permissions found. Contact your admin to request access.
-          </p>
-        ) : null}
-      </>
-    );
+  function canAccessNavItem(href: string) {
+    if (href === "/vendor/jobs") {
+      return role === "vendor" && permissions.includes("jobs:read_limited");
+    }
+    if (href === "/candidates") {
+      return permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
+    }
+    if (href === "/jobs") {
+      return permissions.includes("jobs:read");
+    }
+    if (href === "/pipeline") {
+      return permissions.includes("pipeline:read");
+    }
+    if (href === "/invite" || href === "/users") {
+      return role === "admin" || permissions.includes("users:invite");
+    }
+    if (href === "/roles") {
+      return role === "admin";
+    }
+    return true;
   }
 
   return (
@@ -155,8 +166,26 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </div>
       ) : null}
       <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 py-6 md:grid-cols-[220px_1fr]">
-        <aside className="hidden h-fit rounded-lg border border-slate-200 bg-white p-2 md:block">
-          {renderNav()}
+        <aside className="rounded-lg border border-slate-200 bg-white p-2 h-fit">
+          <nav className="space-y-1">
+            {navItems.filter((item) => canAccessNavItem(item.href)).map((item) => (
+              <Link
+                key={item.href}
+                className={cn(
+                  "block rounded-md px-3 py-2 text-sm transition-colors",
+                  pathname === item.href ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+                )}
+                href={item.href}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+          {permissions.length === 0 ? (
+            <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              No assigned permissions found. Contact your admin to request access.
+            </p>
+          ) : null}
         </aside>
         <main className="min-w-0">
           {!accessReady ? (
