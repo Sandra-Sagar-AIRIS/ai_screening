@@ -11,6 +11,7 @@ const ORG_ID_KEY = "airis_organization_id";
 const PERMISSIONS_KEY = "airis_permissions";
 
 type AuthState = {
+  hydrated: boolean;
   token: string | null;
   role: UserRole | null;
   userType: UserType | null;
@@ -30,6 +31,7 @@ type AuthState = {
 };
 
 export const useAuthStore = create<AuthState>((set) => ({
+  hydrated: false,
   token: null,
   role: null,
   userType: null,
@@ -65,7 +67,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     const organizationId = window.localStorage.getItem(ORG_ID_KEY);
     const rawPermissions = window.localStorage.getItem(PERMISSIONS_KEY);
     const permissions = rawPermissions ? (JSON.parse(rawPermissions) as Permission[]) : [];
-    set({ token, role, userType, organizationId, permissions });
+    set({ token, role, userType, organizationId, permissions, hydrated: true });
   },
   refreshPermissions: async () => {
     if (typeof window === "undefined") {

@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Base document styles (plain CSS so body always gets a background even if @apply resolution fails). */
 body {
-  @apply bg-background text-foreground antialiased;
+  background-color: #f8fafc;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }

@@ -29,7 +29,7 @@ class Job(Base):
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="draft")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="open")
 
     # Optional fields for Phase 1 job spec.
     # Kept nullable so existing `JobService.create_job()` continues to work.

@@ -1,14 +1,12 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { PasswordField } from "@/components/auth/password-field";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api/client";
 import { acceptInvite } from "@/lib/api/invites";
-
-import { Suspense } from "react";
 
 function AcceptInviteForm() {
   const router = useRouter();

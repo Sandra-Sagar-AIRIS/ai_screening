@@ -21,7 +21,7 @@ export function JobCard({ job }: JobCardProps) {
           <p className="text-sm text-slate-600">Created: {new Date(job.created_at).toLocaleDateString()}</p>
         </div>
         <Link href={`/vendor/jobs/${job.id}/submit`}>
-          <Button size="sm">Submit Candidate</Button>
+          <Button className="h-8 px-3 text-xs">Submit Candidate</Button>
         </Link>
       </div>
     </article>

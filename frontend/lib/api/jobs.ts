@@ -1,5 +1,5 @@
 import { apiRequest, ApiError, API_BASE_URL } from "@/lib/api/client";
-import type { Job, JobStatus, JobSubmission, JobSubmissionStatus, JobMatchesResponse } from "@/lib/api/types";
+import type { Job, JobMetrics, JobStatus, JobSubmission, JobSubmissionStatus, JobMatchesResponse } from "@/lib/api/types";
 
 export type JobParseResult = {
   title: string | null;
@@ -75,11 +75,11 @@ export async function submitCandidateToJob(
   candidateId: string,
   notes?: string
 ) {
-  // POST /api/v1/applications is the canonical endpoint for candidate-job linking.
-  // Sending notes via the applications schema is not supported; it uses candidate_id + job_id only.
-  return apiRequest("/applications", {
+  // Canonical endpoint that creates BOTH the job submission AND an initial pipeline card.
+  // Backend schema: POST /jobs/{job_id}/submit { candidate_id, notes? }
+  return apiRequest(`/jobs/${jobId}/submit`, {
     method: "POST",
-    body: JSON.stringify({ candidate_id: candidateId, job_id: jobId }),
+    body: JSON.stringify({ candidate_id: candidateId, notes: notes ?? null }),
   });
 }
 
@@ -158,4 +158,8 @@ export async function updateJobSubmissionStatus(jobId: string, submissionId: str
     method: "PATCH",
     body: JSON.stringify({ status }),
   });
+}
+
+export async function getJobsMetrics() {
+  return apiRequest<JobMetrics[]>("/jobs/metrics");
 }

@@ -52,9 +52,10 @@ def _require_admin_or_invite(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CurrentUser:
     """List roles for user-assignment UI (admins + users with users:invite)."""
-    if current_user.role == "admin":
+    role_key = (current_user.role or "").strip().lower()
+    if role_key == "admin":
         return current_user
-    if (current_user.role or "").strip().lower() == "vendor":
+    if role_key == "vendor":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden.")
     permissions = get_user_permissions(db, current_user.organization_id, current_user.role, user_id=current_user.user_id)
     if USERS_INVITE in permissions:

@@ -1,4 +1,4 @@
-import { apiRequest } from "@/lib/api/client";
+import { ApiError, apiRequest } from "@/lib/api/client";
 import { CANDIDATES_BULK_STAGE_PATH } from "@/lib/api/candidateManagementPaths";
 import type { Candidate } from "@/lib/api/types";
 
@@ -368,15 +368,22 @@ export async function addCandidateInteraction(candidateId: string, payload: Cand
 }
 
 export async function getCandidateInteractions(candidateId: string, limit = 50, offset = 0) {
-  const response = await apiRequest<CandidateManagementEnvelope<CandidateInteraction[]>>(
-    `/candidate-management/candidates/${candidateId}/interactions?limit=${limit}&offset=${offset}`,
-    {
-      headers: {
-        ...getWorkspaceHeader(),
-      },
+  try {
+    const response = await apiRequest<CandidateManagementEnvelope<CandidateInteraction[]>>(
+      `/candidate-management/candidates/${candidateId}/interactions?limit=${limit}&offset=${offset}`,
+      {
+        headers: {
+          ...getWorkspaceHeader(),
+        },
+      }
+    );
+    return response.data;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return [];
     }
-  );
-  return response.data;
+    throw error;
+  }
 }
 
 export async function createBulkUploadJob(payload: BulkUploadRequestPayload) {

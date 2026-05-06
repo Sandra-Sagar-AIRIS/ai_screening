@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { login } from "@/lib/api/auth";
@@ -10,8 +10,6 @@ import { AuthShell } from "@/components/auth/auth-shell";
 import { PasswordField } from "@/components/auth/password-field";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-
-import { Suspense } from "react";
 
 function LoginForm() {
   const router = useRouter();

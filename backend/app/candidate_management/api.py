@@ -454,7 +454,11 @@ def get_candidate(
         # Use robust normalization to prevent validation errors on detail view
         safe_data = service._normalize_candidate(candidate)
         return _success(CandidateResponse.model_validate(safe_data))
-    except HTTPException:
+    except HTTPException as exc:
+        # Candidate detail can be served from legacy candidate storage while candidate-management
+        # timeline data is absent. Treat "not found" as empty timeline to keep the UI functional.
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            return _success([])
         raise
     except Exception as e:
         logger.error(f"FATAL: Internal error in get_candidate for {candidate_id}: {str(e)}")
@@ -679,6 +683,8 @@ def list_interactions(
         # Use robust normalization for each interaction
         safe_interactions = [service._normalize_interaction(item) for item in interactions]
         return _success([InteractionResponse.model_validate(item) for item in safe_interactions])
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"FATAL: Internal error in list_interactions for {candidate_id}: {str(e)}")
         logger.error(traceback.format_exc())

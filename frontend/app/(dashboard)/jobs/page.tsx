@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { createJob, getJobs, updateJob, deleteJob, parseJD, type JobParseResult } from "@/lib/api/jobs";
 import { JOBS_CREATE_PERMISSION, hasPermission } from "@/lib/rbac";
+import { isAdminRole } from "@/lib/dashboard-nav";
 import type { Job, JobStatus } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
@@ -209,7 +210,7 @@ function JDInputModal({
         {error && (
           <div className="mt-4 flex items-center justify-between bg-red-50 p-3 rounded-md border border-red-200">
             <p className="text-sm text-red-600">{error}</p>
-            <Button variant="outline" size="sm" onClick={handleParse} className="text-red-700 border-red-200 hover:bg-red-100">
+            <Button variant="outline" onClick={handleParse} className="text-red-700 border-red-200 hover:bg-red-100">
               Retry
             </Button>
           </div>
@@ -264,7 +265,7 @@ function JDPreviewModal({
         client_id: clientId,
         title: title.trim(),
         description: description.trim() || null,
-        status: "draft",
+        status: "open",
         location: location.trim() || undefined,
         salary_min: salaryMin ? Number(salaryMin) : null,
         salary_max: salaryMax ? Number(salaryMax) : null,
@@ -403,6 +404,8 @@ export default function JobsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "draft" | "closed">("all");
   const permissions = useAuthStore((state) => state.permissions);
+  const role = useAuthStore((state) => state.role);
+  const canCreateJobs = hasPermission(permissions, JOBS_CREATE_PERMISSION) || isAdminRole(role);
 
   // regular create form
   const [creating, setCreating] = useState(false);
@@ -411,7 +414,7 @@ export default function JobsPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
-  const [status, setStatus] = useState<JobStatus>("draft");
+  const [status, setStatus] = useState<JobStatus>("open");
   const [requiredSkills, setRequiredSkills] = useState("");
   const [preferredSkills, setPreferredSkills] = useState("");
   const [salaryMin, setSalaryMin] = useState("");
@@ -446,7 +449,13 @@ export default function JobsPage() {
     }
   }
 
-  useEffect(() => { refreshJobs(); }, []);
+  useEffect(() => {
+    void refreshJobs();
+    const interval = window.setInterval(() => {
+      void refreshJobs();
+    }, 30000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   function handleImportClick() {
     // Ask for client ID before opening the JD input modal
@@ -457,7 +466,7 @@ export default function JobsPage() {
     setTitle(""); setDescription(""); setLocation(""); setClientId("");
     setRequiredSkills(""); setPreferredSkills(""); setSalaryMin(""); setSalaryMax("");
     setExpMin(""); setExpMax(""); setEmploymentType("");
-    setStatus("draft");
+    setStatus("open");
   }
 
   function openEdit(job: Job) {
@@ -465,7 +474,7 @@ export default function JobsPage() {
     setDescription(job.description || "");
     setLocation(job.location || "");
     setClientId(job.client_id || "");
-    setStatus(job.status || "draft");
+    setStatus(job.status || "open");
     setRequiredSkills(job.required_skills?.join(", ") || "");
     setPreferredSkills(job.preferred_skills?.join(", ") || "");
     setSalaryMin(job.salary_min?.toString() || "");
@@ -503,7 +512,11 @@ export default function JobsPage() {
     <section className="relative space-y-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Jobs</h1>
-        {hasPermission(permissions, JOBS_CREATE_PERMISSION) ? (
+        <div className="flex items-center gap-2">
+          <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => void refreshJobs()}>
+            Refresh
+          </Button>
+        {canCreateJobs ? (
           <div className="flex gap-2">
             <Button variant="outline" onClick={handleImportClick}>
               ✨ Import from JD
@@ -513,6 +526,7 @@ export default function JobsPage() {
             </Button>
           </div>
         ) : null}
+        </div>
       </div>
 
       {error && !showCreate ? <p className="text-sm text-red-600">{error}</p> : null}

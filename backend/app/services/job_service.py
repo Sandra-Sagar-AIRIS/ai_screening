@@ -468,7 +468,8 @@ class JobService:
         )
         self.db.add(submission)
         try:
-            self.db.commit()
+            # Flush so we can create the pipeline in the same transaction.
+            self.db.flush()
         except IntegrityError:
             self.db.rollback()
             existing = self.db.scalar(
@@ -488,8 +489,6 @@ class JobService:
                 )
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="DUPLICATE_SUBMISSION")
 
-        self.db.refresh(submission)
-
         # Create initial pipeline card (Phase 1 integration).
         from app.schemas.pipeline import PipelineCreate, PipelineStage, PipelineStatus
 
@@ -503,9 +502,13 @@ class JobService:
                 status=PipelineStatus.ACTIVE,
                 notes=payload.notes,
             ),
+            commit=False,
         )
 
         try:
+            # Commit both JobSubmission and Pipeline together.
+            self.db.commit()
+            self.db.refresh(submission)
             res = JobSubmissionResponse.model_validate(submission)
             logger.info(f"SUBMIT_SUCCESS: Submission {submission.id} created")
             return res

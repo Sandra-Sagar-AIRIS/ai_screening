@@ -19,30 +19,38 @@ function toErrorMessage(detail: unknown, status: number): string {
     return detail;
   }
   if (typeof detail === "object") {
-    if ("detail" in detail) {
-      const raw = (detail as { detail: unknown }).detail;
-      if (typeof raw === "string") {
-        return raw;
-      }
-      if (raw && typeof raw === "object") {
-        if ("error" in raw) {
-          return String((raw as { error: unknown }).error);
-        }
-        try {
-          return JSON.stringify(raw);
-        } catch {
-          return "Request failed";
-        }
-      }
-      return String(raw);
+    const record = detail as { detail?: unknown; message?: unknown };
+    if (typeof record.detail === "string") {
+      return record.detail;
     }
-    try {
-      return JSON.stringify(detail);
-    } catch {
-      return `Request failed with status ${status}`;
+    if (Array.isArray(record.detail) && record.detail.length > 0) {
+      const first = record.detail[0] as { msg?: unknown };
+      if (typeof first?.msg === "string") {
+        return first.msg;
+      }
+    }
+    if (typeof record.message === "string") {
+      return record.message;
     }
   }
   return `Request failed with status ${status}`;
+}
+
+/** Maps HTTP status to short, user-facing copy (403/401-aware). */
+export function formatApiErrorForUser(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 403) {
+      return "You don't have permission to perform this action.";
+    }
+    if (err.status === 401) {
+      return "Your session expired. Please sign in again.";
+    }
+    return err.message;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return "Something went wrong. Please try again.";
 }
 
 type RequestOptions = RequestInit & {
@@ -54,6 +62,21 @@ function getAuthToken() {
     return null;
   }
   return window.localStorage.getItem("airis_access_token");
+}
+
+function shouldSuppressApiErrorLog(path: string, status: number): boolean {
+  // Legacy candidates can exist without candidate-management timeline rows.
+  if (
+    status === 404 &&
+    /^\/candidate-management\/candidates\/[^/]+\/interactions(?:\?|$)/.test(path)
+  ) {
+    return true;
+  }
+  // Candidate is already submitted to this job (idempotent UX flow).
+  if (status === 409 && /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path)) {
+    return true;
+  }
+  return false;
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -70,6 +93,14 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   });
 
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem("airis_access_token");
+      } catch {
+        /* ignore */
+      }
+      window.location.assign("/login");
+    }
     let detail: unknown = null;
     try {
       detail = await response.json();
@@ -78,7 +109,8 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     }
     const message = toErrorMessage(detail, response.status);
     const expectedCandidateConflict =
-      response.status === 409 && path.includes("/candidate-management/candidates");
+      response.status === 409 &&
+      (path.includes("/candidate-management/candidates") || /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path));
 
     if (expectedCandidateConflict) {
       // Expected domain conflict; avoid noisy dev overlay.

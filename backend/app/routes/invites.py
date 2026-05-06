@@ -43,9 +43,10 @@ def _require_invite_access(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CurrentUser:
-    if current_user.role == "admin":
+    role_key = (current_user.role or "").strip().lower()
+    if role_key == "admin":
         return current_user
-    if current_user.role == "vendor":
+    if role_key == "vendor":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: vendor cannot manage users/roles.")
 
     permissions = get_user_permissions(db, current_user.organization_id, current_user.role, user_id=current_user.user_id)
@@ -191,7 +192,7 @@ def resend_invite(
             ) from None
         db.refresh(invite)
 
-    print(f"[RESEND] Sending invite email to {invite.email}")
+    logger.info("Resending invite email", extra={"email": invite.email, "invite_id": str(invite.id)})
     send_invite_email(invite.email, invite.token)
 
     return InviteResendResponse(message="Invite resent successfully.")
