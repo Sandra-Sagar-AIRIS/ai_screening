@@ -21,4 +21,5 @@ class Base(DeclarativeBase):
 
 # Ensure Invite model is imported so metadata registration is explicit.
 from app.models.invite import Invite  # noqa: E402,F401
+from app.models.auth_session import AuthSession  # noqa: E402,F401
 

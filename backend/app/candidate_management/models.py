@@ -80,6 +80,21 @@ class BulkUploadItemStatus(str, enum.Enum):
     SKIPPED_DUPLICATE = "skipped_duplicate"
 
 
+class CandidateParseStatus(str, enum.Enum):
+    """Lifecycle of resume parsing for a candidate.
+
+    `pending`     - row exists, parser hasn't run yet.
+    `processing`  - parser running (set immediately before invocation).
+    `completed`   - parser succeeded; structured fields populated.
+    `failed`      - parser raised; `parse_error` holds the message.
+    """
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class Candidate(Base):
     __tablename__ = "candidates"
     __table_args__ = (
@@ -134,6 +149,16 @@ class Candidate(Base):
     ai_parse_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     parse_confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
     parsed_resume_data: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    # ATS resume-parsing lifecycle (separate from AI confidence).
+    parse_status: Mapped[CandidateParseStatus] = mapped_column(
+        sa.String(20),
+        nullable=False,
+        default=CandidateParseStatus.PENDING,
+        server_default=CandidateParseStatus.PENDING.value,
+    )
+    parse_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     merged_into_candidate_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),

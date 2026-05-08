@@ -1,4 +1,4 @@
-import { ApiError, apiRequest } from "@/lib/api/client";
+import { API_BASE_URL, ApiError, apiRequest } from "@/lib/api/client";
 import { CANDIDATES_BULK_STAGE_PATH } from "@/lib/api/candidateManagementPaths";
 import type { Candidate } from "@/lib/api/types";
 
@@ -209,25 +209,28 @@ export async function getCandidates(
     job_id?: string;
   }
 ) {
-  if (shouldUseCandidateManagementApi()) {
-    const params = new URLSearchParams({
-      limit: String(limit),
-      offset: String(offset),
-    });
-    if (filters?.query) params.set("query", filters.query);
-    if (filters?.location) params.set("location", filters.location);
-    if (filters?.min_years_experience !== undefined) {
-      params.set("min_years_experience", String(filters.min_years_experience));
-    }
-    if (filters?.max_years_experience !== undefined) {
-      params.set("max_years_experience", String(filters.max_years_experience));
-    }
-    if (filters?.status) {
-      params.set("status", filters.status);
-    }
-    if (filters?.stage) params.set("stage", filters.stage);
-    if (filters?.source) params.set("source", filters.source);
-    if (filters?.job_id) params.set("job_id", filters.job_id);
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (filters?.query) params.set("query", filters.query);
+  if (filters?.location) params.set("location", filters.location);
+  if (filters?.min_years_experience !== undefined) {
+    params.set("min_years_experience", String(filters.min_years_experience));
+  }
+  if (filters?.max_years_experience !== undefined) {
+    params.set("max_years_experience", String(filters.max_years_experience));
+  }
+  if (filters?.status) {
+    params.set("status", filters.status);
+  }
+  if (filters?.stage) params.set("stage", filters.stage);
+  if (filters?.source) params.set("source", filters.source);
+  if (filters?.job_id) params.set("job_id", filters.job_id);
+
+  // Mixed deployments can have newly-created candidates only in candidate-management.
+  // Prefer candidate-management list and gracefully fall back to legacy API.
+  try {
     const response = await apiRequest<CandidateManagementEnvelope<CandidateManagementListData>>(
       `/candidate-management/candidates?${params.toString()}`,
       {
@@ -237,6 +240,10 @@ export async function getCandidates(
       }
     );
     return response.data.candidates.map(mapCandidateManagementCandidate);
+  } catch {
+    if (shouldUseCandidateManagementApi()) {
+      throw new Error("Unable to load candidates from candidate-management API.");
+    }
   }
   const legacy = await apiRequest<Candidate[]>(`/candidates?limit=${limit}&offset=${offset}`);
   return legacy.map(mapLegacyCandidate);
@@ -254,12 +261,62 @@ export async function getCandidateById(candidateId: string) {
     );
     return mapCandidateManagementCandidate(response.data);
   }
+  // Mixed deployments may list candidate-management IDs that don't exist in legacy.
+  // Try candidate-management detail first without noisy API error logging.
+  try {
+    const token = typeof window !== "undefined" ? window.localStorage.getItem("airis_access_token") : null;
+    const response = await fetch(`${API_BASE_URL}/candidate-management/candidates/${candidateId}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...getWorkspaceHeader(),
+      },
+    });
+    if (response.ok) {
+      const cm = (await response.json()) as CandidateManagementEnvelope<CandidateManagementCandidate>;
+      return mapCandidateManagementCandidate(cm.data);
+    }
+  } catch {
+    // Ignore and continue to legacy fallback.
+  }
+
   const legacy = await apiRequest<Candidate>(`/candidates/${candidateId}`);
-  return mapLegacyCandidate(legacy);
+  const mappedLegacy = mapLegacyCandidate(legacy);
+  // In mixed deployments, legacy candidates API can omit resume fields while
+  // candidate-management still stores them. Best-effort enrich detail payload.
+  try {
+    const token = typeof window !== "undefined" ? window.localStorage.getItem("airis_access_token") : null;
+    const response = await fetch(`${API_BASE_URL}/candidate-management/candidates/${candidateId}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...getWorkspaceHeader(),
+      },
+    });
+    if (!response.ok) {
+      return mappedLegacy;
+    }
+    const cm = (await response.json()) as CandidateManagementEnvelope<CandidateManagementCandidate>;
+    const mappedCM = mapCandidateManagementCandidate(cm.data);
+    return {
+      ...mappedLegacy,
+      resume_s3_key: mappedCM.resume_s3_key ?? mappedLegacy.resume_s3_key ?? null,
+      resume_file_name: mappedCM.resume_file_name ?? mappedLegacy.resume_file_name ?? null,
+    };
+  } catch {
+    return mappedLegacy;
+  }
 }
 
 export async function createCandidate(payload: CreateCandidatePayload) {
-  if (shouldUseCandidateManagementApi()) {
+  const requiresCandidateManagementCreate = Boolean(
+    payload.resume_s3_key ||
+    payload.resume_file_name ||
+    payload.parsed_resume_data ||
+    payload.parse_confidence !== undefined
+  );
+
+  if (shouldUseCandidateManagementApi() || requiresCandidateManagementCreate) {
     const response = await apiRequest<CandidateManagementEnvelope<CandidateManagementCandidate>>(
       "/candidate-management/candidates",
       {
@@ -583,6 +640,23 @@ export async function updateCandidate(candidateId: string, payload: UpdateCandid
     );
     return mapCandidateManagementCandidate(response.data);
   }
+  // Mixed deployments: candidate may exist only in candidate-management.
+  try {
+    const response = await apiRequest<CandidateManagementEnvelope<CandidateManagementCandidate>>(
+      `/candidate-management/candidates/${candidateId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+        headers: {
+          ...getWorkspaceHeader(),
+        },
+      }
+    );
+    return mapCandidateManagementCandidate(response.data);
+  } catch {
+    // Fallback to legacy update for legacy-only candidates.
+  }
+
   const legacyPayload = {
     first_name: payload.first_name,
     last_name: payload.last_name,

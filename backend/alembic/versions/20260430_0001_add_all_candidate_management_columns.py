@@ -1,11 +1,13 @@
 """Add all missing candidate_management columns to candidates table.
 
-Revision ID: 20260430_0001
-Revises: 20260429_0003
+Revision ID: 20260430_0101
+Revises: 20260429_0103
 Create Date: 2026-04-30
 
 This migration safely adds ALL columns required by the candidate_management module
 using column-existence checks so it never fails if already applied.
+
+Renumbered from 20260430_0001 (duplicate id; canonical 20260430_0001 is org_roles migration).
 """
 
 from collections.abc import Sequence
@@ -17,8 +19,8 @@ from sqlalchemy.dialects import postgresql
 
 from app.core.config import get_settings
 
-revision: str = "20260430_0001"
-down_revision: str | None = "20260429_0003"
+revision: str = "20260430_0101"
+down_revision: str | None = "20260429_0103"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

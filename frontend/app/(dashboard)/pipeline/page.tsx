@@ -17,11 +17,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { getCandidates } from "@/lib/api/candidates";
 import { getJobs } from "@/lib/api/jobs";
+import { getJobMatchesAts, rescoreJobAts } from "@/lib/api/ats";
 import { getPipelines, updatePipeline } from "@/lib/api/pipeline";
 import { PIPELINE_UPDATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import type { Candidate, Job, Pipeline } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
+import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
+import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
 
 type BoardStage = "applied" | "screening" | "interview" | "offered" | "hired";
 
@@ -56,11 +59,17 @@ function toPipelineStage(stage: BoardStage): Pipeline["stage"] {
 function CandidateCard({
   pipeline,
   candidate,
+  atsScore,
+  recommendation,
   isMoving,
+  isTopMatch,
 }: {
   pipeline: Pipeline;
   candidate?: Candidate;
+  atsScore?: number;
+  recommendation?: string;
   isMoving?: boolean;
+  isTopMatch?: boolean;
 }) {
   return (
     <div className={`relative group transition-transform duration-300 w-full max-w-[240px] cursor-grab active:cursor-grabbing ${isMoving ? 'opacity-70' : 'hover:-translate-y-1.5'}`}>
@@ -80,6 +89,15 @@ function CandidateCard({
             Experience:{" "}
             {candidate?.years_experience !== null && candidate?.years_experience !== undefined ? `${candidate.years_experience}y` : "-"}
           </p>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {isTopMatch ? (
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                Top Match
+              </span>
+            ) : null}
+            <ATSScoreBadge score={atsScore} compact />
+            <ATSRecommendationBadge recommendation={recommendation} compact />
+          </div>
         </Link>
         {isMoving ? <p className="mt-2 text-xs text-blue-600">Updating stage...</p> : null}
       </div>
@@ -90,13 +108,19 @@ function CandidateCard({
 function DraggableCandidateCard({
   pipeline,
   candidate,
+  atsScore,
+  recommendation,
   canDrag,
   isMoving,
+  isTopMatch,
 }: {
   pipeline: Pipeline;
   candidate?: Candidate;
+  atsScore?: number;
+  recommendation?: string;
   canDrag: boolean;
   isMoving: boolean;
+  isTopMatch?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: pipeline.id,
@@ -115,7 +139,7 @@ function DraggableCandidateCard({
       {...attributes}
       {...listeners}
     >
-      <CandidateCard pipeline={pipeline} candidate={candidate} isMoving={isMoving} />
+      <CandidateCard pipeline={pipeline} candidate={candidate} atsScore={atsScore} recommendation={recommendation} isMoving={isMoving} isTopMatch={isTopMatch} />
     </div>
   );
 }
@@ -184,7 +208,10 @@ export default function PipelinePage() {
   const permissions = useAuthStore((state) => state.permissions);
   const [movingPipelineId, setMovingPipelineId] = useState<string | null>(null);
   const [activePipelineId, setActivePipelineId] = useState<string | null>(null);
+  const [atsByCandidateId, setAtsByCandidateId] = useState<Record<string, { score: number; recommendation: string }>>({});
+  const [sortMode, setSortMode] = useState<"ats_desc" | "newest" | "updated">("ats_desc");
   const boardScrollRef = useRef<HTMLDivElement | null>(null);
+  const rescoreRequestedJobIdsRef = useRef<Set<string>>(new Set());
   const canUpdatePipeline = hasPermission(permissions, PIPELINE_UPDATE_PERMISSION);
   const canReadCandidates = permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -212,9 +239,8 @@ export default function PipelinePage() {
           getJobs(200, 0),
         ]);
         setCandidates(candidateData);
-        // Keep pipeline job selector aligned with jobs page:
-        // exclude terminal states, but allow draft/open/on_hold.
-        setJobs(jobData.filter((job) => job.status !== "cancelled" && job.status !== "filled" && job.status !== "closed"));
+        // Candidate matching / pipeline excludes paused and terminal jobs.
+        setJobs(jobData.filter((job) => job.status === "open"));
       } catch (err) {
         if (err instanceof ApiError) {
           setError(err.message);
@@ -230,9 +256,27 @@ export default function PipelinePage() {
     setLoading(true);
     setError(null);
     try {
-      const pipelineData = await getPipelines(200, 0, jobId);
+      const [pipelineData, atsMatches] = await Promise.all([
+        getPipelines(200, 0, jobId),
+        getJobMatchesAts(jobId, { limit: 200, offset: 0, sort_by: "score_desc" }),
+      ]);
       console.info("[pipeline-board] fetched", { jobId, count: pipelineData.length });
       setPipelines(pipelineData);
+      const nextAtsByCandidate: Record<string, { score: number; recommendation: string }> = {};
+      for (const item of atsMatches.matches) {
+        nextAtsByCandidate[item.candidate_id] = {
+          score: item.fit_score,
+          recommendation: item.recommendation,
+        };
+      }
+      setAtsByCandidateId(nextAtsByCandidate);
+      const hasUnscoredCandidates = pipelineData.some((pipeline) => !nextAtsByCandidate[pipeline.candidate_id]);
+      if (pipelineData.length > 0 && hasUnscoredCandidates && !rescoreRequestedJobIdsRef.current.has(jobId)) {
+        rescoreRequestedJobIdsRef.current.add(jobId);
+        void rescoreJobAts(jobId).catch(() => {
+          // Keep the board responsive even if rescoring endpoint is unavailable.
+        });
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -259,10 +303,24 @@ export default function PipelinePage() {
     return STAGES.reduce<Record<BoardStage, Array<{ pipeline: Pipeline; candidate: Candidate | undefined }>>>((acc, stage) => {
       acc[stage] = pipelines
         .filter((pipeline) => toBoardStage(pipeline.stage) === stage)
-        .map((pipeline) => ({ pipeline, candidate: candidateMap.get(pipeline.candidate_id) }));
+        .map((pipeline) => ({ pipeline, candidate: candidateMap.get(pipeline.candidate_id) }))
+        // Hide orphan pipeline cards so "Unknown candidate" rows don't pollute the board.
+        .filter((item) => Boolean(item.candidate))
+        .sort((a, b) => {
+          if (sortMode === "newest") {
+            return new Date(b.pipeline.created_at).getTime() - new Date(a.pipeline.created_at).getTime();
+          }
+          if (sortMode === "updated") {
+            return new Date(b.pipeline.updated_at).getTime() - new Date(a.pipeline.updated_at).getTime();
+          }
+          return (
+            (atsByCandidateId[b.pipeline.candidate_id]?.score ?? -1) -
+            (atsByCandidateId[a.pipeline.candidate_id]?.score ?? -1)
+          );
+        });
       return acc;
     }, {} as Record<BoardStage, Array<{ pipeline: Pipeline; candidate: Candidate | undefined }>>);
-  }, [candidates, pipelines]);
+  }, [candidates, pipelines, atsByCandidateId, sortMode]);
 
   const pipelineById = useMemo(() => new Map(pipelines.map((pipeline) => [pipeline.id, pipeline])), [pipelines]);
   const candidateById = useMemo(() => new Map(candidates.map((candidate) => [candidate.id, candidate])), [candidates]);
@@ -357,7 +415,16 @@ export default function PipelinePage() {
               ))}
             </select>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700"
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as "ats_desc" | "newest" | "updated")}
+            >
+              <option value="ats_desc">ATS Score (High to Low)</option>
+              <option value="newest">Newest</option>
+              <option value="updated">Recently Updated</option>
+            </select>
             {canUpdatePipeline ? <p className="text-sm text-slate-500">Drag candidates across stages</p> : null}
             <Button
               variant="outline"
@@ -419,6 +486,9 @@ export default function PipelinePage() {
                         key={pipeline.id}
                         pipeline={pipeline}
                         candidate={candidate}
+                        atsScore={atsByCandidateId[pipeline.candidate_id]?.score}
+                        recommendation={atsByCandidateId[pipeline.candidate_id]?.recommendation}
+                        isTopMatch={(atsByCandidateId[pipeline.candidate_id]?.score ?? -1) >= 85}
                         canDrag={canUpdatePipeline && movingPipelineId === null}
                         isMoving={movingPipelineId === pipeline.id}
                       />
@@ -434,6 +504,9 @@ export default function PipelinePage() {
                 <CandidateCard
                   pipeline={activePipeline}
                   candidate={candidateById.get(activePipeline.candidate_id)}
+                  atsScore={atsByCandidateId[activePipeline.candidate_id]?.score}
+                  recommendation={atsByCandidateId[activePipeline.candidate_id]?.recommendation}
+                  isTopMatch={(atsByCandidateId[activePipeline.candidate_id]?.score ?? -1) >= 85}
                   isMoving={false}
                 />
               </div>

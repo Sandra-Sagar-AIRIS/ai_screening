@@ -136,6 +136,17 @@ export type Candidate = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  parse_status?: "pending" | "processing" | "completed" | "failed" | null;
+  parse_error?: string | null;
+  parsed_at?: string | null;
+  parsed_resume_data?: {
+    skills?: string[];
+    years_of_experience?: number | null;
+    previous_titles?: string[];
+    education?: string | null;
+    certifications?: string[];
+    normalized_keywords?: string[];
+  } | null;
 };
 
 /** Assigned vendor on a job (GET /jobs/:id/vendors). */
@@ -171,7 +182,7 @@ export type CandidateCreatePayload = {
   notes?: string;
 };
 
-export type JobStatus = "draft" | "open" | "on_hold" | "closed" | "cancelled" | "filled";
+export type JobStatus = "draft" | "open" | "paused" | "closed" | "filled";
 
 export type Job = {
   id: string;
@@ -180,6 +191,7 @@ export type Job = {
   title: string;
   description: string | null;
   status: JobStatus;
+  paused_reason?: string | null;
   location?: string | null;
   salary_min?: number | null;
   salary_max?: number | null;
@@ -219,14 +231,55 @@ export type JobSubmission = {
 };
 
 export type JobMatchEntry = {
+  rank: number;
   candidate_id: string;
-  score: number;
-  reasons?: string[];
+  candidate_name?: string | null;
+  fit_score: number;
+  category_scores: {
+    required_skills: number;
+    preferred_skills: number;
+    experience: number;
+    title: number;
+    education: number;
+  };
+  already_submitted: boolean;
+  matched_skills: string[];
+  missing_skills: string[];
+  recommendation: string;
+  confidence_score?: number | null;
 };
 
 export type JobMatchesResponse = {
+  job_id: string;
   matches: JobMatchEntry[];
-  total: number;
+  total_count: number;
+  generated_at: string;
+  limit: number;
+  offset: number;
+};
+
+export type CandidateMatchEntry = {
+  job_id: string;
+  fit_score: number;
+  category_scores: {
+    required_skills: number;
+    preferred_skills: number;
+    experience: number;
+    title: number;
+    education: number;
+  };
+  matched_skills: string[];
+  missing_skills: string[];
+  recommendation: string;
+  confidence_score?: number | null;
+};
+
+export type CandidateMatchesResponse = {
+  candidate_id: string;
+  matches: CandidateMatchEntry[];
+  total_count: number;
+  limit: number;
+  offset: number;
 };
 
 export type PipelineStage = "applied" | "screening" | "interview" | "offer" | "placed" | "rejected";

@@ -8,14 +8,16 @@ from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+from jose import ExpiredSignatureError, JWTError, jwt
 from sqlalchemy import func, select
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.permissions import normalize_permissions
 from app.db.session import get_db
 from app.models.organization_role import OrganizationRole
+from app.models.auth_session import AuthSession
 from app.models.profile import Profile
 from app.models.role_permission import RolePermission
 from app.schemas.auth import CurrentUser, UserType
@@ -23,6 +25,12 @@ from app.services.permission_service import PermissionService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
+
+
+def _auth_sessions_relation_missing(exc: BaseException) -> bool:
+    """True when DB has no auth_sessions table (migration not applied)."""
+    msg = (str(getattr(exc, "orig", None) or exc)).lower()
+    return "auth_sessions" in msg and ("does not exist" in msg or "undefinedtable" in msg.replace(" ", ""))
 _DEBUG_LOG_PATH = Path(__file__).resolve().parents[2] / "debug-f65d2f.log"
 
 
@@ -162,6 +170,10 @@ def get_current_user(
             if not user_id:
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.")
             token_org_id = payload.get("organization_id")
+            token_type = payload.get("typ")
+            token_session_id = payload.get("sid")
+        except ExpiredSignatureError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired.") from exc
         except JWTError as exc:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.") from exc
 
@@ -193,6 +205,41 @@ def get_current_user(
             )
         if token_org_id and token_org_id != str(profile.organization_id):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.")
+        if token_type not in (None, "access"):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.")
+        if token_session_id:
+            try:
+                session_uuid = UUID(str(token_session_id))
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.") from exc
+            skip_session_revocation_check = False
+            auth_session = None
+            try:
+                auth_session = db.scalar(select(AuthSession).where(AuthSession.id == session_uuid))
+            except ProgrammingError as exc:
+                if _auth_sessions_relation_missing(exc):
+                    logger.warning(
+                        "auth_dependencies.auth_sessions_table_missing",
+                        extra={
+                            "exception_class": type(exc).__name__,
+                            "hint": "Run Alembic migration for auth_sessions or use tokens without sid until migrated.",
+                        },
+                        exc_info=True,
+                    )
+                    skip_session_revocation_check = True
+                else:
+                    logger.exception(
+                        "auth_dependencies.auth_session_lookup_programming_error",
+                        extra={"exception_class": type(exc).__name__},
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Authentication storage is temporarily unavailable.",
+                    ) from exc
+            if not skip_session_revocation_check and (
+                auth_session is None or auth_session.revoked_at is not None
+            ):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been invalidated.")
 
         # Authorization uses DB truth: JWT `sub` only identifies the profile; stale/missing claims
         # on role/type would otherwise yield empty permission lookups or wrong client/internal behavior.

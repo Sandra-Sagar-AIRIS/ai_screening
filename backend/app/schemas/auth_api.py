@@ -16,6 +16,7 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
     role: str
     user_type: str
@@ -25,6 +26,10 @@ class TokenResponse(BaseModel):
 
 class SignupResponse(BaseModel):
     message: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=20)
 
 
 class MePermissionsResponse(BaseModel):

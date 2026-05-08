@@ -1,8 +1,10 @@
 """Add job_vendors.job_id index for reverse lookups.
 
-Revision ID: 20260429_0003
-Revises: 20260429_0002
+Revision ID: 20260429_0103
+Revises: 20260429_0102
 Create Date: 2026-04-29
+
+Renumbered from 20260429_0003 (duplicate id).
 """
 
 from __future__ import annotations
@@ -14,8 +16,8 @@ from sqlalchemy import inspect
 
 from app.core.config import get_settings
 
-revision: str = "20260429_0003"
-down_revision: str | None = "20260429_0002"
+revision: str = "20260429_0103"
+down_revision: str | None = "20260429_0102"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

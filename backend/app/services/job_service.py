@@ -6,15 +6,21 @@ from uuid import UUID
 from fastapi import HTTPException, status
 import sqlalchemy as sa
 from sqlalchemy import Select, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.models.job import Job
+from app.models.candidate import Candidate
+from app.models.candidate_job_match import CandidateJobMatch
+from app.models.job_status_history import JobStatusHistory
 from app.models.job_skill import JobSkill
 from app.models.job_match_cache import JobMatchCache
 from app.models.job_submission import JobSubmission
+from app.models.pipeline import Pipeline
 from app.schemas.auth import CurrentUser
 from app.schemas.job import (
+    CandidateMatchEntry,
+    CandidateMatchesResponse,
     JobCreate,
     JobStatus,
     JobMatchEntry,
@@ -32,16 +38,32 @@ from app.schemas.job import (
 from app.services.access_scope_service import AccessScopeService
 from app.services.client_service import ClientService
 from app.services.candidate_service import CandidateService
+from app.services.jd_normalization_service import JDNormalizationService
+from app.services.ats_matching_service import (
+    ATSMatchingService,
+    CandidateScoringInput,
+    JobScoringInput,
+)
+from app.services.task_runner import dispatch_task
+from app.core.config import get_settings
 
 
 DEV_MODE = True
 
 class JobService:
+    _ALLOWED_STATUS_TRANSITIONS: dict[str, set[str]] = {
+        JobStatus.DRAFT.value: {JobStatus.OPEN.value},
+        JobStatus.OPEN.value: {JobStatus.CLOSED.value, JobStatus.FILLED.value, JobStatus.PAUSED.value},
+        JobStatus.PAUSED.value: {JobStatus.OPEN.value},
+    }
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self._clients = ClientService(db)
         self._scope = AccessScopeService(db)
         self._candidates = CandidateService(db)
+        self._jd_normalizer = JDNormalizationService()
+        self._ats = ATSMatchingService()
         # Local import to avoid circular import with pipeline_service.
         from app.services.pipeline_service import PipelineService
 
@@ -69,6 +91,7 @@ class JobService:
             title=job.title,
             description=job.description,
             status=JobStatus(job.status),
+            paused_reason=job.paused_reason,
             location=job.location,
             salary_min=job.salary_min,
             salary_max=job.salary_max,
@@ -169,14 +192,38 @@ class JobService:
         self.db.commit()
         self.db.refresh(job)
 
-        # Store job skills (Phase 1).
+        # Store normalized job skills + record JD parsing lifecycle so the UI
+        # can tell when ATS-ready data is present.
         if payload.required_skills or payload.preferred_skills:
-            self._upsert_job_skills(
+            ok = self._upsert_job_skills(
                 job_id=job.id,
                 required_skills=payload.required_skills,
                 preferred_skills=payload.preferred_skills,
             )
+            job.parsing_status = "completed" if ok else "failed"
+            self.db.add(job)
             self.db.commit()
+            if ok:
+                try:
+                    from app.candidate_management.tasks_ats import rescore_job_task, run_rescore_job
+
+                    dispatch_task(
+                        task=rescore_job_task,
+                        fallback=run_rescore_job,
+                        kwargs={
+                            "organization_id": str(organization_id),
+                            "job_id": str(job.id),
+                        },
+                    )
+                except Exception:
+                    pass
+        else:
+            # No skills supplied yet — leave parsing_status empty/pending so the
+            # caller can finalize it later (e.g. via /jobs/parse-jd).
+            if job.parsing_status is None:
+                job.parsing_status = "pending"
+                self.db.add(job)
+                self.db.commit()
 
         return self._get_job_response(job)
 
@@ -193,6 +240,8 @@ class JobService:
         stmt: Select[tuple[Job]] = select(Job).where(Job.organization_id == organization_id)
         if status is not None:
             stmt = stmt.where(Job.status == status.value)
+        elif (current_user.role or "").lower() == "recruiter":
+            stmt = stmt.where(Job.status.in_([JobStatus.DRAFT.value, JobStatus.OPEN.value, JobStatus.PAUSED.value]))
         if client_id is not None:
             stmt = stmt.where(Job.client_id == client_id)
         if self._scope.is_scoped_user(current_user):
@@ -246,7 +295,10 @@ class JobService:
         if "title" in update_data and update_data["title"] is not None:
             update_data["title"] = str(update_data["title"]).strip()
         if "status" in update_data and update_data["status"] is not None:
-            update_data["status"] = update_data["status"].value
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Use PATCH /jobs/{job_id}/status to change job status.",
+            )
 
         # Validate salary/experience constraints against the *resulting* values.
         def _to_float(val: object) -> float | None:
@@ -272,22 +324,43 @@ class JobService:
             job.filled_at = datetime.now(timezone.utc)
 
         # If skills are provided in an update, replace them fully.
+        skills_touched = False
         if "required_skills" in update_data or "preferred_skills" in update_data:
             required_skills = update_data.pop("required_skills", None)
             preferred_skills = update_data.pop("preferred_skills", None)
-            self._upsert_job_skills(
+            ok = self._upsert_job_skills(
                 job_id=job.id,
                 required_skills=required_skills,
                 preferred_skills=preferred_skills,
             )
+            update_data["parsing_status"] = "completed" if ok else "failed"
+            skills_touched = True
 
         for field, value in update_data.items():
             setattr(job, field, value)
+
+        # Hint downstream pipelines that this job's normalized requirements
+        # changed; Phase 5 wires this to ATS rescoring.
+        self._skills_changed_during_update = skills_touched
 
         try:
             self.db.add(job)
             self.db.commit()
             self.db.refresh(job)
+            if skills_touched:
+                try:
+                    from app.candidate_management.tasks_ats import rescore_job_task, run_rescore_job
+
+                    dispatch_task(
+                        task=rescore_job_task,
+                        fallback=run_rescore_job,
+                        kwargs={
+                            "organization_id": str(organization_id),
+                            "job_id": str(job.id),
+                        },
+                    )
+                except Exception:
+                    pass
             logger.info(f"UPDATE_SUCCESS: Job {job.id} updated")
             return self._get_job_response(job)
         except Exception as e:
@@ -309,6 +382,55 @@ class JobService:
             self.db.rollback()
             raise
 
+    def update_job_status(
+        self,
+        *,
+        job_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        new_status: JobStatus,
+        reason: str | None = None,
+    ) -> JobResponse:
+        job = self.get_job_by_id(job_id, organization_id, current_user)
+
+        current_status = job.status
+        target_status = new_status.value
+
+        allowed_next = self._ALLOWED_STATUS_TRANSITIONS.get(current_status, set())
+        if target_status not in allowed_next:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status transition from '{current_status}' to '{target_status}'.",
+            )
+
+        if target_status == JobStatus.PAUSED.value and not (reason or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Pause reason is required when moving a job to paused status.",
+            )
+
+        if target_status == JobStatus.FILLED.value:
+            job.filled_at = datetime.now(timezone.utc)
+        if target_status == JobStatus.PAUSED.value:
+            job.paused_reason = (reason or "").strip()
+        elif current_status == JobStatus.PAUSED.value and target_status == JobStatus.OPEN.value:
+            job.paused_reason = None
+
+        job.status = target_status
+        self.db.add(
+            JobStatusHistory(
+                job_id=job.id,
+                previous_status=current_status,
+                new_status=target_status,
+                changed_by=UUID(current_user.user_id),
+                reason=(reason or "").strip() or None,
+            )
+        )
+        self.db.add(job)
+        self.db.commit()
+        self.db.refresh(job)
+        return self._get_job_response(job)
+
     def change_job_status(
         self,
         *,
@@ -317,45 +439,13 @@ class JobService:
         current_user: CurrentUser,
         new_status: JobStatus,
     ) -> JobResponse:
-        job = self.get_job_by_id(job_id, organization_id, current_user)
-
-        current_status = job.status
-        target_status = new_status.value
-
-        # Treat legacy "closed" as cancelled terminal state.
-        cancelled_values = {JobStatus.CANCELLED.value, JobStatus.CLOSED.value}
-        on_hold_value = JobStatus.ON_HOLD.value
-        open_value = JobStatus.OPEN.value
-        draft_value = JobStatus.DRAFT.value
-        filled_value = JobStatus.FILLED.value
-
-        def _normalize(status_value: str) -> str:
-            if status_value in cancelled_values:
-                return JobStatus.CANCELLED.value
-            return status_value
-
-        current_status = _normalize(current_status)
-        target_status = _normalize(target_status)
-
-        allowed: dict[str, set[str]] = {
-            draft_value: {open_value, JobStatus.CANCELLED.value, filled_value},
-            open_value: {on_hold_value, filled_value, JobStatus.CANCELLED.value, draft_value},
-            on_hold_value: {open_value, filled_value, JobStatus.CANCELLED.value, draft_value},
-            filled_value: {open_value, JobStatus.CANCELLED.value, on_hold_value, draft_value},
-            JobStatus.CANCELLED.value: {open_value, filled_value, on_hold_value, draft_value},
-        }
-
-        if target_status not in allowed.get(current_status, set()):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="INVALID_STATUS_TRANSITION")
-
-        if target_status == filled_value:
-            job.filled_at = datetime.now(timezone.utc)
-
-        job.status = target_status
-        self.db.add(job)
-        self.db.commit()
-        self.db.refresh(job)
-        return self._get_job_response(job)
+        return self.update_job_status(
+            job_id=job_id,
+            organization_id=organization_id,
+            current_user=current_user,
+            new_status=new_status,
+            reason=None,
+        )
 
     def search_jobs(
         self,
@@ -455,8 +545,8 @@ class JobService:
         logger.info(f"SUBMIT_START: Job={job_id} Candidate={payload.candidate_id} Org={organization_id}")
         job = self.get_job_by_id(job_id, organization_id, current_user)
 
-        # Phase 1 spec: accept only "open" or "on_hold".
-        if job.status not in {JobStatus.OPEN.value, JobStatus.ON_HOLD.value}:
+        # Candidate matching/pipeline submission is only valid for open jobs.
+        if job.status != JobStatus.OPEN.value:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="JOB_NOT_OPEN")
 
         candidate = self._candidates.get_candidate_by_id(payload.candidate_id, organization_id, current_user)
@@ -512,6 +602,23 @@ class JobService:
             # Commit both JobSubmission and Pipeline together.
             self.db.commit()
             self.db.refresh(submission)
+            try:
+                from app.candidate_management.tasks_ats import (
+                    rescore_candidate_job_task,
+                    run_rescore_candidate_job,
+                )
+
+                dispatch_task(
+                    task=rescore_candidate_job_task,
+                    fallback=run_rescore_candidate_job,
+                    kwargs={
+                        "organization_id": str(organization_id),
+                        "candidate_id": str(candidate.id),
+                        "job_id": str(job.id),
+                    },
+                )
+            except Exception:
+                self.db.rollback()
             res = JobSubmissionResponse.model_validate(submission)
             logger.info(f"SUBMIT_SUCCESS: Submission {submission.id} created")
             return res
@@ -591,149 +698,18 @@ class JobService:
         current_user: CurrentUser,
         request: JobMatchTriggerRequest,
     ) -> JobMatchTriggerResponse:
-        # Phase 1: compute synchronously and store in `job_match_cache`.
-        # (The spec calls for async + ai-services, but this repo currently does not integrate it.)
         refresh = request.refresh
-
         job = self.get_job_by_id(job_id, organization_id, current_user)
-
-        try:
-            cached = self.db.scalar(select(JobMatchCache).where(JobMatchCache.job_id == job.id))
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Could not fetch matches (migration missing?): {e}")
-            self.db.rollback()
-            cached = None
-
-        if cached is not None and not refresh and cached.ranked_candidate_ids:
-            return JobMatchTriggerResponse(
-                job_id=job.id,
-                match_count=len(cached.ranked_candidate_ids or []),
-                generated_at=cached.generated_at,
-                refresh_requested=False,
-            )
-
-        try:
-            required_skills = self.db.scalars(
-                select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(True))
-            ).all()
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Could not fetch job skills (migration missing?): {e}")
-            self.db.rollback()
-            required_skills = []
-
-        required_normalized = [s.strip().lower() for s in required_skills if s and s.strip()]
-
-        # Fetch candidates using legacy candidate service (availability across schema versions).
-        # Note: Candidate schema differs in the new candidate-management module; this keeps Phase 1 working.
-        candidates: list = []
-        # Legacy CandidateService.list_candidates is limited to 50; page through a bit.
-        page_limit = 50
-        offset = 0
-        while True:
-            page = self._candidates.list_candidates(
-                organization_id=organization_id,
-                current_user=current_user,
-                limit=page_limit,
-                offset=offset,
-            )
-            if not page:
-                break
-            candidates.extend(page)
-            if len(page) < page_limit:
-                break
-            offset += page_limit
-            if len(candidates) >= 200:
-                break
-
-        ranked: list[dict[str, object]] = []
-        for idx, candidate in enumerate(candidates):
-            candidate_loc = (getattr(candidate, "location", None) or "").lower()
-            candidate_exp = (getattr(candidate, "experience_summary", None) or "").lower()
-            candidate_notes = (getattr(candidate, "notes", None) or "").lower()
-            blob = f"{candidate_loc} {candidate_exp} {candidate_notes}"
-
-            overlap = 0
-            for skill in required_normalized:
-                if skill and skill in blob:
-                    overlap += 1
-
-            num_required = max(1, len(required_normalized))
-            skills_overlap_score = int(round(100 * overlap / num_required))
-
-            location_score = 100 if job.location and job.location.lower() in candidate_loc else 70
-
-            # Task 5: Improve experience matching logic
-            cand_years_exp = getattr(candidate, "years_experience", None)
-            experience_fit = 60 # Default if unknown
-
-            if job.experience_min_years is None and job.experience_max_years is None:
-                experience_fit = 70 # Neutral/Unknown job requirements
-            elif cand_years_exp is not None:
-                min_exp = job.experience_min_years or 0
-                max_exp = job.experience_max_years or float('inf')
-
-                if min_exp <= cand_years_exp <= max_exp:
-                    experience_fit = 100
-                elif cand_years_exp < min_exp:
-                    gap = min_exp - cand_years_exp
-                    experience_fit = max(0, 100 - (gap * 15)) # -15 per year gap
-                else: # overqualified
-                    experience_fit = 90
-
-            # Compute fit_score with potential salary boost
-            fit_score = int(
-                round(0.6 * skills_overlap_score + 0.25 * location_score + 0.15 * experience_fit)
-            )
-
-            # Optional salary boost (if candidate has expected_salary)
-            cand_expected_salary = getattr(candidate, "expected_salary", None)
-            if cand_expected_salary is not None and job.salary_min is not None and job.salary_max is not None:
-                 if job.salary_min <= cand_expected_salary <= job.salary_max:
-                     fit_score = min(100, fit_score + 5) # 5 point boost
-
-            ranked.append(
-                {
-                    "candidate_id": str(candidate.id),
-                    "fit_score": fit_score,
-                    "category_scores": {
-                        "skills_overlap": skills_overlap_score,
-                        "location_compatibility": location_score,
-                        "experience_fit": experience_fit,
-                    },
-                }
-            )
-
-        ranked.sort(key=lambda x: int(x.get("fit_score") or 0), reverse=True)
-        # Store only top N to keep JSON small.
-        top_n = 100
-        ranked = ranked[:top_n]
-
-        from datetime import datetime, timezone
-        generated_time = datetime.now(timezone.utc)
-
-        try:
-            if cached is None:
-                cached = JobMatchCache(job_id=job.id, ranked_candidate_ids=ranked)
-                self.db.add(cached)
-                self.db.commit()
-                self.db.refresh(cached)
-                generated_time = cached.generated_at
-            else:
-                cached.ranked_candidate_ids = ranked
-                self.db.add(cached)
-                self.db.commit()
-                self.db.refresh(cached)
-                generated_time = cached.generated_at
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Could not save job match cache (migration missing?): {e}")
-            self.db.rollback()
-
+        cached = self._scalar_job_match_cache(job.id)
+        if refresh or cached is None:
+            self.rescore_job_sync(organization_id=organization_id, job_id=job.id)
+            self.db.commit()
+        cached = self._scalar_job_match_cache(job.id)
+        generated_time = cached.generated_at if cached else datetime.now(timezone.utc)
+        match_count = len(cached.ranked_candidate_ids or []) if cached else 0
         return JobMatchTriggerResponse(
             job_id=job.id,
-            match_count=len(ranked),
+            match_count=match_count,
             generated_at=generated_time,
             refresh_requested=refresh,
         )
@@ -746,119 +722,429 @@ class JobService:
         current_user: CurrentUser,
         limit: int,
         offset: int,
+        sort_by: str = "score_desc",
+        min_score: int | None = None,
+        recommendation: str | None = None,
     ) -> JobMatchesResponse:
         job = self.get_job_by_id(job_id, organization_id, current_user)
+        filters = [
+            CandidateJobMatch.organization_id == organization_id,
+            CandidateJobMatch.job_id == job.id,
+        ]
+        if min_score is not None:
+            filters.append(CandidateJobMatch.match_score >= min_score)
+        if recommendation:
+            filters.append(sa.func.lower(CandidateJobMatch.recommendation) == recommendation.lower())
 
+        count_stmt = select(sa.func.count()).select_from(CandidateJobMatch).where(*filters)
+        stmt = select(CandidateJobMatch).where(*filters)
+        if sort_by == "missing_critical_asc":
+            ms = CandidateJobMatch.missing_skills
+            missing_len = sa.case(
+                (ms.is_(None), 999_999),
+                (sa.func.jsonb_typeof(ms) != sa.literal("array"), 999_999),
+                else_=sa.func.jsonb_array_length(ms),
+            )
+            stmt = stmt.order_by(missing_len.asc(), CandidateJobMatch.match_score.desc())
+        else:
+            stmt = stmt.order_by(CandidateJobMatch.match_score.desc(), CandidateJobMatch.updated_at.desc())
         try:
-            cached = self.db.scalar(select(JobMatchCache).where(JobMatchCache.job_id == job.id))
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Could not fetch matches (migration missing?): {e}")
+            total_count = int(self.db.scalar(count_stmt) or 0)
+            rows = list(self.db.scalars(stmt.offset(offset).limit(limit)))
+        except ProgrammingError as exc:
+            # ATS migrations may not be applied yet in some environments.
+            # Return an empty payload instead of surfacing a 500 to recruiter UI.
+            if "candidate_job_match" not in str(exc).lower():
+                raise
             self.db.rollback()
-            return JobMatchesResponse(job_id=job.id, matches=[], total_count=0, generated_at=job.created_at, limit=limit, offset=offset)
-
-        if cached is None or not cached.ranked_candidate_ids:
-            return JobMatchesResponse(job_id=job.id, matches=[], total_count=0, generated_at=job.created_at, limit=limit, offset=offset)
-
-        matches_raw = cached.ranked_candidate_ids or []
-
-        # Apply pagination at the response layer.
-        sliced = matches_raw[offset : offset + limit]
-
-        candidate_ids_for_page: list[UUID] = []
-        for raw_ranked in sliced:
-            try:
-                candidate_ids_for_page.append(UUID(str(raw_ranked.get("candidate_id"))))
-            except Exception:  # pragma: no cover
-                continue
-
-        try:
-            submitted_ids = set(
-                self.db.scalars(
-                    select(JobSubmission.candidate_id).where(
-                        JobSubmission.job_id == job.id,
-                        JobSubmission.candidate_id.in_(candidate_ids_for_page),
-                    )
+            return JobMatchesResponse(
+                job_id=job.id,
+                matches=[],
+                total_count=0,
+                generated_at=job.updated_at,
+                limit=limit,
+                offset=offset,
+            )
+        submitted_ids = set(
+            self.db.scalars(
+                select(JobSubmission.candidate_id).where(
+                    JobSubmission.job_id == job.id,
+                    JobSubmission.candidate_id.in_([row.candidate_id for row in rows]),
                 )
             )
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Could not fetch match submissions (migration missing?): {e}")
-            self.db.rollback()
-            submitted_ids = set()
-
+        ) if rows else set()
+        candidate_names: dict[UUID, str] = {}
+        if rows:
+            candidate_rows = self.db.execute(
+                select(Candidate.id, Candidate.first_name, Candidate.last_name).where(
+                    Candidate.organization_id == organization_id,
+                    Candidate.id.in_([row.candidate_id for row in rows]),
+                )
+            ).all()
+            for candidate_id, first_name, last_name in candidate_rows:
+                full_name = f"{(first_name or '').strip()} {(last_name or '').strip()}".strip()
+                candidate_names[candidate_id] = full_name or str(candidate_id)
         matches: list[JobMatchEntry] = []
-        for raw_ranked in sliced:
-            candidate_id = UUID(str(raw_ranked.get("candidate_id")))
-            fit_score = int(raw_ranked.get("fit_score") or 0)
-            category_scores_raw = raw_ranked.get("category_scores") or {}
-            category_scores = JobMatchCategoryScores(
-                skills_overlap=int(category_scores_raw.get("skills_overlap") or 0),
-                location_compatibility=int(category_scores_raw.get("location_compatibility") or 0),
-                experience_fit=int(category_scores_raw.get("experience_fit") or 0),
-            )
+        for idx, row in enumerate(rows):
+            cs = self._coerce_match_category_scores(row.category_scores)
             matches.append(
                 JobMatchEntry(
-                    rank=len(matches) + 1 + offset,
-                    candidate_id=candidate_id,
-                    fit_score=fit_score,
-                    category_scores=category_scores,
-                    already_submitted=candidate_id in submitted_ids,
+                    rank=offset + idx + 1,
+                    candidate_id=row.candidate_id,
+                    candidate_name=candidate_names.get(row.candidate_id),
+                    fit_score=row.match_score,
+                    category_scores=JobMatchCategoryScores(
+                        required_skills=int(cs.get("required_skills") or 0),
+                        preferred_skills=int(cs.get("preferred_skills") or 0),
+                        experience=int(cs.get("experience") or 0),
+                        title=int(cs.get("title") or 0),
+                        education=int(cs.get("education") or 0),
+                    ),
+                    already_submitted=row.candidate_id in submitted_ids,
+                    matched_skills=self._coerce_jsonb_str_list(row.matched_skills),
+                    missing_skills=self._coerce_jsonb_str_list(row.missing_skills),
+                    recommendation=row.recommendation,
+                    confidence_score=float(row.confidence_score or 0),
                 )
             )
-
+        cached = self._scalar_job_match_cache(job.id)
         return JobMatchesResponse(
             job_id=job.id,
             matches=matches,
-            total_count=len(matches_raw),
-            generated_at=cached.generated_at,
+            total_count=total_count,
+            generated_at=(cached.generated_at if cached is not None else job.updated_at),
             limit=limit,
             offset=offset,
         )
 
+    def get_candidate_matches(
+        self,
+        *,
+        candidate_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        limit: int,
+        offset: int,
+    ) -> CandidateMatchesResponse:
+        self._candidates.get_candidate_by_id(candidate_id, organization_id, current_user)
+        filters = [
+            CandidateJobMatch.organization_id == organization_id,
+            CandidateJobMatch.candidate_id == candidate_id,
+        ]
+        count_stmt = select(sa.func.count()).select_from(CandidateJobMatch).where(*filters)
+        stmt = (
+            select(CandidateJobMatch)
+            .where(*filters)
+            .order_by(CandidateJobMatch.match_score.desc(), CandidateJobMatch.updated_at.desc())
+        )
+        try:
+            total_count = int(self.db.scalar(count_stmt) or 0)
+            rows = list(self.db.scalars(stmt.offset(offset).limit(limit)))
+        except ProgrammingError as exc:
+            if "candidate_job_match" not in str(exc).lower():
+                raise
+            self.db.rollback()
+            return CandidateMatchesResponse(
+                candidate_id=candidate_id,
+                matches=[],
+                total_count=0,
+                limit=limit,
+                offset=offset,
+            )
+        matches: list[CandidateMatchEntry] = []
+        for row in rows:
+            cs = self._coerce_match_category_scores(row.category_scores)
+            matches.append(
+                CandidateMatchEntry(
+                    job_id=row.job_id,
+                    fit_score=row.match_score,
+                    category_scores=JobMatchCategoryScores(
+                        required_skills=int(cs.get("required_skills") or 0),
+                        preferred_skills=int(cs.get("preferred_skills") or 0),
+                        experience=int(cs.get("experience") or 0),
+                        title=int(cs.get("title") or 0),
+                        education=int(cs.get("education") or 0),
+                    ),
+                    matched_skills=self._coerce_jsonb_str_list(row.matched_skills),
+                    missing_skills=self._coerce_jsonb_str_list(row.missing_skills),
+                    recommendation=row.recommendation,
+                    confidence_score=float(row.confidence_score or 0),
+                )
+            )
+        return CandidateMatchesResponse(
+            candidate_id=candidate_id,
+            matches=matches,
+            total_count=total_count,
+            limit=limit,
+            offset=offset,
+        )
+
+    def rescore_job_sync(self, *, organization_id: UUID, job_id: UUID) -> int:
+        job = self.db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == organization_id))
+        if job is None:
+            return 0
+        candidate_ids = list(
+            self.db.scalars(
+                select(Pipeline.candidate_id).where(
+                    Pipeline.organization_id == organization_id,
+                    Pipeline.job_id == job_id,
+                )
+            )
+        )
+        count = 0
+        for cid in candidate_ids:
+            self.rescore_candidate_job_sync(organization_id=organization_id, candidate_id=cid, job_id=job_id)
+            count += 1
+        self._refresh_job_match_cache(job_id=job_id, organization_id=organization_id)
+        return count
+
+    def rescore_candidate_sync(self, *, organization_id: UUID, candidate_id: UUID) -> int:
+        job_ids = list(
+            self.db.scalars(
+                select(Pipeline.job_id).where(
+                    Pipeline.organization_id == organization_id,
+                    Pipeline.candidate_id == candidate_id,
+                )
+            )
+        )
+        count = 0
+        for job_id in job_ids:
+            self.rescore_candidate_job_sync(organization_id=organization_id, candidate_id=candidate_id, job_id=job_id)
+            self._refresh_job_match_cache(job_id=job_id, organization_id=organization_id)
+            count += 1
+        return count
+
+    def rescore_candidate_job_sync(self, *, organization_id: UUID, candidate_id: UUID, job_id: UUID) -> None:
+        job = self.db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == organization_id))
+        candidate = self.db.scalar(
+            select(Candidate).where(Candidate.id == candidate_id, Candidate.organization_id == organization_id)
+        )
+        if job is None or candidate is None:
+            return
+        required_skills = list(
+            self.db.scalars(
+                select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(True))
+            )
+        )
+        preferred_skills = list(
+            self.db.scalars(
+                select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(False))
+            )
+        )
+        candidate_blob = " ".join(
+            [
+                (candidate.experience_summary or ""),
+                (candidate.education or ""),
+                (candidate.notes or ""),
+                (candidate.location or ""),
+            ]
+        ).lower()
+        candidate_skill_hits: list[str] = []
+        for skill in set(required_skills + preferred_skills):
+            norm = self._jd_normalizer.normalize_skill(skill)
+            if norm and norm in candidate_blob:
+                candidate_skill_hits.append(norm)
+        years = self._extract_years_from_text(candidate.experience_summary)
+        previous_titles = self._extract_titles_from_text(candidate.experience_summary or "")
+        result = self._ats.score(
+            candidate=CandidateScoringInput(
+                candidate_id=str(candidate.id),
+                skills=candidate_skill_hits,
+                years_of_experience=years,
+                previous_titles=previous_titles,
+                education=[candidate.education] if candidate.education else [],
+                parser_confidence=0.6,
+            ),
+            job=JobScoringInput(
+                job_id=str(job.id),
+                title=job.title,
+                required_skills_normalized=required_skills,
+                preferred_skills_normalized=preferred_skills,
+                min_experience_years=float(job.experience_min_years) if job.experience_min_years is not None else None,
+                max_experience_years=float(job.experience_max_years) if job.experience_max_years is not None else None,
+                education_requirements=[],
+            ),
+        )
+        try:
+            row = self.db.scalar(
+                select(CandidateJobMatch).where(
+                    CandidateJobMatch.organization_id == organization_id,
+                    CandidateJobMatch.candidate_id == candidate.id,
+                    CandidateJobMatch.job_id == job.id,
+                )
+            )
+            if row is None:
+                row = CandidateJobMatch(
+                    organization_id=organization_id,
+                    candidate_id=candidate.id,
+                    job_id=job.id,
+                    match_score=result.match_score,
+                    category_scores=result.category_scores,
+                    matched_skills=result.matched_skills,
+                    missing_skills=result.missing_skills,
+                    matched_preferred_skills=result.matched_preferred_skills,
+                    recommendation=result.recommendation,
+                    confidence_score=result.confidence_score,
+                    evaluated_at=datetime.now(timezone.utc),
+                )
+                self.db.add(row)
+            else:
+                row.match_score = result.match_score
+                row.category_scores = result.category_scores
+                row.matched_skills = result.matched_skills
+                row.missing_skills = result.missing_skills
+                row.matched_preferred_skills = result.matched_preferred_skills
+                row.recommendation = result.recommendation
+                row.confidence_score = result.confidence_score
+                row.evaluated_at = datetime.now(timezone.utc)
+                self.db.add(row)
+        except ProgrammingError as exc:
+            if "candidate_job_match" not in str(exc).lower():
+                raise
+            self.db.rollback()
+            return
+
+    def dispatch_rescore_job(self, *, organization_id: UUID, job_id: UUID) -> None:
+        from app.candidate_management.tasks_ats import rescore_job_task, run_rescore_job
+
+        dispatch_task(
+            task=rescore_job_task,
+            fallback=run_rescore_job,
+            kwargs={"organization_id": str(organization_id), "job_id": str(job_id)},
+        )
+
+    def dispatch_rescore_candidate(self, *, organization_id: UUID, candidate_id: UUID) -> None:
+        from app.candidate_management.tasks_ats import rescore_candidate_task, run_rescore_candidate
+
+        dispatch_task(
+            task=rescore_candidate_task,
+            fallback=run_rescore_candidate,
+            kwargs={"organization_id": str(organization_id), "candidate_id": str(candidate_id)},
+        )
+
+    def _refresh_job_match_cache(self, *, job_id: UUID, organization_id: UUID) -> None:
+        try:
+            rows = list(
+                self.db.scalars(
+                    select(CandidateJobMatch)
+                    .where(
+                        CandidateJobMatch.organization_id == organization_id,
+                        CandidateJobMatch.job_id == job_id,
+                    )
+                    .order_by(CandidateJobMatch.match_score.desc(), CandidateJobMatch.updated_at.desc())
+                    .limit(100)
+                )
+            )
+        except ProgrammingError as exc:
+            if "candidate_job_match" not in str(exc).lower():
+                raise
+            self.db.rollback()
+            return
+        ranked = [
+            {
+                "candidate_id": str(row.candidate_id),
+                "fit_score": int(row.match_score),
+                "category_scores": self._coerce_match_category_scores(row.category_scores),
+            }
+            for row in rows
+        ]
+        # `job_match_cache` is an optional optimization; if the table doesn't exist yet
+        # we still want `candidate_job_matches` to persist (so the ATS UI can render).
+        if not self._job_match_cache_table_exists():
+            return
+
+        cached = self.db.scalar(select(JobMatchCache).where(JobMatchCache.job_id == job_id))
+        if cached is None:
+            cached = JobMatchCache(job_id=job_id, ranked_candidate_ids=ranked)
+        else:
+            cached.ranked_candidate_ids = ranked
+        self.db.add(cached)
+
+    def _job_match_cache_table_exists(self) -> bool:
+        settings = get_settings()
+        schema = settings.db_schema
+        table_fqn = f"{schema}.job_match_cache" if schema else "job_match_cache"
+        # `to_regclass` returns NULL when the relation doesn't exist.
+        exists = self.db.scalar(sa.text("select to_regclass(:t) is not null"), {"t": table_fqn})
+        return bool(exists)
+
+    @staticmethod
+    def _extract_years_from_text(text: str | None) -> float | None:
+        if not text:
+            return None
+        import re
+
+        m = re.search(r"(\\d+(?:\\.\\d+)?)\\s*\\+?\\s*(?:years?|yrs?)", text, flags=re.IGNORECASE)
+        if not m:
+            return None
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _extract_titles_from_text(text: str) -> list[str]:
+        if not text:
+            return []
+        parts = [p.strip() for p in text.split(",") if p.strip()]
+        return parts[:5]
+
     # -------------------------------
     # Internal helpers
     # -------------------------------
+    @staticmethod
+    def _coerce_match_category_scores(raw: object) -> dict[str, object]:
+        """JSONB may contain non-dicts from legacy or manual edits; avoid 500s on read."""
+        return raw if isinstance(raw, dict) else {}
+
+    @staticmethod
+    def _coerce_jsonb_str_list(raw: object) -> list[str]:
+        if raw is None:
+            return []
+        if isinstance(raw, list):
+            return [str(x) for x in raw]
+        return []
+
+    def _scalar_job_match_cache(self, job_id: UUID) -> JobMatchCache | None:
+        """Load legacy cache row; tolerate DBs that never created `job_match_cache`."""
+        try:
+            return self.db.scalar(select(JobMatchCache).where(JobMatchCache.job_id == job_id))
+        except ProgrammingError as exc:
+            if "job_match_cache" not in str(exc).lower():
+                raise
+            self.db.rollback()
+            return None
+
     def _upsert_job_skills(
         self,
         *,
         job_id: UUID,
         required_skills: list[str] | None,
         preferred_skills: list[str] | None,
-    ) -> None:
+    ) -> bool:
+        """Replace skills for a job using normalized values.
+
+        Returns True on success and False if the upsert failed (caller can use
+        this to set `parsing_status='failed'`). We persist canonical skill
+        names (lowercased + alias-mapped) so the matching engine and the JD
+        normalizer always agree on what a skill is.
+        """
         try:
-            # Replace strategy: delete existing rows for the job, then re-insert.
+            normalized = self._jd_normalizer.normalize(
+                required_skills=required_skills,
+                preferred_skills=preferred_skills,
+            )
+
             self.db.execute(sa.delete(JobSkill).where(JobSkill.job_id == job_id))
-
-            normalized_required = [s.strip() for s in (required_skills or []) if s and s.strip()]
-            normalized_preferred = [s.strip() for s in (preferred_skills or []) if s and s.strip()]
-
-            # Dedupe case-insensitively, keep required over preferred.
-            required_set = {s.lower() for s in normalized_required}
-            preferred_set = {s.lower() for s in normalized_preferred}
-
-            to_create: list[JobSkill] = []
-
-            required_seen_lower: set[str] = set()
-            for raw in normalized_required:
-                lower = raw.lower()
-                if lower in required_set and lower not in required_seen_lower:
-                    required_seen_lower.add(lower)
-                    to_create.append(JobSkill(job_id=job_id, skill=raw, is_required=True))
-
-            preferred_seen_lower: set[str] = set()
-            for raw in normalized_preferred:
-                lower = raw.lower()
-                if lower in preferred_set and lower not in required_set and lower not in preferred_seen_lower:
-                    preferred_seen_lower.add(lower)
-                    to_create.append(JobSkill(job_id=job_id, skill=raw, is_required=False))
-
-            for skill in to_create:
-                self.db.add(skill)
-                
+            for skill in normalized.required_skills_normalized:
+                self.db.add(JobSkill(job_id=job_id, skill=skill, is_required=True))
+            for skill in normalized.preferred_skills_normalized:
+                self.db.add(JobSkill(job_id=job_id, skill=skill, is_required=False))
             self.db.flush()
+            return True
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).error(f"SKILL_UPSERT_FAILED: {e}")
             # Do NOT rollback the whole session here, as it would undo the main job update.
-            # Instead, we just fail to update skills.
+            return False

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -15,6 +16,8 @@ from pydantic import BaseModel
 from app.core.config import get_settings
 from app.core.dependencies import get_current_user, require_any_permissions, require_permission
 from app.core.permissions import (
+    ATS_READ,
+    ATS_RESCORE,
     CANDIDATES_READ,
     CANDIDATES_READ_OWN,
     JOBS_CREATE,
@@ -483,8 +486,9 @@ async def parse_job_description(
     pdf_file: Annotated[UploadFile | None, File()] = None,
     raw_text: Annotated[str | None, Form()] = None,
 ) -> JobParseResponse:
-    """Parse a job description via PDF upload or pasted text using Groq AI (llama-3.3-70b)."""
+    """Parse a job description via file upload (.pdf/.doc/.docx) or pasted text."""
     import pdfplumber  # already in requirements.txt
+    from docx import Document
 
     settings = get_settings()
     api_key = settings.groq_api_key
@@ -497,19 +501,27 @@ async def parse_job_description(
     # ── Extract text ────────────────────────────────────────────────────────
     text = ""
     if pdf_file is not None:
-        if not (pdf_file.filename or "").lower().endswith(".pdf"):
+        filename = (pdf_file.filename or "").lower()
+        if not (filename.endswith(".pdf") or filename.endswith(".doc") or filename.endswith(".docx")):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only .pdf files are accepted.",
+                detail="Only .pdf, .doc, or .docx files are accepted.",
             )
         file_bytes = await pdf_file.read()
         try:
-            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                text = "\n".join(page.extract_text() or "" for page in pdf.pages).strip()
+            if filename.endswith(".pdf"):
+                with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                    text = "\n".join(page.extract_text() or "" for page in pdf.pages).strip()
+            elif filename.endswith(".docx"):
+                document = Document(io.BytesIO(file_bytes))
+                text = "\n".join((p.text or "").strip() for p in document.paragraphs if (p.text or "").strip())
+            else:
+                # Legacy .doc files are binary; we use a best-effort decode for now.
+                text = file_bytes.decode("utf-8", errors="ignore").strip()
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to read PDF: {exc}",
+                detail=f"Failed to read uploaded file: {exc}",
             ) from exc
     elif raw_text:
         text = raw_text.strip()
@@ -517,7 +529,7 @@ async def parse_job_description(
     if not text:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provide either a PDF file or raw_text.",
+            detail="Provide either a JD file or raw_text.",
         )
 
     # ── Call Groq ────────────────────────────────────────────────────────────
@@ -539,9 +551,35 @@ async def parse_job_description(
             detail=f"Groq request failed: {exc}",
         ) from exc
 
-    # ── Return only known fields (ignore any extra keys Groq may add) ────────
-    known_fields = {k: parsed.get(k) for k in JobParseResponse.model_fields if k != "raw_jd_text"}
-    return JobParseResponse(**known_fields, raw_jd_text=text or None)
+    # ── Return normalized payload with schema-safe defaults ───────────────────
+    def _as_str_list(value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        out: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                trimmed = item.strip()
+                if trimmed:
+                    out.append(trimmed)
+        return out
+
+    payload = {
+        "title": parsed.get("title"),
+        "location": parsed.get("location"),
+        "employment_type": parsed.get("employment_type"),
+        "experience_min_years": parsed.get("experience_min_years"),
+        "experience_max_years": parsed.get("experience_max_years"),
+        "salary_min": parsed.get("salary_min"),
+        "salary_max": parsed.get("salary_max"),
+        "salary_currency": str(parsed.get("salary_currency") or "USD"),
+        "urgency": str(parsed.get("urgency") or "normal"),
+        "description": parsed.get("description"),
+        "required_skills": _as_str_list(parsed.get("required_skills")),
+        "preferred_skills": _as_str_list(parsed.get("preferred_skills")),
+        "key_responsibilities": _as_str_list(parsed.get("key_responsibilities")),
+        "raw_jd_text": text or None,
+    }
+    return JobParseResponse.model_validate(payload)
 
 
 @router.get("/{job_id}", response_model=JobResponse)
@@ -610,11 +648,12 @@ def patch_change_job_status(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> JobResponse:
     service = JobService(db)
-    return service.change_job_status(
+    return service.update_job_status(
         job_id=job_id,
         organization_id=UUID(current_user.organization_id),
         current_user=current_user,
         new_status=payload.status,
+        reason=payload.reason,
     )
 
 
@@ -714,10 +753,13 @@ def trigger_job_matching(
 def get_job_matches(
     job_id: UUID,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(require_permission(JOBS_READ))],
+    _: Annotated[CurrentUser, Depends(require_any_permissions(JOBS_READ, ATS_READ))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    sort_by: Annotated[str, Query()] = "score_desc",
+    min_score: Annotated[int | None, Query(ge=0, le=100)] = None,
+    recommendation: Annotated[str | None, Query()] = None,
 ) -> JobMatchesResponse:
     service = JobService(db)
     return service.get_matches(
@@ -726,4 +768,33 @@ def get_job_matches(
         current_user=current_user,
         limit=limit,
         offset=offset,
+        sort_by=sort_by,
+        min_score=min_score,
+        recommendation=recommendation,
+    )
+
+
+@router.post(
+    "/{job_id}/rescore",
+    response_model=JobMatchTriggerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def rescore_job_matches(
+    job_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_any_permissions(JOBS_UPDATE, ATS_RESCORE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> JobMatchTriggerResponse:
+    service = JobService(db)
+    service.get_job_by_id(job_id, UUID(current_user.organization_id), current_user)
+    service.dispatch_rescore_job(
+        organization_id=UUID(current_user.organization_id),
+        job_id=job_id,
+    )
+    cached = db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == UUID(current_user.organization_id)))
+    return JobMatchTriggerResponse(
+        job_id=job_id,
+        match_count=0,
+        generated_at=(cached.updated_at if cached is not None else datetime.now()),
+        refresh_requested=True,
     )

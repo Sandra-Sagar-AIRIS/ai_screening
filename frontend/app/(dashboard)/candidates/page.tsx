@@ -474,6 +474,20 @@ export default function CandidatesPage() {
     return pipeline.stage.charAt(0).toUpperCase() + pipeline.stage.slice(1);
   }
 
+  function getCandidateSourceKey(candidate: Candidate): string {
+    if (candidate.source === "import") return "bulk_upload";
+    if (candidate.source) return candidate.source;
+    if (candidate.source_type === "vendor") return "agency";
+    if (candidate.source_type === "internal") return "manual";
+    // Legacy rows can miss source metadata; treat as manual instead of blank.
+    return "manual";
+  }
+
+  function getCandidateSourceLabel(candidate: Candidate): string {
+    const key = getCandidateSourceKey(candidate);
+    return key.replace(/_/g, " ");
+  }
+
   const sortedCandidates = useMemo(() => {
     let data = viewImportedOnly 
       ? candidates.filter((candidate) => candidate.source === "bulk_upload" || candidate.source === "import") 
@@ -498,6 +512,26 @@ export default function CandidatesPage() {
       });
     }
 
+    if (locationFilter.trim()) {
+      const loc = locationFilter.trim().toLowerCase();
+      data = data.filter((c) => (c.location || "").toLowerCase().includes(loc));
+    }
+
+    if (statusFilter !== "all") {
+      data = data.filter((c) => (c.status ?? "active") === statusFilter);
+    }
+
+    if (sourceFilter !== "all") {
+      data = data.filter((c) => getCandidateSourceKey(c) === sourceFilter);
+    }
+
+    if (experienceFilter.trim()) {
+      const minYears = Number(experienceFilter.trim());
+      if (!Number.isNaN(minYears)) {
+        data = data.filter((c) => (c.years_experience ?? -1) >= minYears);
+      }
+    }
+
     if (stageFilter !== "all") {
       data = data.filter((c) => {
         const pipeline = pipelineByCandidate.get(c.id);
@@ -520,7 +554,20 @@ export default function CandidatesPage() {
       return sortDirection === "asc" ? result : -result;
     });
     return data;
-  }, [candidates, sortBy, sortDirection, viewImportedOnly, searchQuery, pipelineByCandidate, jobs, stageFilter]);
+  }, [
+    candidates,
+    sortBy,
+    sortDirection,
+    viewImportedOnly,
+    searchQuery,
+    locationFilter,
+    statusFilter,
+    sourceFilter,
+    experienceFilter,
+    pipelineByCandidate,
+    jobs,
+    stageFilter,
+  ]);
 
   async function handleSearchApply() {
     await loadCandidates({
@@ -596,8 +643,8 @@ export default function CandidatesPage() {
 
   async function submitCandidateToPipeline(candidateId: string, jobId: string) {
     const selectedJob = jobs.find((job) => job.id === jobId);
-    if (selectedJob && selectedJob.status !== "open" && selectedJob.status !== "on_hold") {
-      setError("This job is not open. Move it to Open or On Hold before submitting candidates.");
+    if (selectedJob && selectedJob.status !== "open") {
+      setError("This job is not open. Move it to Open before submitting candidates.");
       return;
     }
     const duplicate = pipelines.some((item) => item.candidate_id === candidateId && item.job_id === jobId);
@@ -608,7 +655,17 @@ export default function CandidatesPage() {
     setSubmitLoading(true);
     try {
       console.info("[candidate-submit] payload", { candidateId, jobId });
-      await submitCandidateToJob(jobId, candidateId);
+      try {
+        await submitCandidateToJob(jobId, candidateId);
+      } catch (err) {
+        // Mixed deployments can return 404 when the canonical submit path cannot resolve
+        // candidate-management-origin candidate records. Fall back to assigning job_id.
+        if (err instanceof ApiError && err.status === 404) {
+          await updateCandidate(candidateId, { job_id: jobId });
+        } else {
+          throw err;
+        }
+      }
 
       setSubmitModalCandidateId(null);
       setSubmitModalJobId("");
@@ -1037,7 +1094,7 @@ export default function CandidatesPage() {
                     </td>
                     <td className="px-3 py-3">
                       <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">
-                        {candidate.source?.replace('_', ' ') ?? "-"}
+                        {getCandidateSourceLabel(candidate)}
                       </span>
                     </td>
 

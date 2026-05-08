@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { createJob, getJobs, updateJob, deleteJob, parseJD, type JobParseResult } from "@/lib/api/jobs";
-import { JOBS_CREATE_PERMISSION, hasPermission } from "@/lib/rbac";
+import { JOBS_CREATE_PERMISSION, JOBS_UPDATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import { isAdminRole } from "@/lib/dashboard-nav";
 import type { Job, JobStatus } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
@@ -142,7 +142,7 @@ function JDInputModal({
   async function handleParse() {
     setError(null);
     if (tab === "paste" && !text.trim()) { setError("Paste a job description first."); return; }
-    if (tab === "upload" && !file) { setError("Select a PDF file first."); return; }
+    if (tab === "upload" && !file) { setError("Select a JD file first."); return; }
     try {
       setParsing(true);
       const result = tab === "paste"
@@ -150,10 +150,10 @@ function JDInputModal({
         : await parseJD({ type: "file", file: file! });
       onParsed({
         ...result,
-        // raw_jd_text is now returned by the backend for both paste and PDF.
+        // raw_jd_text is now returned by the backend for both paste and file upload.
         // For paste, also use the locally typed text as a fallback.
         raw_jd_text: result.raw_jd_text ?? (tab === "paste" ? text : undefined),
-        parsing_source: tab === "paste" ? "text" : "pdf",
+        parsing_source: tab === "paste" ? "text" : "file",
         parsing_status: "success",
       });
     } catch (err) {
@@ -179,7 +179,7 @@ function JDInputModal({
                 tab === t ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
-              {t === "paste" ? "📋 Paste JD" : "📄 Upload PDF"}
+              {t === "paste" ? "📋 Paste JD" : "📄 Upload JD"}
             </button>
           ))}
         </div>
@@ -197,12 +197,12 @@ function JDInputModal({
             className="flex h-40 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-400 hover:border-blue-400 hover:text-blue-500 transition-colors"
           >
             <span className="text-3xl">📂</span>
-            <p className="mt-2 text-sm">{file ? file.name : "Click to select a PDF"}</p>
-            <p className="text-xs mt-1">Only .pdf files are accepted</p>
+            <p className="mt-2 text-sm">{file ? file.name : "Click to select a JD file"}</p>
+            <p className="text-xs mt-1">Accepted: .pdf, .doc, .docx</p>
             <input
               ref={fileRef}
               type="file"
-              accept=".pdf"
+              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               className="hidden"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
@@ -413,7 +413,17 @@ export default function JobsPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
   const permissions = useAuthStore((state) => state.permissions);
   const role = useAuthStore((state) => state.role);
-  const canCreateJobs = hasPermission(permissions, JOBS_CREATE_PERMISSION) || isAdminRole(role);
+  const token = useAuthStore((state) => state.token);
+  const refreshPermissions = useAuthStore((state) => state.refreshPermissions);
+  const canCreateJobs =
+    hasPermission(permissions, JOBS_CREATE_PERMISSION) ||
+    hasPermission(permissions, JOBS_UPDATE_PERMISSION) ||
+    isAdminRole(role);
+
+  useEffect(() => {
+    if (!token) return;
+    void refreshPermissions();
+  }, [token, refreshPermissions]);
 
   // regular create form
   const [creating, setCreating] = useState(false);
@@ -440,8 +450,13 @@ export default function JobsPage() {
   const [parsedResult, setParsedResult] = useState<JobParseResult | null>(null);
 
   async function refreshJobs() {
-    const data = await getJobs(50, 0);
-    setJobs(data);
+    try {
+      const data = await getJobs(50, 0);
+      setJobs(data);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load jobs.");
+    }
   }
 
   async function handleDeleteJob(jobId: string) {
@@ -491,12 +506,13 @@ export default function JobsPage() {
 
   function getStatusBadgeClass(jobStatus: JobStatus) {
     if (jobStatus === "open") return "bg-green-100 text-green-700";
-    if (jobStatus === "cancelled" || jobStatus === "filled" || jobStatus === "closed") return "bg-red-100 text-red-600";
-    return "bg-slate-100 text-slate-600";
+    if (jobStatus === "paused") return "bg-yellow-100 text-yellow-700";
+    if (jobStatus === "filled") return "bg-blue-100 text-blue-700";
+    if (jobStatus === "closed") return "bg-red-100 text-red-600";
+    return "bg-gray-100 text-gray-600";
   }
 
   function getStatusLabel(jobStatus: JobStatus) {
-    if (jobStatus === "cancelled" || jobStatus === "filled" || jobStatus === "closed") return "Closed";
     return jobStatus.replace("_", " ");
   }
 
@@ -504,7 +520,7 @@ export default function JobsPage() {
     const matchesSearch = job.title.toLowerCase().includes(searchQuery.toLowerCase().trim());
     if (!matchesSearch) return false;
     if (statusFilter === "all") return true;
-    if (statusFilter === "closed") return job.status === "cancelled" || job.status === "filled" || job.status === "closed";
+    if (statusFilter === "closed") return job.status === "filled" || job.status === "closed";
     return job.status === statusFilter;
   });
 
@@ -567,10 +583,10 @@ export default function JobsPage() {
               <Shield className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-xs font-medium text-slate-500">On Hold</p>
-              <h3 className="text-xl font-bold text-slate-900">{jobs.filter(j => j.status === "on_hold").length}</h3>
+              <p className="text-xs font-medium text-slate-500">Paused</p>
+              <h3 className="text-xl font-bold text-slate-900">{jobs.filter(j => j.status === "paused").length}</h3>
               <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                {jobs.length === 0 ? "0.0" : ((jobs.filter(j => j.status === "on_hold").length / jobs.length) * 100).toFixed(1)}% of total
+                {jobs.length === 0 ? "0.0" : ((jobs.filter(j => j.status === "paused").length / jobs.length) * 100).toFixed(1)}% of total
               </p>
             </div>
           </CardContent>
@@ -583,9 +599,9 @@ export default function JobsPage() {
             </div>
             <div>
               <p className="text-xs font-medium text-slate-500">Closed</p>
-              <h3 className="text-xl font-bold text-slate-900">{jobs.filter(j => j.status === "cancelled" || j.status === "filled" || j.status === "closed").length}</h3>
+              <h3 className="text-xl font-bold text-slate-900">{jobs.filter(j => j.status === "filled" || j.status === "closed").length}</h3>
               <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                {jobs.length === 0 ? "0.0" : ((jobs.filter(j => j.status === "cancelled" || j.status === "filled" || j.status === "closed").length / jobs.length) * 100).toFixed(1)}% of total
+                {jobs.length === 0 ? "0.0" : ((jobs.filter(j => j.status === "filled" || j.status === "closed").length / jobs.length) * 100).toFixed(1)}% of total
               </p>
             </div>
           </CardContent>
@@ -756,7 +772,7 @@ export default function JobsPage() {
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
                   <select className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" value={status} onChange={(e) => setStatus(e.target.value as JobStatus)}>
-                    <option value="open">Open</option><option value="on_hold">On Hold</option><option value="closed">Closed</option><option value="cancelled">Cancelled</option><option value="filled">Filled</option>
+                    <option value="draft">Draft</option><option value="open">Open</option><option value="paused">Paused</option><option value="closed">Closed</option><option value="filled">Filled</option>
                   </select>
                 </div>
                 <div>
@@ -792,7 +808,6 @@ export default function JobsPage() {
                   await updateJob(editingJobId, {
                     title: title.trim(),
                     description: description.trim() || null,
-                    status,
                     location: location.trim() || undefined,
                     experience_min_years: expMin ? Number(expMin) : undefined,
                     experience_max_years: expMax ? Number(expMax) : undefined,

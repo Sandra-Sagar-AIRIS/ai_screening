@@ -8,7 +8,13 @@ from app.core.config import get_settings
 settings = get_settings()
 
 # pool_pre_ping helps keep long-lived API processes healthy.
-engine = create_engine(settings.database_url, pool_pre_ping=True, future=True)
+# hide_parameters prevents SQLAlchemy from echoing sensitive bind/URL values.
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    future=True,
+    hide_parameters=True,
+)
 
 SessionLocal = sessionmaker(
     bind=engine,

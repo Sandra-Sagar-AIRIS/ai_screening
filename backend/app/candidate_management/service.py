@@ -19,6 +19,7 @@ from app.candidate_management.models import (
     Candidate,
     CandidateAuditLog,
     CandidateInteraction,
+    CandidateParseStatus,
     CandidateSkill,
     CandidateSource,
     CandidateStatus,
@@ -42,6 +43,7 @@ from app.candidate_management.schemas import (
 from app.models.pipeline import Pipeline
 from app.models.application import Application
 from app.models.job import Job
+from app.services.task_runner import dispatch_task
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +180,22 @@ class CandidateManagementService:
         if self.ai_service is None:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI service is unavailable.")
 
-        parse_result = self.ai_service.parse_resume(resume_s3_key=request.resume_s3_key)
+        # Resume parsing lifecycle: pending -> processing -> completed/failed.
+        # We capture failures in `parse_error` so the UI can surface them.
+        try:
+            parse_result = self.ai_service.parse_resume(resume_s3_key=request.resume_s3_key)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Resume parser raised: %s", exc)
+            self._mark_resume_parse_failed(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                candidate_id=request.candidate_id,
+                error=str(exc),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"error": "RESUME_PARSE_FAILED", "message": str(exc)[:500]},
+            ) from exc
         parsed = self._sanitize_json_value(parse_result.parsed_resume_data or {})
         parsed_email = self._normalized_optional_email(parsed.get("email"))
         parsed_phone = self._normalized_optional_phone(parsed.get("phone"))
@@ -200,21 +217,65 @@ class CandidateManagementService:
             )
 
         if request.candidate_id:
-            candidate = self._require_candidate(
+            existing = self.repository.get_candidate_by_id(
                 org_id=org_id,
                 workspace_id=workspace_id,
                 candidate_id=request.candidate_id,
+                include_deleted=False,
+                with_skills=False,
             )
-            updates: dict[str, Any] = {
-                "resume_s3_key": self._optional_str(request.resume_s3_key),
-                "resume_file_name": self._optional_str(request.resume_file_name),
-                "resume_uploaded_at": datetime.now(timezone.utc),
-                "parse_confidence": parse_result.parse_confidence,
-                "ai_parse_version": parse_result.ai_parse_version,
-                "parsed_resume_data": parsed,
-                "updated_by": actor_user_id,
-            }
-            self.repository.update_candidate_fields(candidate, updates)
+            if existing is not None:
+                candidate = existing
+                updates: dict[str, Any] = {
+                    "resume_s3_key": self._optional_str(request.resume_s3_key),
+                    "resume_file_name": self._optional_str(request.resume_file_name),
+                    "resume_uploaded_at": datetime.now(timezone.utc),
+                    "parse_confidence": parse_result.parse_confidence,
+                    "ai_parse_version": parse_result.ai_parse_version,
+                    "parsed_resume_data": parsed,
+                    "parse_status": CandidateParseStatus.COMPLETED,
+                    "parse_error": None,
+                    "parsed_at": datetime.now(timezone.utc),
+                    "updated_by": actor_user_id,
+                }
+                self.repository.update_candidate_fields(candidate, updates)
+            else:
+                # Allow caller-provided candidate UUID for create flows so storage
+                # keys can follow resumes/{org_id}/{candidate_id}/...
+                full_name = str(parsed.get("full_name") or "").strip()
+                first_name = str(parsed.get("first_name") or "").strip() or (full_name.split(" ")[0] if full_name else "Unknown")
+                last_name = str(parsed.get("last_name") or "").strip() or (
+                    " ".join(full_name.split(" ")[1:]) if full_name and " " in full_name else "Candidate"
+                )
+                candidate = Candidate(
+                    id=request.candidate_id,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    first_name=first_name,
+                    last_name=last_name,
+                    full_name=full_name or f"{first_name} {last_name}",
+                    email=parsed_email,
+                    phone=parsed_phone,
+                    location=self._optional_str(parsed.get("location")),
+                    years_experience=self._optional_int(parsed.get("years_experience")),
+                    headline=self._optional_str(parsed.get("headline")),
+                    summary=self._optional_str(parsed.get("summary")),
+                    source=CandidateSource.RESUME_UPLOAD,
+                    stage="applied",
+                    resume_s3_key=self._optional_str(request.resume_s3_key),
+                    resume_file_name=self._optional_str(request.resume_file_name),
+                    resume_uploaded_at=datetime.now(timezone.utc),
+                    parse_confidence=parse_result.parse_confidence,
+                    ai_parse_version=parse_result.ai_parse_version,
+                    parsed_resume_data=parsed,
+                    parse_status=CandidateParseStatus.COMPLETED,
+                    parse_error=None,
+                    parsed_at=datetime.now(timezone.utc),
+                    created_by=actor_user_id,
+                    updated_by=actor_user_id,
+                    status=CandidateStatus.ACTIVE,
+                )
+                self.repository.create_candidate(candidate)
         else:
             full_name = str(parsed.get("full_name") or "").strip()
             first_name = str(parsed.get("first_name") or "").strip() or (full_name.split(" ")[0] if full_name else "Unknown")
@@ -241,6 +302,9 @@ class CandidateManagementService:
                 parse_confidence=parse_result.parse_confidence,
                 ai_parse_version=parse_result.ai_parse_version,
                 parsed_resume_data=parsed,
+                parse_status=CandidateParseStatus.COMPLETED,
+                parse_error=None,
+                parsed_at=datetime.now(timezone.utc),
                 created_by=actor_user_id,
                 updated_by=actor_user_id,
                 status=CandidateStatus.ACTIVE,
@@ -274,6 +338,19 @@ class CandidateManagementService:
             },
         )
         self.db.commit()
+        try:
+            from app.candidate_management.tasks_ats import rescore_candidate_task, run_rescore_candidate
+
+            dispatch_task(
+                task=rescore_candidate_task,
+                fallback=run_rescore_candidate,
+                kwargs={
+                    "organization_id": str(org_id),
+                    "candidate_id": str(candidate.id),
+                },
+            )
+        except Exception:
+            self.db.rollback()
         return self._require_candidate(org_id=org_id, workspace_id=workspace_id, candidate_id=candidate.id), parse_result
 
     def get_candidate(self, *, org_id: UUID, workspace_id: UUID, candidate_id: UUID) -> Candidate:
@@ -731,7 +808,13 @@ class CandidateManagementService:
         limit: int,
         offset: int,
     ) -> list[CandidateInteraction]:
-        self._require_candidate(org_id=org_id, workspace_id=workspace_id, candidate_id=candidate_id)
+        # Avoid eager-loading skills: not needed for timeline and can fail on schema drift.
+        self._require_candidate(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            candidate_id=candidate_id,
+            with_skills=False,
+        )
         return self.repository.list_interactions(
             org_id=org_id,
             workspace_id=workspace_id,
@@ -945,13 +1028,59 @@ class CandidateManagementService:
     # -------------------------------
     # Helpers
     # -------------------------------
-    def _require_candidate(self, *, org_id: UUID, workspace_id: UUID, candidate_id: UUID) -> Candidate:
+    def _mark_resume_parse_failed(
+        self,
+        *,
+        org_id: UUID,
+        workspace_id: UUID,
+        candidate_id: UUID | None,
+        error: str,
+    ) -> None:
+        """Persist parse-failure state on the candidate row, if one exists.
+
+        Best-effort: parsing can fail before a candidate row exists (e.g.
+        first-time upload). We swallow DB errors here because the caller is
+        about to surface the original parse exception to the client.
+        """
+        if candidate_id is None:
+            return
+        try:
+            candidate = self.repository.get_candidate_by_id(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                candidate_id=candidate_id,
+                include_deleted=True,
+                with_skills=False,
+            )
+            if candidate is None:
+                return
+            self.repository.update_candidate_fields(
+                candidate,
+                {
+                    "parse_status": CandidateParseStatus.FAILED,
+                    "parse_error": error[:2000],
+                    "parsed_at": datetime.now(timezone.utc),
+                },
+            )
+            self.db.commit()
+        except SQLAlchemyError:
+            logger.exception("Failed to persist parse_status=failed for candidate %s", candidate_id)
+            self.db.rollback()
+
+    def _require_candidate(
+        self,
+        *,
+        org_id: UUID,
+        workspace_id: UUID,
+        candidate_id: UUID,
+        with_skills: bool = True,
+    ) -> Candidate:
         candidate = self.repository.get_candidate_by_id(
             org_id=org_id,
             workspace_id=workspace_id,
             candidate_id=candidate_id,
             include_deleted=False,
-            with_skills=True,
+            with_skills=with_skills,
         )
         if candidate is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found.")
@@ -1176,10 +1305,18 @@ class CandidateManagementService:
         return data
 
     @staticmethod
+    def _coerce_interaction_metadata_for_api(value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value
+        return {"_legacy_wrapped": True, "value": value}
+
+    @staticmethod
     def _normalize_interaction(interaction: CandidateInteraction) -> dict[str, Any]:
         from app.candidate_management.schemas import InteractionTypeSchema
         from sqlalchemy import inspect
-        
+
         try:
             data = {c.key: getattr(interaction, c.key) for c in inspect(interaction).mapper.column_attrs}
         except Exception:
@@ -1204,7 +1341,11 @@ class CandidateManagementService:
             data["interaction_type"] = InteractionTypeSchema.SYSTEM.value
         else:
             data["interaction_type"] = str(it).strip().lower()
-            
+
+        raw_meta = data.pop("interaction_metadata", None)
+        if raw_meta is None:
+            raw_meta = data.pop("metadata", None)
+        data["metadata"] = CandidateManagementService._coerce_interaction_metadata_for_api(raw_meta)
         return data
     @staticmethod
     def _normalized_optional_phone(value: Any) -> str | None:

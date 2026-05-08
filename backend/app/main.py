@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
 
-from app.core.config import get_settings
+from app.core.config import get_cors_origins, get_settings
 from app.candidate_management.api import router as candidate_management_router
 from app.models import reflect_database_schema
 from app.routes.auth import router as auth_router
@@ -30,14 +30,14 @@ app = FastAPI(title=settings.app_name, debug=settings.debug)
 # Step 2: ADD CORS (TOP LEVEL)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=get_cors_origins(settings.cors_origins),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "http://localhost:3000",
+    "Access-Control-Allow-Origin": get_cors_origins(settings.cors_origins)[0],
     "Access-Control-Allow-Credentials": "true",
 }
 
@@ -57,27 +57,47 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(ResponseValidationError)
 async def response_validation_exception_handler(request: Request, exc: ResponseValidationError):
+    logger.error(
+        "response_validation_failed",
+        extra={
+            "path": str(request.url.path),
+            "method": request.method,
+            "exception_type": type(exc).__name__,
+            "errors": exc.errors(),
+        },
+        exc_info=exc,
+    )
     return JSONResponse(
         status_code=500,
         headers=CORS_HEADERS,
         content={
             "success": False,
             "detail": "Response validation error. Data format mismatch.",
-            "error": str(exc.errors())
-        }
+            "error": exc.errors(),
+            "exception_type": "ResponseValidationError",
+        },
     )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.exception("Unhandled API exception", extra={"path": str(request.url.path), "method": request.method})
+    logger.exception(
+        "Unhandled API exception",
+        extra={
+            "path": str(request.url.path),
+            "method": request.method,
+            "exception_type": type(exc).__name__,
+        },
+    )
+    safe_message = str(exc).strip() or repr(exc)
     return JSONResponse(
         status_code=500,
         headers=CORS_HEADERS,
         content={
             "success": False,
             "detail": "Internal server error",
-            "error": str(exc)
-        }
+            "error": safe_message,
+            "exception_type": type(exc).__name__,
+        },
     )
 
 # Reflect once at startup so ORM classes are available for repositories/services.

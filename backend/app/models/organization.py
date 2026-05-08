@@ -20,6 +20,7 @@ class Organization(Base):
         server_default=sa.text("gen_random_uuid()"),
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    max_concurrent_sessions: Mapped[int | None] = mapped_column(sa.Integer(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

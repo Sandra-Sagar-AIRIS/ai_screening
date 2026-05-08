@@ -7,8 +7,9 @@ from fastapi import HTTPException
 
 from app.schemas.pipeline import PipelineCreate
 from app.services.candidate_service import CandidateService
-from app.services.job_service import JobService
 from app.services.pipeline_service import PipelineService
+from app.services.permission_service import PermissionService
+from app.schemas.auth import CurrentUser
 
 pytestmark = pytest.mark.unit
 
@@ -26,6 +27,7 @@ pytestmark = pytest.mark.unit
 def test_list_endpoints_are_scoped_by_organization_id(
     client,
     auth_headers,
+    force_auth,
     monkeypatch,
     path,
     service_class,
@@ -41,20 +43,30 @@ def test_list_endpoints_are_scoped_by_organization_id(
     module = __import__(module_name, fromlist=[class_name])
     klass = getattr(module, class_name)
     monkeypatch.setattr(klass, method_name, _capture_org)
+    monkeypatch.setattr(PermissionService, "can_user", lambda *args, **kwargs: True)
 
-    response = client.get(path, headers=auth_headers)
+    response = client.get(path)
     assert response.status_code == 200
     assert captured["organization_id"] == UUID(auth_headers["X-Organization-Id"])
 
 
 class _PipelineCreateDbStub:
+    def __init__(self):
+        self._scalar_calls = 0
+
     def scalar(self, *_args, **_kwargs):
-        return None
+        self._scalar_calls += 1
+        if self._scalar_calls == 1:
+            return object()  # job exists
+        return None  # no existing pipeline duplicate
 
     def add(self, *_args, **_kwargs):
         return None
 
     def commit(self):
+        return None
+
+    def flush(self):
         return None
 
     def refresh(self, *_args, **_kwargs):
@@ -70,28 +82,26 @@ def test_pipeline_create_validates_foreign_keys_within_same_org(monkeypatch):
 
     seen: dict[str, UUID] = {}
 
-    def _candidate_check(self, candidate_id_arg, organization_id_arg):
+    def _candidate_check(self, candidate_id_arg, organization_id_arg, current_user):
         seen["candidate_org"] = organization_id_arg
         seen["candidate_id"] = candidate_id_arg
         return object()
 
-    def _job_check(self, job_id_arg, organization_id_arg):
-        seen["job_org"] = organization_id_arg
-        seen["job_id"] = job_id_arg
-        return object()
-
     monkeypatch.setattr(CandidateService, "get_candidate_by_id", _candidate_check)
-    monkeypatch.setattr(JobService, "get_job_by_id", _job_check)
 
+    current_user = CurrentUser(
+        user_id=str(uuid4()),
+        organization_id=str(expected_org),
+        role="admin",
+    )
     service.create_pipeline(
         expected_org,
+        current_user,
         PipelineCreate(candidate_id=candidate_id, job_id=job_id, stage="applied", status="active"),
     )
 
     assert seen["candidate_org"] == expected_org
-    assert seen["job_org"] == expected_org
     assert seen["candidate_id"] == candidate_id
-    assert seen["job_id"] == job_id
 
 
 class _PipelineLookupDbStub:

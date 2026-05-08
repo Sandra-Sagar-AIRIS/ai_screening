@@ -1,5 +1,13 @@
 import { apiRequest, ApiError, API_BASE_URL } from "@/lib/api/client";
-import type { Job, JobMetrics, JobStatus, JobSubmission, JobSubmissionStatus, JobMatchesResponse } from "@/lib/api/types";
+import type {
+  Job,
+  JobCandidateListItem,
+  JobMatchesResponse,
+  JobMetrics,
+  JobStatus,
+  JobSubmission,
+  JobSubmissionStatus,
+} from "@/lib/api/types";
 
 export type JobParseResult = {
   title: string | null;
@@ -71,16 +79,20 @@ export async function getJobById(jobId: string) {
   return apiRequest<Job>(`/jobs/${jobId}`);
 }
 
+export async function getJobCandidates(jobId: string) {
+  return apiRequest<JobCandidateListItem[]>(`/jobs/${jobId}/candidates`);
+}
+
 export async function submitCandidateToJob(
   jobId: string,
   candidateId: string,
   notes?: string
 ) {
+  const payload = JSON.stringify({ candidate_id: candidateId, notes: notes ?? null });
   // Canonical endpoint that creates BOTH the job submission AND an initial pipeline card.
-  // Backend schema: POST /jobs/{job_id}/submit { candidate_id, notes? }
   return apiRequest(`/jobs/${jobId}/submit`, {
     method: "POST",
-    body: JSON.stringify({ candidate_id: candidateId, notes: notes ?? null }),
+    body: payload,
   });
 }
 
@@ -117,10 +129,10 @@ export async function updateJob(jobId: string, payload: any) {
   });
 }
 
-export async function changeJobStatus(jobId: string, status: JobStatus) {
+export async function changeJobStatus(jobId: string, status: JobStatus, reason?: string) {
   return apiRequest(`/jobs/${jobId}/status`, {
     method: "PATCH",
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, reason: reason ?? null }),
   });
 }
 
@@ -143,6 +155,11 @@ export async function getJobSubmissions(jobId: string, params?: { submission_sta
 }
 
 export async function triggerJobMatching(jobId: string, refresh = false) {
+  if (refresh) {
+    return apiRequest(`/jobs/${jobId}/rescore`, {
+      method: "POST",
+    });
+  }
   return apiRequest(`/jobs/${jobId}/match`, {
     method: "POST",
     body: JSON.stringify({ refresh }),

@@ -1,8 +1,10 @@
 """Add vendor role + scoped vendor access.
 
-Revision ID: 20260429_0002
-Revises: 20260429_0001
+Revision ID: 20260429_0102
+Revises: 20260429_0101
 Create Date: 2026-04-29
+
+Renumbered from 20260429_0002 (duplicate id).
 """
 
 from __future__ import annotations
@@ -21,8 +23,8 @@ from app.core.permissions import (
     SUBMISSIONS_READ_OWN,
 )
 
-revision: str = "20260429_0002"
-down_revision: str | None = "20260429_0001"
+revision: str = "20260429_0102"
+down_revision: str | None = "20260429_0101"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

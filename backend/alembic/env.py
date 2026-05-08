@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from logging.config import fileConfig
 
 from alembic import context
@@ -8,12 +9,15 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
 from app.db.base import Base
+from app.utils.redaction import redact_database_url
 from app.models.candidate import Candidate  # noqa: F401
+from app.models.candidate_job_match import CandidateJobMatch  # noqa: F401
 from app.models.client import Client  # noqa: F401
 from app.models.client_job_access import ClientJobAccess  # noqa: F401
 from app.models.interview import Interview  # noqa: F401
 from app.models.invite import Invite  # noqa: F401
 from app.models.job import Job  # noqa: F401
+from app.models.job_status_history import JobStatusHistory  # noqa: F401
 from app.models.job_vendor import JobVendor  # noqa: F401
 from app.models.organization import Organization  # noqa: F401
 from app.models.organization_role import OrganizationRole  # noqa: F401
@@ -28,9 +32,12 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 # Use DATABASE_URL from .env instead of hardcoded alembic.ini URL.
 config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.hide_parameters", "true")
+logger.debug("Alembic configured for DB URL: %s", redact_database_url(settings.database_url))
 
 # IMPORTANT:
 # Use declarative metadata (model code) for stable, deterministic autogenerate.
@@ -51,7 +58,7 @@ def _process_revision_directives(_context, _revision, directives) -> None:
     script = directives[0]
     if script.upgrade_ops.is_empty():
         directives[:] = []
-        print("No schema changes detected; migration file not generated.")
+        logger.info("No schema changes detected; migration file not generated.")
 
 
 _COMPARE_SERVER_DEFAULT = os.getenv("ALEMBIC_COMPARE_SERVER_DEFAULT", "false").strip().lower() in {
@@ -84,6 +91,7 @@ def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        hide_parameters=True,
     )
 
     with connectable.connect() as connection:

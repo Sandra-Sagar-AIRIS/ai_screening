@@ -38,3 +38,29 @@ class SupabaseStorageClient:
             response.raise_for_status()
         return object_key
 
+    def create_signed_download_url(self, *, object_key: str, expires_in_seconds: int = 3600) -> str:
+        if not self.is_configured():
+            raise RuntimeError(
+                "Supabase storage is not configured. Set SUPABASE_URL, "
+                "SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_ANON_KEY), and SUPABASE_STORAGE_BUCKET."
+            )
+
+        sign_url = f"{self.supabase_url}/storage/v1/object/sign/{self.bucket}/{object_key}"
+        headers = {
+            "apikey": self.service_key,
+            "Authorization": f"Bearer {self.service_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {"expiresIn": int(expires_in_seconds)}
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            response = client.post(sign_url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+        signed_path = data.get("signedURL") or data.get("signedUrl")
+        if not signed_path:
+            raise RuntimeError("Supabase did not return a signed download URL.")
+        if str(signed_path).startswith("http"):
+            return str(signed_path)
+        return f"{self.supabase_url}/storage/v1{signed_path}"
+

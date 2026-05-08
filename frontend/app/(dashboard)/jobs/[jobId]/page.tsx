@@ -1,14 +1,19 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
-import { getJobById, getJobSubmissions, updateJob, deleteJob } from "@/lib/api/jobs";
+import { getJobById, getJobCandidates, getJobSubmissions, updateJob, deleteJob, changeJobStatus } from "@/lib/api/jobs";
 import { getPipelines } from "@/lib/api/pipeline";
-import type { Job, JobSubmission, JobStatus, Pipeline } from "@/lib/api/types";
+import { getJobMatchesAts, rescoreJobAts } from "@/lib/api/ats";
+import type { Job, JobCandidateListItem, JobSubmission, JobStatus, Pipeline } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
+import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
+import { ATSMatchBreakdownPanel } from "@/components/ats/ats-match-breakdown-panel";
 import { 
   Clipboard, 
   Search,
@@ -125,12 +130,23 @@ export default function JobDetailPage() {
   const [activeTab, setActiveTab] = useState<"overview" | "raw_jd">("overview");
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [jobCandidates, setJobCandidates] = useState<JobCandidateListItem[]>([]);
+  const [atsMatches, setAtsMatches] = useState<Array<{ candidate_id: string; candidate_name?: string | null; fit_score: number; recommendation: string; matched_skills: string[]; missing_skills: string[]; category_scores?: { required_skills: number; preferred_skills: number; experience: number; title: number; education: number }; confidence_score?: number | null }>>([]);
+  const [atsLoading, setAtsLoading] = useState(false);
+  const [atsOffset, setAtsOffset] = useState(0);
+  const [atsLimit] = useState(10);
+  const [atsTotal, setAtsTotal] = useState(0);
+  const [atsSortBy, setAtsSortBy] = useState<"score_desc" | "missing_critical_asc">("score_desc");
 
   // Edit Job State
   const [showEdit, setShowEdit] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showPauseReasonModal, setShowPauseReasonModal] = useState(false);
+  const [pauseReason, setPauseReason] = useState("");
+  const [pendingStatus, setPendingStatus] = useState<JobStatus | null>(null);
+  const [statusUpdating, setStatusUpdating] = useState(false);
 
   async function handleDeleteConfirm() {
     if (!params.jobId) return;
@@ -184,7 +200,6 @@ export default function JobDetailPage() {
       await updateJob(params.jobId, {
         title: editTitle.trim(),
         description: editDescription.trim() || null, 
-        status: editStatus,
         location: editLocation.trim() || null,
         experience_min_years: editExpMin ? Number(editExpMin) : null,
         experience_max_years: editExpMax ? Number(editExpMax) : null,
@@ -203,6 +218,18 @@ export default function JobDetailPage() {
     }
   }
 
+  async function loadAtsMatches() {
+    if (!params.jobId) return;
+    setAtsLoading(true);
+    try {
+      const ats = await getJobMatchesAts(params.jobId, { limit: atsLimit, offset: atsOffset, sort_by: atsSortBy }).catch(() => null);
+      setAtsMatches(ats?.matches ?? []);
+      setAtsTotal(ats?.total_count ?? 0);
+    } finally {
+      setAtsLoading(false);
+    }
+  }
+
   async function loadData() {
     if (!params.jobId) return;
     setLoading(true);
@@ -211,6 +238,13 @@ export default function JobDetailPage() {
     try {
       const data = await getJobById(params.jobId);
       setJob(data);
+      await loadAtsMatches();
+      try {
+        const candidates = await getJobCandidates(params.jobId);
+        setJobCandidates(candidates);
+      } catch {
+        setJobCandidates([]);
+      }
       try {
         const pipelineData = await getPipelines(200, 0, params.jobId);
         setPipelines(pipelineData);
@@ -229,9 +263,46 @@ export default function JobDetailPage() {
     }
   }
 
+  const ALLOWED_STATUS_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
+    draft: ["open"],
+    open: ["closed", "filled", "paused"],
+    paused: ["open"],
+    closed: [],
+    filled: [],
+  };
+
+  async function applyStatusChange(nextStatus: JobStatus, reason?: string) {
+    if (!job) return;
+    try {
+      setStatusUpdating(true);
+      const updated = await changeJobStatus(job.id, nextStatus, reason);
+      setJob(updated as Job);
+      setPauseReason("");
+      setPendingStatus(null);
+      setShowPauseReasonModal(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Unable to change job status.");
+    } finally {
+      setStatusUpdating(false);
+    }
+  }
+
+  function onStatusOptionClick(nextStatus: JobStatus) {
+    if (nextStatus === "paused") {
+      setPendingStatus(nextStatus);
+      setShowPauseReasonModal(true);
+      return;
+    }
+    void applyStatusChange(nextStatus);
+  }
+
   useEffect(() => {
     loadData();
   }, [params.jobId]);
+
+  useEffect(() => {
+    void loadAtsMatches();
+  }, [params.jobId, atsOffset, atsSortBy]);
 
   useEffect(() => {
     if (job) {
@@ -259,6 +330,12 @@ export default function JobDetailPage() {
       navigator.clipboard.writeText(job.raw_jd_text);
     }
   };
+
+  async function handleRescoreAts() {
+    if (!params.jobId) return;
+    await rescoreJobAts(params.jobId);
+    await loadAtsMatches();
+  }
 
   const handleOpenJD = () => {
     if (!job?.raw_jd_text) return;
@@ -322,11 +399,11 @@ export default function JobDetailPage() {
   if (!job) return null;
 
   const statusColors: Record<string, string> = {
+    draft: "bg-gray-100 text-gray-700",
     open: "bg-emerald-50 text-emerald-700",
-    on_hold: "bg-amber-50 text-amber-700",
+    paused: "bg-amber-50 text-amber-700",
     filled: "bg-blue-50 text-blue-700",
-    closed: "bg-gray-100 text-gray-500",
-    cancelled: "bg-red-50 text-red-700",
+    closed: "bg-red-50 text-red-700",
   };
 
   const urgencyColors: Record<string, string> = {
@@ -343,6 +420,13 @@ export default function JobDetailPage() {
     offered: pipelines.filter((item) => item.stage === "offer").length,
     hired: pipelines.filter((item) => item.stage === "placed").length,
   };
+  const candidateNamesById: Record<string, string> = {};
+  for (const candidate of jobCandidates) {
+    const fullName = `${candidate.first_name} ${candidate.last_name}`.trim();
+    candidateNamesById[candidate.id] = fullName || candidate.email || candidate.id;
+  }
+  const scoredCandidateIds = new Set(atsMatches.map((match) => match.candidate_id));
+  const pendingAtsCandidates = jobCandidates.filter((candidate) => !scoredCandidateIds.has(candidate.id));
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
@@ -384,6 +468,26 @@ export default function JobDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-3 ml-4">
+            {ALLOWED_STATUS_TRANSITIONS[job.status]?.length ? (
+              <select
+                className="rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700"
+                defaultValue=""
+                disabled={statusUpdating}
+                onChange={(e) => {
+                  const val = e.target.value as JobStatus;
+                  if (!val) return;
+                  onStatusOptionClick(val);
+                  e.currentTarget.value = "";
+                }}
+              >
+                <option value="">Change Status</option>
+                {ALLOWED_STATUS_TRANSITIONS[job.status].map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <ActionMenu onEdit={openEditPanel} onDelete={() => setShowDeleteConfirm(true)} />
           </div>
         </div>
@@ -489,6 +593,103 @@ export default function JobDetailPage() {
                       <span className="text-sm font-semibold text-gray-900">{formatDate(job.created_at)}</span>
                     </div>
                   </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-indigo-500" /> ATS Matches
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                        value={atsSortBy}
+                        onChange={(e) => {
+                          setAtsOffset(0);
+                          setAtsSortBy(e.target.value as "score_desc" | "missing_critical_asc");
+                        }}
+                      >
+                        <option value="score_desc">Score desc</option>
+                        <option value="missing_critical_asc">Least missing skills</option>
+                      </select>
+                      <Button variant="outline" className="text-xs" onClick={() => void handleRescoreAts()}>
+                        Rescore
+                      </Button>
+                    </div>
+                  </div>
+                  {atsLoading ? (
+                    <p className="text-sm text-gray-500">Processing ATS...</p>
+                  ) : atsMatches.length === 0 && pendingAtsCandidates.length === 0 ? (
+                    <p className="text-sm text-gray-500">No ATS matches computed yet.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {atsMatches.map((m) => (
+                        <div key={m.candidate_id} className="rounded-lg border border-gray-100 p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <Link href={`/candidates/${m.candidate_id}`} className="text-sm font-semibold text-indigo-700 hover:underline">
+                              {m.candidate_name || candidateNamesById[m.candidate_id] || m.candidate_id}
+                            </Link>
+                            <div className="flex items-center gap-1.5">
+                              <ATSScoreBadge score={m.fit_score} compact />
+                              <ATSRecommendationBadge recommendation={m.recommendation} compact />
+                            </div>
+                          </div>
+                          <ATSMatchBreakdownPanel
+                            title="Match Breakdown"
+                            data={{
+                              fit_score: m.fit_score,
+                              recommendation: m.recommendation,
+                              category_scores: m.category_scores,
+                              matched_skills: m.matched_skills,
+                              missing_skills: m.missing_skills,
+                              confidence_score: m.confidence_score,
+                            }}
+                          />
+                        </div>
+                      ))}
+                      {pendingAtsCandidates.length > 0 && (
+                        <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/60 p-3">
+                          <p className="text-xs font-semibold text-amber-700">
+                            {pendingAtsCandidates.length} candidate(s) are submitted but ATS scoring is pending.
+                          </p>
+                          <div className="mt-2 space-y-1">
+                            {pendingAtsCandidates.map((candidate) => (
+                              <Link
+                                key={candidate.id}
+                                href={`/candidates/${candidate.id}`}
+                                className="block text-xs text-amber-800 hover:underline"
+                              >
+                                {candidateNamesById[candidate.id] || candidate.id}
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between pt-1 text-xs text-slate-600">
+                        <span>
+                          Showing {atsMatches.length ? atsOffset + 1 : 0}-{Math.min(atsOffset + atsMatches.length, atsTotal)} of {atsTotal}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            className="h-7 px-2 text-xs"
+                            disabled={atsOffset === 0 || atsLoading}
+                            onClick={() => setAtsOffset((prev) => Math.max(0, prev - atsLimit))}
+                          >
+                            Prev
+                          </Button>
+                          <Button
+                            variant="outline"
+                            className="h-7 px-2 text-xs"
+                            disabled={atsOffset + atsLimit >= atsTotal || atsLoading}
+                            onClick={() => setAtsOffset((prev) => prev + atsLimit)}
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -645,17 +846,7 @@ export default function JobDetailPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
-                    <select 
-                      className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none" 
-                      value={editStatus} 
-                      onChange={(e) => setEditStatus(e.target.value as JobStatus)}
-                    >
-                      <option value="open">Open</option>
-                      <option value="on_hold">On Hold</option>
-                      <option value="cancelled">Cancelled</option>
-                      <option value="closed">Closed (Legacy)</option>
-                      <option value="filled">Filled</option>
-                    </select>
+                    <Input value={editStatus} disabled />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">Employment Type</label>
@@ -724,6 +915,34 @@ export default function JobDetailPage() {
                 </Button>
                 <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={handleDeleteConfirm} disabled={deleting}>
                   {deleting ? "Deleting..." : "Delete Permanently"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showPauseReasonModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl overflow-hidden">
+            <div className="p-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Pause job</h3>
+              <p className="text-sm text-gray-500 mb-4">Enter reason</p>
+              <textarea
+                value={pauseReason}
+                onChange={(e) => setPauseReason(e.target.value)}
+                className="w-full rounded-md border border-slate-200 p-3 text-sm"
+                placeholder="Waiting for client feedback"
+              />
+              <div className="mt-4 flex items-center justify-end gap-3">
+                <Button variant="outline" onClick={() => setShowPauseReasonModal(false)} disabled={statusUpdating}>
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  disabled={statusUpdating || !pauseReason.trim() || pendingStatus !== "paused"}
+                  onClick={() => void applyStatusChange("paused", pauseReason.trim())}
+                >
+                  {statusUpdating ? "Updating..." : "Pause Job"}
                 </Button>
               </div>
             </div>

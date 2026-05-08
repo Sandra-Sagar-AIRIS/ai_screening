@@ -27,6 +27,8 @@ _RECRUITER_DEFAULTS: tuple[str, ...] = (
     "pipeline:read",
     "pipeline:create",
     "pipeline:update",
+    "ats:read",
+    "ats:rescore",
 )
 _CLIENT_DEFAULTS: tuple[str, ...] = (
     "jobs:read",

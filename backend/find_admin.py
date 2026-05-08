@@ -1,7 +1,11 @@
-import uuid
+import os
 from sqlalchemy import create_engine, text
 
-engine = create_engine("postgresql://postgres:postgres@localhost:5432/airis")
+database_url = os.getenv("DATABASE_URL")
+if not database_url:
+    raise RuntimeError("DATABASE_URL is required.")
+
+engine = create_engine(database_url, hide_parameters=True, future=True)
 
 with engine.connect() as conn:
     result = conn.execute(text("SELECT id, organization_id, role FROM profiles WHERE role='admin' LIMIT 1"))

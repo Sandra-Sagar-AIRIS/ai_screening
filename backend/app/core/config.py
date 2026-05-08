@@ -1,10 +1,12 @@
 import os
 from functools import lru_cache
 from pathlib import Path
+import logging
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
+from app.utils.redaction import redact_database_url
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -47,8 +49,27 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("JWT_SECRET_KEY", "jwt_secret_key"),
     )
     jwt_algorithm: str = Field(default="HS256", validation_alias=AliasChoices("JWT_ALGORITHM", "jwt_algorithm"))
+    jwt_access_token_exp_minutes: int = Field(
+        default=60,
+        validation_alias=AliasChoices("JWT_ACCESS_TOKEN_EXP_MINUTES", "jwt_access_token_exp_minutes"),
+    )
+    jwt_refresh_token_exp_days: int = Field(
+        default=7,
+        validation_alias=AliasChoices("JWT_REFRESH_TOKEN_EXP_DAYS", "jwt_refresh_token_exp_days"),
+    )
+    jwt_max_concurrent_sessions_default: int = Field(
+        default=5,
+        validation_alias=AliasChoices(
+            "JWT_MAX_CONCURRENT_SESSIONS_DEFAULT",
+            "jwt_max_concurrent_sessions_default",
+        ),
+    )
     cors_origins: str = Field(
-        default="http://localhost:3000,http://127.0.0.1:3000",
+        default=(
+            "http://localhost:3000,http://127.0.0.1:3000,"
+            "http://localhost:3001,http://127.0.0.1:3001,"
+            "http://localhost:3002,http://127.0.0.1:3002"
+        ),
         validation_alias=AliasChoices("CORS_ORIGINS", "cors_origins"),
     )
 
@@ -114,8 +135,13 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    print("DATABASE_URL:", os.getenv("DATABASE_URL"))
-    return Settings()
+    settings = Settings()
+    logger = logging.getLogger(__name__)
+    logger.debug(
+        "Settings loaded with database URL configured: %s",
+        redact_database_url(settings.database_url or ""),
+    )
+    return settings
 
 
 def get_cors_origins(raw_origins: str) -> list[str]:

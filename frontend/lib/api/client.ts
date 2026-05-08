@@ -72,8 +72,16 @@ function shouldSuppressApiErrorLog(path: string, status: number): boolean {
   ) {
     return true;
   }
+  // Mixed candidate stores: ATS route may 404 for candidate-management-only IDs.
+  if (status === 404 && /^\/candidates\/[^/]+\/matches(?:\?|$)/.test(path)) {
+    return true;
+  }
   // Candidate is already submitted to this job (idempotent UX flow).
   if (status === 409 && /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path)) {
+    return true;
+  }
+  // Some pages optionally fetch org users for dropdowns; 403 is non-blocking there.
+  if (status === 403 && /^\/users(?:\?|$|\/)/.test(path)) {
     return true;
   }
   return false;
@@ -83,14 +91,22 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const { auth = true, headers, ...rest } = options;
   const token = auth ? getAuthToken() : null;
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...rest,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...headers,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...rest,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...headers,
+      },
+    });
+  } catch (error) {
+    const message =
+      "Cannot reach the API server. Verify backend is running and CORS/API base URL are correct.";
+    console.error(`[API Network Error] ${path}:`, error);
+    throw new ApiError(message, 0, error);
+  }
 
   if (!response.ok) {
     if (response.status === 401 && typeof window !== "undefined") {
@@ -111,10 +127,13 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     const expectedCandidateConflict =
       response.status === 409 &&
       (path.includes("/candidate-management/candidates") || /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path));
+    const suppressErrorLog = shouldSuppressApiErrorLog(path, response.status);
 
     if (expectedCandidateConflict) {
       // Expected domain conflict; avoid noisy dev overlay.
       console.warn(`[API Conflict] ${response.status} ${path}: candidate already exists or conflicting payload`);
+    } else if (suppressErrorLog) {
+      console.warn(`[API Expected] ${response.status} ${path}: suppressed noisy error log`);
     } else {
       console.error(`[API Error] ${response.status} ${path}:`, detail);
     }

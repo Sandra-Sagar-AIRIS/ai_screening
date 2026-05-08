@@ -1,8 +1,10 @@
 """Add user-level permission overrides (grant/deny).
 
-Revision ID: 20260429_0001
+Revision ID: 20260429_0101
 Revises: 20260427_0026
 Create Date: 2026-04-29
+
+Renumbered from 20260429_0001 (duplicate id) to avoid Alembic graph ambiguity.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from sqlalchemy.dialects import postgresql
 from app.core.config import get_settings
 from app.core.permissions import ALL_PERMISSIONS
 
-revision: str = "20260429_0001"
+revision: str = "20260429_0101"
 down_revision: str | None = "20260427_0026"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

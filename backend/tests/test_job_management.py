@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.job import Job
+from app.models.job_status_history import JobStatusHistory
 from app.models.job_skill import JobSkill
 from app.models.pipeline import Pipeline
 
@@ -99,7 +100,7 @@ def test_status_transition_draft_to_filled_returns_400(client, auth_headers):
 
     res = client.patch(f"/api/v1/jobs/{job_id}/status", headers=auth_headers, json={"status": "filled"})
     assert res.status_code == 400
-    assert res.json()["detail"] == "INVALID_STATUS_TRANSITION"
+    assert "Invalid status transition" in res.json()["detail"]
 
 
 def test_status_transition_draft_to_open_succeeds(client, auth_headers, db_session: Session):
@@ -125,6 +126,10 @@ def test_status_transition_draft_to_open_succeeds(client, auth_headers, db_sessi
     job = db_session.scalar(select(Job).where(Job.id == UUID(job_id)))
     assert job is not None
     assert job.status == "open"
+    history = db_session.scalars(select(JobStatusHistory).where(JobStatusHistory.job_id == UUID(job_id))).all()
+    assert len(history) == 1
+    assert history[0].previous_status == "draft"
+    assert history[0].new_status == "open"
 
 
 def test_submit_candidate_to_open_job_creates_submission_and_pipeline(

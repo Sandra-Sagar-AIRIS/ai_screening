@@ -5,7 +5,7 @@ Revises: 20260430_0002
 Create Date: 2026-04-30
 
 Ensures the job_skills table exists.  The table was declared in
-20260429_0001 but may have been skipped if the table appeared to exist
+20260429_0001 (extend jobs migration) but may have been skipped if the table appeared to exist
 at that time.  This migration re-checks and creates it if absent.
 """
 

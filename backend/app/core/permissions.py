@@ -31,6 +31,8 @@ USERS_DELETE = "users:delete"
 CLIENTS_CREATE = "clients:create"
 CLIENTS_READ = "clients:read"
 CLIENTS_UPDATE = "clients:update"
+ATS_READ = "ats:read"
+ATS_RESCORE = "ats:rescore"
 
 # Vendor-scoped permissions.
 SUBMISSIONS_CREATE = "submissions:create"
@@ -60,6 +62,8 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     CLIENTS_CREATE,
     CLIENTS_READ,
     CLIENTS_UPDATE,
+    ATS_READ,
+    ATS_RESCORE,
     SUBMISSIONS_CREATE,
     SUBMISSIONS_READ_OWN,
 )

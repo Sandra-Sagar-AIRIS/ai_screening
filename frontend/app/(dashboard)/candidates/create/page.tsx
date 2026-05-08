@@ -214,11 +214,11 @@ export default function CandidatesPage() {
   async function handleUploadResume() {
     if (!resumeFile) {
       setError("Please choose a resume file.");
-      return;
+      return false;
     }
     if (resumeFile.size > 10 * 1024 * 1024) {
       setError("File exceeds 10MB limit.");
-      return;
+      return false;
     }
     setUploading(true);
     try {
@@ -241,8 +241,10 @@ export default function CandidatesPage() {
       setParseResult(payload.parse_result);
       trackModuleEvent("resume_parsed_for_review", { fileName: resumeFile.name });
       setError(null);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to upload and parse resume.");
+      return false;
     } finally {
       setUploading(false);
     }
@@ -621,8 +623,8 @@ export default function CandidatesPage() {
             <div className="flex justify-between pt-4">
               <Button variant="outline" onClick={handleBack}>Back</Button>
               <Button onClick={async () => {
-                 await handleUploadResume();
-                 if (draftCandidate) setActiveStep(3);
+                 const success = await handleUploadResume();
+                 if (success) setActiveStep(3);
               }} disabled={uploading || !resumeFile}>
                 {uploading ? "Parsing..." : "Upload & Parse"}
               </Button>
@@ -706,13 +708,42 @@ export default function CandidatesPage() {
             <CardTitle>Review Parsed Data</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <Input value={draftCandidate.first_name} onChange={(e) => setDraftCandidate(p => p ? {...p, first_name: e.target.value} : p)} />
-              <Input value={draftCandidate.last_name} onChange={(e) => setDraftCandidate(p => p ? {...p, last_name: e.target.value} : p)} />
-              <Input value={draftCandidate.email} onChange={(e) => setDraftCandidate(p => p ? {...p, email: e.target.value} : p)} />
-              <Input value={draftCandidate.phone} onChange={(e) => setDraftCandidate(p => p ? {...p, phone: e.target.value} : p)} />
-              <Input value={draftCandidate.location} onChange={(e) => setDraftCandidate(p => p ? {...p, location: e.target.value} : p)} />
-              <Input value={draftCandidate.headline} onChange={(e) => setDraftCandidate(p => p ? {...p, headline: e.target.value} : p)} />
+            <div className="space-y-4">
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Basic Information</p>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-600">First Name</label>
+                    <Input value={draftCandidate.first_name} onChange={(e) => setDraftCandidate(p => p ? {...p, first_name: e.target.value} : p)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-600">Last Name</label>
+                    <Input value={draftCandidate.last_name} onChange={(e) => setDraftCandidate(p => p ? {...p, last_name: e.target.value} : p)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-600">Email</label>
+                    <Input value={draftCandidate.email} onChange={(e) => setDraftCandidate(p => p ? {...p, email: e.target.value} : p)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-600">Phone</label>
+                    <Input value={draftCandidate.phone} onChange={(e) => setDraftCandidate(p => p ? {...p, phone: e.target.value} : p)} />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Professional Information</p>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-600">Location</label>
+                    <Input value={draftCandidate.location} onChange={(e) => setDraftCandidate(p => p ? {...p, location: e.target.value} : p)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-600">Headline / Current Role</label>
+                    <Input value={draftCandidate.headline} onChange={(e) => setDraftCandidate(p => p ? {...p, headline: e.target.value} : p)} />
+                  </div>
+                </div>
+              </div>
             </div>
             
 

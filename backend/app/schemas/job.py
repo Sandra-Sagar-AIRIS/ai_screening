@@ -30,10 +30,8 @@ class JobParseResponse(BaseModel):
 class JobStatus(StrEnum):
     DRAFT = "draft"
     OPEN = "open"
-    ON_HOLD = "on_hold"
-    # Legacy/compat: some existing UI uses "closed" for "cancelled".
+    PAUSED = "paused"
     CLOSED = "closed"
-    CANCELLED = "cancelled"
     FILLED = "filled"
 
 
@@ -99,6 +97,7 @@ class JobUpdate(BaseModel):
 
 class JobStatusTransition(BaseModel):
     status: JobStatus
+    reason: str | None = None
 
 
 class JobSubmissionCreate(BaseModel):
@@ -124,17 +123,24 @@ class JobSubmissionResponse(BaseModel):
 
 
 class JobMatchCategoryScores(BaseModel):
-    skills_overlap: int
-    location_compatibility: int
-    experience_fit: int
+    required_skills: int
+    preferred_skills: int
+    experience: int
+    title: int
+    education: int
 
 
 class JobMatchEntry(BaseModel):
     rank: int
     candidate_id: UUID
+    candidate_name: str | None = None
     fit_score: int
     category_scores: JobMatchCategoryScores
     already_submitted: bool
+    matched_skills: list[str] = Field(default_factory=list)
+    missing_skills: list[str] = Field(default_factory=list)
+    recommendation: str = "Weak Match"
+    confidence_score: float = 0.0
 
 
 class JobMatchTriggerRequest(BaseModel):
@@ -157,6 +163,24 @@ class JobMatchesResponse(BaseModel):
     offset: int
 
 
+class CandidateMatchEntry(BaseModel):
+    job_id: UUID
+    fit_score: int
+    category_scores: JobMatchCategoryScores
+    matched_skills: list[str] = Field(default_factory=list)
+    missing_skills: list[str] = Field(default_factory=list)
+    recommendation: str = "Weak Match"
+    confidence_score: float = 0.0
+
+
+class CandidateMatchesResponse(BaseModel):
+    candidate_id: UUID
+    matches: list[CandidateMatchEntry]
+    total_count: int
+    limit: int
+    offset: int
+
+
 class JobResponse(BaseModel):
     """Full job representation returned by GET /jobs and GET /jobs/{id}."""
 
@@ -166,6 +190,7 @@ class JobResponse(BaseModel):
     title: str
     description: str | None
     status: JobStatus
+    paused_reason: str | None = None
 
     # Rich spec fields (Task 1 – previously missing from API response).
     location: str | None = None

@@ -16,19 +16,24 @@ import {
   type CandidateInteraction,
   type InterviewRecord,
 } from "@/lib/api/candidates";
-import { getJobs } from "@/lib/api/jobs";
+import { getJobs, submitCandidateToJob } from "@/lib/api/jobs";
 import { getPipelines, updatePipeline } from "@/lib/api/pipeline";
+import { getCandidateMatchesAts, rescoreCandidateAts } from "@/lib/api/ats";
 import type { Candidate, Job, OrganizationUser, Pipeline } from "@/lib/api/types";
 import { getUsers } from "@/lib/api/users";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
+import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
+import { ATSMatchBreakdownPanel } from "@/components/ats/ats-match-breakdown-panel";
 
 export default function CandidateDetailPage() {
   const params = useParams<{ candidateId: string }>();
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [interactions, setInteractions] = useState<CandidateInteraction[]>([]);
+  const [interactionsLoadFailed, setInteractionsLoadFailed] = useState(false);
   const [interviews, setInterviews] = useState<InterviewRecord[]>([]);
   const [users, setUsers] = useState<OrganizationUser[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -55,6 +60,21 @@ export default function CandidateDetailPage() {
   const [submitJobId, setSubmitJobId] = useState("");
   const [submittingToJob, setSubmittingToJob] = useState(false);
   const [updatingPipelineId, setUpdatingPipelineId] = useState<string | null>(null);
+  const [atsMatches, setAtsMatches] = useState<Array<{ job_id: string; fit_score: number; recommendation: string; matched_skills: string[]; missing_skills: string[] }>>([]);
+  const [atsLoading, setAtsLoading] = useState(false);
+
+  async function loadCandidateMatchesWithRetry(candidateId: string, attempts = 4, waitMs = 1200) {
+    for (let i = 0; i < attempts; i++) {
+      const result = await getCandidateMatchesAts(candidateId, { limit: 50, offset: 0 }).catch(() => null);
+      if (result && result.matches.length > 0) {
+        return result.matches;
+      }
+      if (i < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+    }
+    return [] as Array<{ job_id: string; fit_score: number; recommendation: string; matched_skills: string[]; missing_skills: string[] }>;
+  }
 
   useEffect(() => {
     if (!params.candidateId) {
@@ -62,16 +82,30 @@ export default function CandidateDetailPage() {
     }
     async function loadData() {
       try {
+        setInteractionsLoadFailed(false);
         const data = await getCandidateById(params.candidateId);
         const [timelineResult, pipelinesResult, interviewResult] = await Promise.allSettled([
           getCandidateInteractions(params.candidateId, 100, 0),
           getPipelines(200, 0, undefined, params.candidateId),
           getCandidateInterviews(params.candidateId),
         ]);
+        setAtsLoading(true);
+        const atsResult = await getCandidateMatchesAts(params.candidateId, { limit: 50, offset: 0 }).catch(() => null);
         setCandidate(data);
+        setInteractionsLoadFailed(timelineResult.status === "rejected");
         setInteractions(timelineResult.status === "fulfilled" ? timelineResult.value : []);
-        setPipelines(pipelinesResult.status === "fulfilled" ? pipelinesResult.value : []);
+        const loadedPipelines = pipelinesResult.status === "fulfilled" ? pipelinesResult.value : [];
+        setPipelines(loadedPipelines);
         setInterviews(interviewResult.status === "fulfilled" ? interviewResult.value : []);
+        setAtsMatches(atsResult?.matches ?? []);
+        if ((atsResult?.matches?.length ?? 0) === 0 && loadedPipelines.length > 0) {
+          // ATS scoring is async; trigger once and poll briefly before showing unavailable.
+          await rescoreCandidateAts(params.candidateId).catch(() => undefined);
+          const retried = await loadCandidateMatchesWithRetry(params.candidateId, 4, 1200);
+          if (retried.length > 0) {
+            setAtsMatches(retried);
+          }
+        }
         setFirstName(data.first_name);
         setLastName(data.last_name);
         setEmail(data.email);
@@ -87,6 +121,9 @@ export default function CandidateDetailPage() {
         } else {
           setError("Unable to load candidate details");
         }
+      }
+      finally {
+        setAtsLoading(false);
       }
     }
     loadData();
@@ -158,7 +195,73 @@ export default function CandidateDetailPage() {
 
     try {
       const orgId = localStorage.getItem("airis_organization_id");
-      const response = await fetch(resumeUrl, {
+      const fileName = (candidate?.resume_file_name || "").toLowerCase();
+      const isDocx = fileName.endsWith(".docx");
+      const isDoc = fileName.endsWith(".doc");
+
+      if (action === "open" && isDocx) {
+        const docxUrl = `${resumeUrl}${resumeUrl.includes("?") ? "&" : "?"}disposition=attachment`;
+        const docxRes = await fetch(docxUrl, {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("airis_access_token")}`,
+            ...(orgId ? { "X-Workspace-Id": orgId } : {}),
+          },
+        });
+        if (!docxRes.ok) throw new Error("Failed to load DOCX resume");
+        const arrayBuffer = await docxRes.arrayBuffer();
+
+        const previewWin = window.open("", "_blank");
+        if (!previewWin) {
+          throw new Error("Popup blocked. Please allow popups for resume preview.");
+        }
+        previewWin.document.write(
+          "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+          + "<title>Resume Preview</title>"
+          + "<style>"
+          + "body{margin:0;background:#f8fafc;font-family:Inter,Segoe UI,Arial,sans-serif;}"
+          + ".viewer-shell{max-width:980px;margin:20px auto;padding:0 12px;}"
+          + ".docx-wrapper{background:transparent;padding:0 !important;}"
+          + ".docx{background:#fff !important;border:1px solid #e2e8f0;border-radius:12px;padding:28px !important;box-shadow:0 1px 2px rgba(0,0,0,.04);}"
+          + "</style>"
+          + "</head><body><div id='docx'></div></body></html>"
+        );
+        previewWin.document.close();
+        const container = previewWin.document.getElementById("docx");
+        if (!container) throw new Error("Failed to initialize preview container.");
+        container.className = "viewer-shell";
+
+        const { renderAsync } = await import("docx-preview");
+        await renderAsync(arrayBuffer, container, previewWin.document.head, {
+          className: "docx",
+          inWrapper: true,
+          ignoreWidth: true,
+          ignoreHeight: true,
+          breakPages: false,
+          ignoreFonts: false,
+        });
+        return;
+      }
+
+      if (action === "open" && isDoc) {
+        const previewUrl = `${API_BASE_URL}/candidate-management/candidates/${params.candidateId}/resume/preview`;
+        const previewRes = await fetch(previewUrl, {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("airis_access_token")}`,
+            ...(orgId ? { "X-Workspace-Id": orgId } : {}),
+          },
+        });
+        if (!previewRes.ok) throw new Error("Failed to preview resume");
+        const preview = await previewRes.json() as { file_name: string; html: string };
+        const htmlBlob = new Blob(
+          [preview.html],
+          { type: "text/html" }
+        );
+        window.open(window.URL.createObjectURL(htmlBlob), "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      const targetUrl = `${resumeUrl}${resumeUrl.includes("?") ? "&" : "?"}disposition=${action === "open" ? "inline" : "attachment"}`;
+      const response = await fetch(targetUrl, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("airis_access_token")}`,
           ...(orgId ? { "X-Workspace-Id": orgId } : {}),
@@ -176,7 +279,7 @@ export default function CandidateDetailPage() {
         a.click();
         document.body.removeChild(a);
       } else {
-        window.open(url, "_blank");
+        window.open(url, "_blank", "noopener,noreferrer");
       }
       
       setTimeout(() => window.URL.revokeObjectURL(url), 1000);
@@ -379,12 +482,18 @@ export default function CandidateDetailPage() {
     }
     setSubmittingToJob(true);
     try {
-      await updateCandidate(candidate.id, { job_id: submitJobId });
+      await submitCandidateToJob(submitJobId, candidate.id);
       try {
         const linkedPipelines = await getPipelines(200, 0, undefined, candidate.id);
         setPipelines(linkedPipelines);
       } catch {
         setPipelines([]);
+      }
+      try {
+        const fresh = await getCandidateMatchesAts(candidate.id, { limit: 50, offset: 0 });
+        setAtsMatches(fresh.matches);
+      } catch {
+        // ATS can lag behind async scoring briefly.
       }
       setSubmitJobId("");
     } catch (err) {
@@ -406,6 +515,15 @@ export default function CandidateDetailPage() {
     } finally {
       setUpdatingPipelineId(null);
     }
+  }
+
+  async function handleRescoreAts() {
+    if (!params.candidateId) return;
+    setAtsLoading(true);
+    await rescoreCandidateAts(params.candidateId).catch(() => undefined);
+    const freshMatches = await loadCandidateMatchesWithRetry(params.candidateId, 6, 1000);
+    setAtsMatches(freshMatches);
+    setAtsLoading(false);
   }
 
 
@@ -512,6 +630,55 @@ export default function CandidateDetailPage() {
           ) : (
             <p className="text-sm text-slate-500">No resume uploaded for this candidate.</p>
           )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>ATS Match Breakdown</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <ATSScoreBadge score={atsMatches[0]?.fit_score} isLoading={atsLoading} />
+              <ATSRecommendationBadge recommendation={atsMatches[0]?.recommendation} isLoading={atsLoading} />
+            </div>
+            <Button variant="outline" onClick={() => void handleRescoreAts()}>
+              Rescore ATS
+            </Button>
+          </div>
+          {atsLoading ? (
+            <p className="text-slate-500">Processing ATS...</p>
+          ) : atsMatches.length === 0 ? (
+            <p className="text-slate-500">ATS unavailable.</p>
+          ) : (
+            atsMatches.map((match) => (
+              <ATSMatchBreakdownPanel
+                key={match.job_id}
+                title={jobs.find((job) => job.id === match.job_id)?.title ?? match.job_id}
+                data={{
+                  fit_score: match.fit_score,
+                  recommendation: match.recommendation,
+                  matched_skills: match.matched_skills,
+                  missing_skills: match.missing_skills,
+                }}
+              />
+            ))
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>ATS Candidate Insights</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          {candidate.parse_status && candidate.parse_status !== "completed" ? (
+            <p className="text-slate-500">Processing ATS...</p>
+          ) : null}
+          <p><span className="font-medium">Extracted Skills:</span> {candidate.parsed_resume_data?.skills?.length ? candidate.parsed_resume_data.skills.join(", ") : "ATS unavailable"}</p>
+          <p><span className="font-medium">Extracted Experience:</span> {candidate.parsed_resume_data?.years_of_experience ?? candidate.years_experience ?? "-"}</p>
+          <p><span className="font-medium">Parsed Titles:</span> {candidate.parsed_resume_data?.previous_titles?.length ? candidate.parsed_resume_data.previous_titles.join(", ") : "-"}</p>
+          <p><span className="font-medium">Parsed Education:</span> {candidate.parsed_resume_data?.education ?? candidate.education ?? "-"}</p>
+          <p><span className="font-medium">Certifications:</span> {candidate.parsed_resume_data?.certifications?.length ? candidate.parsed_resume_data.certifications.join(", ") : "-"}</p>
         </CardContent>
       </Card>
       <Card>
@@ -654,7 +821,9 @@ export default function CandidateDetailPage() {
               {addingNote ? "Adding..." : "Add Note"}
             </Button>
           </div>
-          {orderedTimeline.length === 0 ? (
+          {interactionsLoadFailed ? (
+            <p className="text-amber-700">Unable to load interactions. You can still view the profile and ATS data.</p>
+          ) : orderedTimeline.length === 0 ? (
             <p className="text-slate-500">No interactions yet.</p>
           ) : (
             orderedTimeline.map((item) => (

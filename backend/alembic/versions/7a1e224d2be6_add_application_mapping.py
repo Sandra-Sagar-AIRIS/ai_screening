@@ -43,14 +43,16 @@ def upgrade() -> None:
         op.create_index('idx_app_job', 'applications', ['job_id'], unique=False)
         op.create_index(op.f('ix_applications_organization_id'), 'applications', ['organization_id'], unique=False)
 
-    columns = [col['name'] for col in inspector.get_columns('candidates')]
-    if 'job_id' in columns:
+    columns = [col["name"] for col in sa.inspect(conn).get_columns("candidates")]
+    if "job_id" in columns:
         op.execute(
             """
             INSERT INTO applications (organization_id, candidate_id, job_id, stage, status)
-            SELECT c.organization_id, c.id, c.job_id, 'applied', 'active'
+            SELECT COALESCE(c.organization_id, j.organization_id), c.id, c.job_id, 'applied', 'active'
             FROM candidates c
+            INNER JOIN jobs j ON j.id = c.job_id
             WHERE c.job_id IS NOT NULL
+            AND COALESCE(c.organization_id, j.organization_id) IS NOT NULL
             AND NOT EXISTS (
                 SELECT 1 FROM applications a
                 WHERE a.candidate_id = c.id AND a.job_id = c.job_id

@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any, Generic, TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 T = TypeVar("T")
@@ -259,12 +259,21 @@ class ResumeParseResult(BaseModel):
     ai_parse_version: str | None = Field(default=None, max_length=64)
     extracted_skills: list[CandidateSkillInput] = Field(default_factory=list)
 
+    # ATS-friendly structured fields produced by the local extractor.
+    # All optional so existing AI fallback callers stay backward-compatible.
+    years_of_experience: float | None = Field(default=None, ge=0.0, le=80.0)
+    education: list[str] = Field(default_factory=list)
+    certifications: list[str] = Field(default_factory=list)
+    previous_titles: list[str] = Field(default_factory=list)
+    normalized_keywords: list[str] = Field(default_factory=list)
+
     model_config = ConfigDict(extra="forbid")
 
 
 class ResumeUploadResponse(BaseModel):
     candidate: CandidateResponse
     parse_result: ResumeParseResult
+    resume_download_url: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -286,12 +295,33 @@ class InteractionResponse(BaseModel):
     interaction_type: InteractionTypeSchema
     title: str | None
     body: str | None
-    interaction_metadata: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("interaction_metadata", "metadata"),
+    )
     actor_user_id: UUID | None
     actor_role: str | None
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def coerce_interaction_metadata(cls, value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value
+        return {"_legacy_wrapped": True, "value": value}
+
+    @field_validator("title", "body", mode="before")
+    @classmethod
+    def coerce_optional_text(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        return str(value)
 
 
 class MergeCandidatesRequest(BaseModel):
