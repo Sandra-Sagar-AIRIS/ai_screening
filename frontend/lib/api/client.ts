@@ -55,6 +55,8 @@ export function formatApiErrorForUser(err: unknown): string {
 
 type RequestOptions = RequestInit & {
   auth?: boolean;
+  /** Abort the request after this many milliseconds (non-blocking server work should not require long waits). */
+  timeoutMs?: number;
 };
 
 function getAuthToken() {
@@ -92,24 +94,52 @@ function shouldSuppressApiErrorLog(path: string, status: number): boolean {
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { auth = true, headers, ...rest } = options;
+  const { auth = true, timeoutMs, headers, signal: userSignal, ...rest } = options;
   const token = auth ? getAuthToken() : null;
+
+  const abortController = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  if (timeoutMs != null && timeoutMs > 0) {
+    timeoutId = globalThis.setTimeout(() => abortController.abort(), timeoutMs);
+  }
+  if (userSignal) {
+    if (userSignal.aborted) {
+      abortController.abort();
+    } else {
+      userSignal.addEventListener("abort", () => abortController.abort(), { once: true });
+    }
+  }
+  const signal = abortController.signal;
 
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...rest,
+      signal,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...headers,
       },
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const aborted =
+      error instanceof Error && error.name === "AbortError";
+    if (aborted) {
+      const message =
+        timeoutMs != null && timeoutMs > 0
+          ? `Request timed out after ${timeoutMs / 1000}s. The server may still be processing — try refreshing.`
+          : "Request was cancelled.";
+      throw new ApiError(message, 0, error);
+    }
     const message =
       "Cannot reach the API server. Verify backend is running and CORS/API base URL are correct.";
     console.error(`[API Network Error] ${path}:`, error);
     throw new ApiError(message, 0, error);
+  } finally {
+    if (timeoutId !== undefined) {
+      globalThis.clearTimeout(timeoutId);
+    }
   }
 
   if (!response.ok) {

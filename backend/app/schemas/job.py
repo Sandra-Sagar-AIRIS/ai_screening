@@ -289,6 +289,7 @@ class JobResponse(BaseModel):
     raw_jd_text: str | None = None
     parsing_source: str | None = None
     parsing_status: str | None = None
+    enrichment_status: str | None = None
 
     created_at: datetime
     updated_at: datetime

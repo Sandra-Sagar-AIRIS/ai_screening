@@ -47,7 +47,9 @@ class Job(Base):
     raw_jd_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsing_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
     parsing_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    
+    # Async ATS / match-cache pipeline: queued → running → ready | failed (null = not tracked / legacy).
+    enrichment_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     key_responsibilities: Mapped[list[str] | None] = mapped_column(sa.dialects.postgresql.ARRAY(String), nullable=True)
     
     filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

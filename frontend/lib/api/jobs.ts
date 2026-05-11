@@ -116,9 +116,10 @@ export async function createJob(payload: {
   parsing_source?: string | null;
   parsing_status?: string | null;
 }) {
-  return apiRequest(`/jobs`, {
+  return apiRequest<Job>(`/jobs`, {
     method: "POST",
     body: JSON.stringify(payload),
+    timeoutMs: 25_000,
   });
 }
 

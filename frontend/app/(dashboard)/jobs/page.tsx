@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { createJob, getJobs, updateJob, deleteJob, parseJD, type JobParseResult } from "@/lib/api/jobs";
@@ -14,6 +14,14 @@ import { Input } from "@/components/ui/input";
 import { Briefcase, CircleDot, Shield, CheckCircle2, RefreshCw } from "lucide-react";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
+
+function enrichmentStatusLabel(status: string | null | undefined): string | null {
+  if (!status || status === "ready") return null;
+  if (status === "enriching") return "Preparing ATS metadata…";
+  if (status === "created") return "Just created";
+  if (status === "failed") return "Metadata failed";
+  return null;
+}
 
 function SkillTags({
   skills,
@@ -241,7 +249,7 @@ function JDPreviewModal({
   clientId: string;
   onBack: () => void;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (job: Job) => void;
 }) {
   const [title, setTitle] = useState(initial.title ?? "");
   const [location, setLocation] = useState(initial.location ?? "");
@@ -255,13 +263,16 @@ function JDPreviewModal({
   const [preferredSkills, setPreferredSkills] = useState<string[]>(initial.preferred_skills ?? []);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const createLock = useRef(false);
 
   async function handleCreate() {
     if (!title.trim()) { setError("Title is required."); return; }
+    if (createLock.current) return;
+    createLock.current = true;
     setError(null);
     try {
       setCreating(true);
-      await createJob({
+      const job = await createJob({
         client_id: clientId,
         title: title.trim(),
         description: description.trim() || null,
@@ -278,10 +289,11 @@ function JDPreviewModal({
         parsing_source: initial.parsing_source,
         parsing_status: initial.parsing_status,
       });
-      onCreated();
+      onCreated(job);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create job.");
     } finally {
+      createLock.current = false;
       setCreating(false);
     }
   }
@@ -409,6 +421,7 @@ function JDPreviewModal({
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -428,6 +441,7 @@ export default function JobsPage() {
 
   // regular create form
   const [creating, setCreating] = useState(false);
+  const createPanelLock = useRef(false);
   const [showCreate, setShowCreate] = useState(false);
   const [clientId, setClientId] = useState("");
   const [title, setTitle] = useState("");
@@ -449,7 +463,7 @@ export default function JobsPage() {
   const [jdClientId, setJdClientId] = useState("");
   const [parsedResult, setParsedResult] = useState<JobParseResult | null>(null);
 
-  async function refreshJobs() {
+  const refreshJobs = useCallback(async () => {
     try {
       const data = await getJobs(50, 0);
       setJobs(data);
@@ -457,7 +471,9 @@ export default function JobsPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load jobs.");
     }
-  }
+  }, []);
+
+  const needsEnrichmentPoll = jobs.some((j) => j.enrichment_status === "enriching");
 
   async function handleDeleteJob(jobId: string) {
     if (!window.confirm("Are you sure you want to delete this job? This action cannot be undone.")) return;
@@ -471,11 +487,17 @@ export default function JobsPage() {
 
   useEffect(() => {
     void refreshJobs();
-    const interval = window.setInterval(() => {
+    const interval = globalThis.setInterval(() => {
       void refreshJobs();
-    }, 30000);
-    return () => window.clearInterval(interval);
-  }, []);
+    }, needsEnrichmentPoll ? 8000 : 30000);
+    return () => globalThis.clearInterval(interval);
+  }, [needsEnrichmentPoll, refreshJobs]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = globalThis.setTimeout(() => setNotice(null), 8000);
+    return () => globalThis.clearTimeout(t);
+  }, [notice]);
 
   function handleImportClick() {
     setShowJDInput(true);
@@ -525,6 +547,14 @@ export default function JobsPage() {
 
   return (
     <section className="relative space-y-4">
+      {notice ? (
+        <div
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900"
+          role="status"
+        >
+          {notice}
+        </div>
+      ) : null}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Jobs</h1>
         <div className="flex items-center gap-2">
@@ -648,9 +678,16 @@ export default function JobsPage() {
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div className="min-w-0 space-y-2">
                     <p className="truncate text-base font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{job.title}</p>
-                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${getStatusBadgeClass(job.status)}`}>
-                      {getStatusLabel(job.status)}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${getStatusBadgeClass(job.status)}`}>
+                        {getStatusLabel(job.status)}
+                      </span>
+                      {enrichmentStatusLabel(job.enrichment_status) ? (
+                        <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-amber-800">
+                          {enrichmentStatusLabel(job.enrichment_status)}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
 
@@ -737,11 +774,13 @@ export default function JobsPage() {
                   setError("Title and Client ID are required.");
                   return;
                 }
+                if (createPanelLock.current) return;
+                createPanelLock.current = true;
                 try {
                   setCreating(true);
                   const req = requiredSkills.split(/[\n,]+/g).map((s) => s.trim()).filter(Boolean);
                   const pref = preferredSkills.split(/[\n,]+/g).map((s) => s.trim()).filter(Boolean);
-                  await createJob({
+                  const created = await createJob({
                     client_id: clientId.trim(),
                     title: title.trim(),
                     description: description.trim() || null,
@@ -752,8 +791,12 @@ export default function JobsPage() {
                     required_skills: req,
                     preferred_skills: pref,
                   });
-                  setShowCreate(false); resetForm(); await refreshJobs();
-                } catch (err) { setError(err instanceof ApiError ? err.message : "Unable to create job."); } finally { setCreating(false); }
+                  setShowCreate(false);
+                  resetForm();
+                  setJobs((prev) => [created, ...prev.filter((j) => j.id !== created.id)]);
+                  setNotice("Job created. Preparing ATS metadata in the background.");
+                  void refreshJobs();
+                } catch (err) { setError(err instanceof ApiError ? err.message : "Unable to create job."); } finally { createPanelLock.current = false; setCreating(false); }
               }}>{creating ? "Creating..." : "Create Job"}</Button>
             </div>
           </div>
@@ -851,10 +894,12 @@ export default function JobsPage() {
             setShowJDInput(true);
           }}
           onClose={() => { setParsedResult(null); setJdClientId(""); }}
-          onCreated={async () => {
+          onCreated={(job) => {
             setParsedResult(null);
             setJdClientId("");
-            await refreshJobs();
+            setJobs((prev) => [job, ...prev.filter((j) => j.id !== job.id)]);
+            setNotice("Job created. Preparing ATS metadata in the background.");
+            void refreshJobs();
           }}
         />
       ) : null}

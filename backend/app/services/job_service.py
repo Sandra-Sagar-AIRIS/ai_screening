@@ -201,6 +201,7 @@ class JobService:
             raw_jd_text=job.raw_jd_text,
             parsing_source=job.parsing_source,
             parsing_status=job.parsing_status,
+            enrichment_status=getattr(job, "enrichment_status", None),
             created_at=job.created_at,
             updated_at=job.updated_at
         )
@@ -262,6 +263,7 @@ class JobService:
                 detail={"error": "INVALID_EXPERIENCE_RANGE"},
             )
 
+        t0 = time.monotonic()
         job = Job(
             organization_id=organization_id,
             client_id=payload.client_id,
@@ -281,12 +283,15 @@ class JobService:
             raw_jd_text=payload.raw_jd_text,
             parsing_source=payload.parsing_source,
             parsing_status=payload.parsing_status,
+            # Row exists; heavy ATS work runs in background (see enrichment_status).
+            enrichment_status="created",
             created_by=created_by,
         )
         self.db.add(job)
-        self.db.commit()
-        self.db.refresh(job)
+        self.db.flush()
+        t_flush = time.monotonic()
 
+        skills_dispatch = False
         # Store normalized job skills + record JD parsing lifecycle so the UI
         # can tell when ATS-ready data is present.
         if payload.required_skills or payload.preferred_skills:
@@ -296,29 +301,49 @@ class JobService:
                 preferred_skills=payload.preferred_skills,
             )
             job.parsing_status = "completed" if ok else "failed"
-            self.db.add(job)
-            self.db.commit()
             if ok:
-                try:
-                    from app.candidate_management.tasks_ats import rescore_job_task, run_rescore_job
-
-                    dispatch_task(
-                        task=rescore_job_task,
-                        fallback=run_rescore_job,
-                        kwargs={
-                            "organization_id": str(organization_id),
-                            "job_id": str(job.id),
-                        },
-                    )
-                except Exception:
-                    pass
+                job.enrichment_status = "enriching"
+                skills_dispatch = True
+            self.db.add(job)
         else:
             # No skills supplied yet — leave parsing_status empty/pending so the
             # caller can finalize it later (e.g. via /jobs/parse-jd).
             if job.parsing_status is None:
                 job.parsing_status = "pending"
-                self.db.add(job)
-                self.db.commit()
+            self.db.add(job)
+
+        self.db.commit()
+        self.db.refresh(job)
+        t_commit = time.monotonic()
+
+        if skills_dispatch:
+            try:
+                from app.candidate_management.tasks_ats import rescore_job_task, run_rescore_job
+
+                dispatch_task(
+                    task=rescore_job_task,
+                    fallback=run_rescore_job,
+                    kwargs={
+                        "organization_id": str(organization_id),
+                        "job_id": str(job.id),
+                    },
+                )
+            except Exception:
+                logger.exception("job.create.dispatch_rescore_failed", extra={"job_id": str(job.id)})
+        t_dispatch = time.monotonic()
+
+        logger.info(
+            "job.create.timing",
+            extra={
+                "job_id": str(job.id),
+                "organization_id": str(organization_id),
+                "total_ms": int((t_dispatch - t0) * 1000),
+                "flush_ms": int((t_flush - t0) * 1000),
+                "db_commit_ms": int((t_commit - t_flush) * 1000),
+                "dispatch_submit_ms": int((t_dispatch - t_commit) * 1000),
+                "skills_background": skills_dispatch,
+            },
+        )
 
         return self._get_job_response(job)
 
@@ -428,6 +453,7 @@ class JobService:
 
         # If skills are provided in an update, replace them fully.
         skills_touched = False
+        skills_upsert_ok = False
         if "required_skills" in update_data or "preferred_skills" in update_data:
             required_skills = update_data.pop("required_skills", None)
             preferred_skills = update_data.pop("preferred_skills", None)
@@ -438,9 +464,13 @@ class JobService:
             )
             update_data["parsing_status"] = "completed" if ok else "failed"
             skills_touched = True
+            skills_upsert_ok = ok
 
         for field, value in update_data.items():
             setattr(job, field, value)
+
+        if skills_touched and skills_upsert_ok:
+            job.enrichment_status = "enriching"
 
         # Hint downstream pipelines that this job's normalized requirements
         # changed; Phase 5 wires this to ATS rescoring.
