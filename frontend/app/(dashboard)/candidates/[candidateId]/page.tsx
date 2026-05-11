@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { ApiError, API_BASE_URL } from "@/lib/api/client";
 import { getMyPermissions } from "@/lib/api/auth";
@@ -18,8 +18,14 @@ import {
 } from "@/lib/api/candidates";
 import { getJobs, submitCandidateToJob } from "@/lib/api/jobs";
 import { getPipelines, updatePipeline } from "@/lib/api/pipeline";
-import { getCandidateMatchesAts, rescoreCandidateAts } from "@/lib/api/ats";
-import type { Candidate, Job, OrganizationUser, Pipeline } from "@/lib/api/types";
+import {
+  atsAwaitingSemanticEnrichment,
+  getCandidateMatchesAts,
+  pollAtsPairStatusesUntilSettled,
+  pollCandidateMatchesUntilEnriched,
+  rescoreCandidateAts,
+} from "@/lib/api/ats";
+import type { Candidate, CandidateMatchEntry, Job, OrganizationUser, Pipeline } from "@/lib/api/types";
 import { getUsers } from "@/lib/api/users";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +33,10 @@ import { Input } from "@/components/ui/input";
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
 import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
 import { ATSMatchBreakdownPanel } from "@/components/ats/ats-match-breakdown-panel";
+
+function snapJobIdsFromMatches(matches: CandidateMatchEntry[]): string[] {
+  return matches.map((m) => m.job_id).filter(Boolean);
+}
 
 export default function CandidateDetailPage() {
   const params = useParams<{ candidateId: string }>();
@@ -60,26 +70,43 @@ export default function CandidateDetailPage() {
   const [submitJobId, setSubmitJobId] = useState("");
   const [submittingToJob, setSubmittingToJob] = useState(false);
   const [updatingPipelineId, setUpdatingPipelineId] = useState<string | null>(null);
-  const [atsMatches, setAtsMatches] = useState<Array<{ job_id: string; fit_score: number; recommendation: string; matched_skills: string[]; missing_skills: string[] }>>([]);
+  const [atsMatches, setAtsMatches] = useState<CandidateMatchEntry[]>([]);
   const [atsLoading, setAtsLoading] = useState(false);
+  const [atsRescoreBusy, setAtsRescoreBusy] = useState(false);
+  const [atsHint, setAtsHint] = useState<string | null>(null);
+  const candidateLoadSeqRef = useRef(0);
+  const atsSemanticInFlight = useMemo(() => atsAwaitingSemanticEnrichment(atsMatches), [atsMatches]);
 
-  async function loadCandidateMatchesWithRetry(candidateId: string, attempts = 4, waitMs = 1200) {
+  async function loadCandidateMatchesWithRetry(
+    candidateId: string,
+    loadSeq: number,
+    attempts = 4,
+    waitMs = 1200
+  ): Promise<CandidateMatchEntry[]> {
     for (let i = 0; i < attempts; i++) {
-      const result = await getCandidateMatchesAts(candidateId, { limit: 50, offset: 0 }).catch(() => null);
-      if (result && result.matches.length > 0) {
-        return result.matches;
+      try {
+        const result = await getCandidateMatchesAts(candidateId, { limit: 50, offset: 0 });
+        if (loadSeq !== candidateLoadSeqRef.current) {
+          return [];
+        }
+        if (result.matches.length > 0) {
+          return result.matches;
+        }
+      } catch {
+        // Transient or permission noise; retry a few times after rescoring.
       }
       if (i < attempts - 1) {
         await new Promise((resolve) => setTimeout(resolve, waitMs));
       }
     }
-    return [] as Array<{ job_id: string; fit_score: number; recommendation: string; matched_skills: string[]; missing_skills: string[] }>;
+    return [];
   }
 
   useEffect(() => {
     if (!params.candidateId) {
       return;
     }
+    const loadSeq = ++candidateLoadSeqRef.current;
     async function loadData() {
       try {
         setInteractionsLoadFailed(false);
@@ -90,18 +117,33 @@ export default function CandidateDetailPage() {
           getCandidateInterviews(params.candidateId),
         ]);
         setAtsLoading(true);
-        const atsResult = await getCandidateMatchesAts(params.candidateId, { limit: 50, offset: 0 }).catch(() => null);
+        setAtsHint(null);
+        let initialMatches: CandidateMatchEntry[] = [];
+        try {
+          const first = await getCandidateMatchesAts(params.candidateId, { limit: 50, offset: 0 });
+          initialMatches = first.matches ?? [];
+          setAtsHint(first.ats_hint ?? null);
+        } catch {
+          initialMatches = [];
+          setAtsHint(null);
+        }
+        if (loadSeq !== candidateLoadSeqRef.current) {
+          return;
+        }
         setCandidate(data);
         setInteractionsLoadFailed(timelineResult.status === "rejected");
         setInteractions(timelineResult.status === "fulfilled" ? timelineResult.value : []);
         const loadedPipelines = pipelinesResult.status === "fulfilled" ? pipelinesResult.value : [];
         setPipelines(loadedPipelines);
         setInterviews(interviewResult.status === "fulfilled" ? interviewResult.value : []);
-        setAtsMatches(atsResult?.matches ?? []);
-        if ((atsResult?.matches?.length ?? 0) === 0 && loadedPipelines.length > 0) {
+        setAtsMatches(initialMatches);
+        if (initialMatches.length === 0 && loadedPipelines.length > 0) {
           // ATS scoring is async; trigger once and poll briefly before showing unavailable.
           await rescoreCandidateAts(params.candidateId).catch(() => undefined);
-          const retried = await loadCandidateMatchesWithRetry(params.candidateId, 4, 1200);
+          if (loadSeq !== candidateLoadSeqRef.current) {
+            return;
+          }
+          const retried = await loadCandidateMatchesWithRetry(params.candidateId, loadSeq, 4, 1200);
           if (retried.length > 0) {
             setAtsMatches(retried);
           }
@@ -123,10 +165,12 @@ export default function CandidateDetailPage() {
         }
       }
       finally {
-        setAtsLoading(false);
+        if (loadSeq === candidateLoadSeqRef.current) {
+          setAtsLoading(false);
+        }
       }
     }
-    loadData();
+    void loadData();
   }, [params.candidateId]);
 
   useEffect(() => {
@@ -519,11 +563,56 @@ export default function CandidateDetailPage() {
 
   async function handleRescoreAts() {
     if (!params.candidateId) return;
-    setAtsLoading(true);
-    await rescoreCandidateAts(params.candidateId).catch(() => undefined);
-    const freshMatches = await loadCandidateMatchesWithRetry(params.candidateId, 6, 1000);
-    setAtsMatches(freshMatches);
-    setAtsLoading(false);
+    const loadSeq = candidateLoadSeqRef.current;
+    if (atsSemanticInFlight || atsRescoreBusy) return;
+    setAtsRescoreBusy(true);
+    setError(null);
+    try {
+      const meta = await rescoreCandidateAts(params.candidateId);
+      try {
+        const snap = await getCandidateMatchesAts(params.candidateId, { limit: 50, offset: 0 });
+        if (loadSeq === candidateLoadSeqRef.current) {
+          setAtsMatches(snap.matches ?? []);
+        }
+      } catch {
+        const fallback = await loadCandidateMatchesWithRetry(params.candidateId, loadSeq, 4, 800);
+        if (loadSeq === candidateLoadSeqRef.current) {
+          setAtsMatches(fallback);
+        }
+      }
+      if (loadSeq === candidateLoadSeqRef.current && meta.semantic_enrichment === "queued") {
+        const pairJobIds = Array.from(
+          new Set([
+            ...snapJobIdsFromMatches(atsMatches),
+            ...pipelines.map((p) => p.job_id),
+          ])
+        );
+        if (pairJobIds.length > 0) {
+          await pollAtsPairStatusesUntilSettled(
+            pairJobIds.map((jobId) => ({ candidate_id: params.candidateId, job_id: jobId })),
+          );
+        } else {
+          await pollCandidateMatchesUntilEnriched(params.candidateId, {
+            onTick: (m) => {
+              if (loadSeq !== candidateLoadSeqRef.current) return;
+              setAtsMatches(m);
+            },
+          });
+        }
+        const refreshed = await getCandidateMatchesAts(params.candidateId, { limit: 50, offset: 0 });
+        if (loadSeq === candidateLoadSeqRef.current) {
+          setAtsMatches(refreshed.matches ?? []);
+        }
+      }
+    } catch {
+      if (loadSeq === candidateLoadSeqRef.current) {
+        setError("ATS rescore failed. Wait a few seconds and try again.");
+      }
+    } finally {
+      if (loadSeq === candidateLoadSeqRef.current) {
+        setAtsRescoreBusy(false);
+      }
+    }
   }
 
 
@@ -639,27 +728,75 @@ export default function CandidateDetailPage() {
         <CardContent className="space-y-3 text-sm">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
-              <ATSScoreBadge score={atsMatches[0]?.fit_score} isLoading={atsLoading} />
-              <ATSRecommendationBadge recommendation={atsMatches[0]?.recommendation} isLoading={atsLoading} />
+              <ATSScoreBadge
+                score={atsMatches[0]?.fit_score}
+                isLoading={atsLoading || atsRescoreBusy}
+                scorePending={!atsLoading && !atsRescoreBusy && atsMatches.length === 0 && pipelines.length > 0}
+              />
+              <ATSRecommendationBadge
+                recommendation={atsMatches[0]?.recommendation}
+                isLoading={atsLoading || atsRescoreBusy}
+                awaitingMatch={!atsLoading && !atsRescoreBusy && atsMatches.length === 0 && pipelines.length > 0}
+              />
             </div>
-            <Button variant="outline" onClick={() => void handleRescoreAts()}>
-              Rescore ATS
+            <Button
+              variant="outline"
+              onClick={() => void handleRescoreAts()}
+              disabled={atsRescoreBusy || atsSemanticInFlight}
+            >
+              {atsRescoreBusy ? "Rescoring…" : atsSemanticInFlight ? "AI enrichment…" : "Rescore ATS"}
             </Button>
           </div>
           {atsLoading ? (
-            <p className="text-slate-500">Processing ATS...</p>
+            <div className="space-y-2 text-slate-500">
+              <div className="h-3 w-48 animate-pulse rounded bg-slate-100" />
+              <div className="h-24 animate-pulse rounded-lg border border-slate-100 bg-slate-50/80" />
+            </div>
+          ) : atsRescoreBusy && atsMatches.length === 0 ? (
+            <p className="text-slate-500">Saving baseline scores…</p>
           ) : atsMatches.length === 0 ? (
-            <p className="text-slate-500">ATS unavailable.</p>
+            <div className="space-y-2 text-slate-500">
+              <p>
+                {pipelines.length > 0
+                  ? "No scored rows in candidate_job_matches yet — ATS runs after resume parse and job submit."
+                  : "No job applications yet — submit this candidate to a job to generate ATS scores."}
+              </p>
+              {atsHint === "NO_SCORE_ROWS_YET" && pipelines.length > 0 ? (
+                <p className="text-amber-800">
+                  ATS scores are still missing after waiting. Check backend logs for{" "}
+                  <code className="rounded bg-slate-100 px-1">ats.rescore</code> /{" "}
+                  <code className="rounded bg-slate-100 px-1">ats.task.failed</code>, confirm Celery or the in-process
+                  fallback ran, then use “Rescore ATS” or re-open this page.
+                </p>
+              ) : null}
+            </div>
           ) : (
             atsMatches.map((match) => (
               <ATSMatchBreakdownPanel
                 key={match.job_id}
                 title={jobs.find((job) => job.id === match.job_id)?.title ?? match.job_id}
+                isLoading={false}
                 data={{
                   fit_score: match.fit_score,
+                  deterministic_match_score: match.deterministic_match_score,
+                  semantic_match_score: match.semantic_match_score,
+                  ai_enrichment_status: match.ai_enrichment_status,
+                  ats_pipeline_status: match.ats_pipeline_status,
+                  enrichment_error: match.enrichment_error,
+                  deterministic_completed_at: match.deterministic_completed_at,
+                  semantic_completed_at: match.semantic_completed_at,
+                  recruiter_summary: match.recruiter_summary,
+                  confidence_reasoning: match.confidence_reasoning,
+                  semantic_skill_matches: match.semantic_skill_matches,
+                  transferable_skills: match.transferable_skills,
+                  inferred_strengths: match.inferred_strengths,
+                  inferred_gaps: match.inferred_gaps,
                   recommendation: match.recommendation,
+                  category_scores: match.category_scores,
+                  confidence_score: match.confidence_score ?? undefined,
                   matched_skills: match.matched_skills,
                   missing_skills: match.missing_skills,
+                  evaluated_at: match.evaluated_at ?? undefined,
                 }}
               />
             ))
@@ -671,13 +808,56 @@ export default function CandidateDetailPage() {
           <CardTitle>ATS Candidate Insights</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
-          {candidate.parse_status && candidate.parse_status !== "completed" ? (
-            <p className="text-slate-500">Processing ATS...</p>
+          {candidate.parse_status === "failed" ? (
+            <p className="text-amber-800">
+              Resume parsing failed
+              {candidate.parse_error ? `: ${candidate.parse_error}` : ""}. Re-upload the resume or contact support.
+            </p>
+          ) : candidate.parse_status && candidate.parse_status !== "completed" ? (
+            <p className="text-slate-500">Resume parsing in progress…</p>
           ) : null}
-          <p><span className="font-medium">Extracted Skills:</span> {candidate.parsed_resume_data?.skills?.length ? candidate.parsed_resume_data.skills.join(", ") : "ATS unavailable"}</p>
+          {(() => {
+            const pr = candidate.parsed_resume_data;
+            const skillsLine = pr?.skills?.length ? pr.skills.join(", ") : null;
+            const inferredLine = pr?.inferred_skills?.length ? pr.inferred_skills.join(", ") : null;
+            const ecosystemLine = pr?.ecosystem_tags?.length ? pr.ecosystem_tags.join(", ") : null;
+            return (
+              <>
+                <p>
+                  <span className="font-medium">Extracted Skills:</span>{" "}
+                  {skillsLine ?? "Not extracted from resume yet — re-upload or wait for parse to finish."}
+                </p>
+                {inferredLine ? (
+                  <p>
+                    <span className="font-medium">Inferred skills (AI):</span> {inferredLine}
+                  </p>
+                ) : null}
+                {ecosystemLine ? (
+                  <p>
+                    <span className="font-medium">Ecosystem tags:</span> {ecosystemLine}
+                  </p>
+                ) : null}
+                {pr?.seniority_guess ? (
+                  <p>
+                    <span className="font-medium">Seniority (estimate):</span> {pr.seniority_guess}
+                  </p>
+                ) : null}
+                {(pr?.cloud_platforms?.length ?? 0) > 0 ? (
+                  <p>
+                    <span className="font-medium">Cloud / platforms:</span> {(pr?.cloud_platforms ?? []).join(", ")}
+                  </p>
+                ) : null}
+                {pr?.resume_recruiter_summary ? (
+                  <p className="rounded-md border border-slate-100 bg-slate-50/80 p-2 text-slate-700">
+                    <span className="font-medium">Resume summary:</span> {pr.resume_recruiter_summary}
+                  </p>
+                ) : null}
+              </>
+            );
+          })()}
           <p><span className="font-medium">Extracted Experience:</span> {candidate.parsed_resume_data?.years_of_experience ?? candidate.years_experience ?? "-"}</p>
           <p><span className="font-medium">Parsed Titles:</span> {candidate.parsed_resume_data?.previous_titles?.length ? candidate.parsed_resume_data.previous_titles.join(", ") : "-"}</p>
-          <p><span className="font-medium">Parsed Education:</span> {candidate.parsed_resume_data?.education ?? candidate.education ?? "-"}</p>
+          <p><span className="font-medium">Parsed Education:</span> {Array.isArray(candidate.parsed_resume_data?.education) ? candidate.parsed_resume_data?.education.join(", ") : (candidate.parsed_resume_data?.education ?? candidate.education ?? "-")}</p>
           <p><span className="font-medium">Certifications:</span> {candidate.parsed_resume_data?.certifications?.length ? candidate.parsed_resume_data.certifications.join(", ") : "-"}</p>
         </CardContent>
       </Card>

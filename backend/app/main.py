@@ -3,10 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
 
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 from app.core.config import get_cors_origins, get_settings
 from app.candidate_management.api import router as candidate_management_router
 from app.models import reflect_database_schema
 from app.routes.auth import router as auth_router
+from app.routes.ats import router as ats_router
 from app.routes.candidate import router as candidate_router
 from app.routes.client import router as client_router
 from app.routes.health import router as health_router
@@ -42,6 +45,43 @@ CORS_HEADERS = {
 }
 
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
+
+
+def _http_exception_payload(detail: object) -> object:
+    """Ensure JSON-serializable body for HTTPException (str, list, or dict)."""
+    if detail is None:
+        return None
+    if isinstance(detail, (str, int, float, bool)):
+        return detail
+    if isinstance(detail, (list, dict)):
+        return detail
+    return str(detail)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Must be registered so Starlette does not fall through to the generic
+    `Exception` handler (HTTPException subclasses Exception — MRO would match
+    `Exception` and turn every 401/403/404 into a 500 otherwise).
+    """
+    logger.warning(
+        "http_exception",
+        extra={
+            "path": str(request.url.path),
+            "method": request.method,
+            "status_code": exc.status_code,
+            "detail_preview": str(exc.detail)[:300] if exc.detail is not None else "",
+        },
+    )
+    headers = dict(CORS_HEADERS)
+    if getattr(exc, "headers", None):
+        headers.update(exc.headers)
+    return JSONResponse(
+        status_code=exc.status_code,
+        headers=headers,
+        content={"detail": _http_exception_payload(exc.detail)},
+    )
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -80,15 +120,23 @@ async def response_validation_exception_handler(request: Request, exc: ResponseV
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    # Belt-and-suspenders: never handle HTTPException here (see MRO note above).
+    if isinstance(exc, StarletteHTTPException):
+        return await starlette_http_exception_handler(request, exc)
+
     logger.exception(
-        "Unhandled API exception",
+        "unhandled_api_exception",
         extra={
             "path": str(request.url.path),
             "method": request.method,
             "exception_type": type(exc).__name__,
+            "query": str(request.url.query)[:500],
         },
     )
     safe_message = str(exc).strip() or repr(exc)
+    # Avoid non-JSON-serializable payloads breaking the error response itself.
+    if len(safe_message) > 2000:
+        safe_message = safe_message[:2000] + "…"
     return JSONResponse(
         status_code=500,
         headers=CORS_HEADERS,
@@ -113,6 +161,7 @@ app.include_router(candidate_router, prefix="/api/v1")
 app.include_router(candidate_management_router, prefix="/api/v1/candidate-management")
 app.include_router(client_router, prefix="/api/v1")
 app.include_router(job_router, prefix="/api/v1")
+app.include_router(ats_router, prefix="/api/v1")
 app.include_router(pipeline_router, prefix="/api/v1")
 app.include_router(pipeline_singular_router, prefix="/api/v1")
 app.include_router(application_router, prefix="/api/v1")

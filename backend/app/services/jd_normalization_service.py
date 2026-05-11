@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Iterable
+import re
 
 
 # Curated skill alias map. Resume text and JD text often disagree on spelling
@@ -45,6 +46,17 @@ SKILL_ALIASES: dict[str, str] = {
     "ci_cd": "ci-cd",
     "gcp": "google cloud",
     "aws s3": "aws",
+    # Resume / free-text variants (not always used in JD pickers)
+    "rest apis": "rest",
+    "restful": "rest",
+    "rest api": "rest",
+    "mongo db": "mongodb",
+    "mongo": "mongodb",
+    "ms sql": "sql server",
+    "mssql": "sql server",
+    "ms-sql": "sql server",
+    "open telemetry": "opentelemetry",
+    "otel": "opentelemetry",
 }
 
 
@@ -102,6 +114,10 @@ class JDNormalizationService:
         cleaned = value.strip().lower()
         if not cleaned:
             return ""
+        # Strip parenthetical clarifications (e.g. "nosql databases (mongodb / redis)").
+        cleaned = re.sub(r"\s*\([^)]*\)\s*", " ", cleaned)
+        cleaned = re.sub(r"[/|,;]+", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
         # Alias map runs after cleanup so "K8s " maps to "kubernetes".
         return SKILL_ALIASES.get(cleaned, cleaned)
 

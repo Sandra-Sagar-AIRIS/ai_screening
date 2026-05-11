@@ -39,6 +39,24 @@ from app.services.jd_normalization_service import JDNormalizationService
 
 logger = logging.getLogger(__name__)
 
+_SKILL_CATEGORY_EXPANSIONS: dict[str, set[str]] = {
+    # Databases
+    "mysql": {"relational databases", "sql"},
+    "postgresql": {"relational databases", "sql"},
+    "sql server": {"relational databases", "sql"},
+    "sqlite": {"relational databases", "sql"},
+    "mongodb": {"nosql databases"},
+    "redis": {"nosql databases"},
+    "dynamodb": {"nosql databases"},
+    "cassandra": {"nosql databases"},
+    # APIs
+    "rest": {"api design"},
+    "graphql": {"api design"},
+    # Backend ecosystems
+    "node.js": {"backend", "javascript"},
+    "react": {"frontend"},
+}
+
 
 # Public so the persistence layer can use the same constants.
 WEIGHT_REQUIRED_SKILLS = 50
@@ -155,6 +173,12 @@ class ATSMatchingService:
         # already normalized, this is a no-op; if not, it keeps scoring sound.
         cand_skills = {self._normalizer.normalize_skill(s) for s in candidate.skills if s}
         cand_skills.discard("")
+        # Expand skills into broader categories ("mysql" -> "relational databases") so
+        # higher-level JDs can still match specific resume skills.
+        expanded: set[str] = set(cand_skills)
+        for s in list(cand_skills):
+            expanded |= _SKILL_CATEGORY_EXPANSIONS.get(s, set())
+        cand_skills = expanded
         required = [s for s in (self._normalizer.normalize_skill(x) for x in job.required_skills_normalized) if s]
         preferred = [s for s in (self._normalizer.normalize_skill(x) for x in job.preferred_skills_normalized) if s]
 

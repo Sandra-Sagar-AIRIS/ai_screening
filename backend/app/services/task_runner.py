@@ -13,7 +13,14 @@ def _run_fallback_safely(*, fallback: Callable[..., Any], kwargs: dict[str, Any]
     try:
         fallback(**kwargs)
     except Exception:  # noqa: BLE001
-        logger.exception("Fallback task execution failed")
+        logger.exception(
+            "task_runner.fallback_failed",
+            extra={
+                "fallback": getattr(fallback, "__name__", str(fallback)),
+                "kwargs_keys": sorted(kwargs.keys()),
+                **{k: str(v) for k, v in kwargs.items() if k in ("organization_id", "candidate_id", "job_id")},
+            },
+        )
 
 
 def dispatch_task(
@@ -33,6 +40,13 @@ def dispatch_task(
             task.delay(**kwargs)
             return
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Celery dispatch failed; using detached fallback: %s", exc)
+            logger.warning(
+                "task_runner.celery_dispatch_failed",
+                extra={
+                    "error": str(exc)[:500],
+                    "exception_class": type(exc).__name__,
+                    "kwargs_keys": sorted(kwargs.keys()),
+                },
+            )
     _FALLBACK_EXECUTOR.submit(_run_fallback_safely, fallback=fallback, kwargs=kwargs)
 

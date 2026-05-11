@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -50,6 +51,7 @@ class ResumeParseError(Exception):
 
 def parse_resume_file(file_path: Path | str) -> ParsedResume:
     """Extract text and rough sections from a local resume file."""
+    t0 = time.monotonic()
     path = Path(file_path)
     if not path.exists():
         raise ResumeParseError(f"resume file not found: {path}")
@@ -68,6 +70,17 @@ def parse_resume_file(file_path: Path | str) -> ParsedResume:
     if not text.strip():
         raise ResumeParseError(f"no extractable text in resume: {path.name}")
     sections = _split_sections(text)
+    logger.info(
+        "ats.resume.parse.completed",
+        extra={
+            "ats_phase": "resume_parse",
+            "file_name": path.name,
+            "parser": parser,
+            "page_count": page_count,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "text_chars": len(text),
+        },
+    )
     return ParsedResume(text=text, sections=sections, parser=parser, page_count=page_count)
 
 
@@ -75,6 +88,7 @@ def _extract_pdf(path: Path) -> tuple[str, str, int]:
     # pdfplumber preserves spacing/line layout much better than pypdf, which
     # matters for the regex section detector and skill matching downstream.
     try:
+        t_pdfplumber = time.monotonic()
         import pdfplumber  # type: ignore
 
         chunks: list[str] = []
@@ -86,11 +100,22 @@ def _extract_pdf(path: Path) -> tuple[str, str, int]:
             page_count = len(pdf.pages)
         text = "\n".join(chunks)
         if text.strip():
+            logger.info(
+                "ats.pdf.extract.completed",
+                extra={
+                    "ats_phase": "pdf_extract",
+                    "file_name": path.name,
+                    "extractor": "pdfplumber",
+                    "duration_ms": int((time.monotonic() - t_pdfplumber) * 1000),
+                    "page_count": page_count,
+                },
+            )
             return text, "pdfplumber", page_count
     except Exception as exc:  # noqa: BLE001
         logger.warning("pdfplumber failed for %s: %s", path.name, exc)
 
     try:
+        t_pymupdf = time.monotonic()
         import fitz  # type: ignore  # PyMuPDF
 
         with fitz.open(str(path)) as doc:
@@ -98,6 +123,16 @@ def _extract_pdf(path: Path) -> tuple[str, str, int]:
             page_count = doc.page_count
         text = "\n".join(chunks)
         if text.strip():
+            logger.info(
+                "ats.pdf.extract.completed",
+                extra={
+                    "ats_phase": "pdf_extract",
+                    "file_name": path.name,
+                    "extractor": "pymupdf",
+                    "duration_ms": int((time.monotonic() - t_pymupdf) * 1000),
+                    "page_count": page_count,
+                },
+            )
             return text, "pymupdf", page_count
     except Exception as exc:  # noqa: BLE001
         logger.warning("pymupdf failed for %s: %s", path.name, exc)
@@ -105,12 +140,24 @@ def _extract_pdf(path: Path) -> tuple[str, str, int]:
     # Last-resort fallback. pypdf is already a dependency and is sometimes the
     # only thing that opens a damaged PDF.
     try:
+        t_pypdf = time.monotonic()
         from pypdf import PdfReader  # type: ignore
 
         reader = PdfReader(str(path))
         chunks = [(page.extract_text() or "") for page in reader.pages]
         text = "\n".join(chunks)
-        return text, "pypdf", len(reader.pages)
+        pages = len(reader.pages)
+        logger.info(
+            "ats.pdf.extract.completed",
+            extra={
+                "ats_phase": "pdf_extract",
+                "file_name": path.name,
+                "extractor": "pypdf",
+                "duration_ms": int((time.monotonic() - t_pypdf) * 1000),
+                "page_count": pages,
+            },
+        )
+        return text, "pypdf", pages
     except Exception as exc:  # noqa: BLE001
         logger.warning("pypdf failed for %s: %s", path.name, exc)
         return "", "none", 0

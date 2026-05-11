@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -662,7 +662,7 @@ def submit_candidate_to_job(
     job_id: UUID,
     payload: JobSubmissionCreate,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(require_permission(JOBS_UPDATE))],
+    _: Annotated[CurrentUser, Depends(require_any_permissions(JOBS_UPDATE, SUBMISSIONS_CREATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> JobSubmissionResponse:
     service = JobService(db)
@@ -777,7 +777,6 @@ def get_job_matches(
 @router.post(
     "/{job_id}/rescore",
     response_model=JobMatchTriggerResponse,
-    status_code=status.HTTP_202_ACCEPTED,
 )
 def rescore_job_matches(
     job_id: UUID,
@@ -785,16 +784,33 @@ def rescore_job_matches(
     _: Annotated[CurrentUser, Depends(require_any_permissions(JOBS_UPDATE, ATS_RESCORE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> JobMatchTriggerResponse:
+    org_id = UUID(current_user.organization_id)
     service = JobService(db)
-    service.get_job_by_id(job_id, UUID(current_user.organization_id), current_user)
-    service.dispatch_rescore_job(
-        organization_id=UUID(current_user.organization_id),
-        job_id=job_id,
-    )
-    cached = db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == UUID(current_user.organization_id)))
+    service.get_job_by_id(job_id, org_id, current_user)
+    try:
+        count = service.rescore_job_fast(organization_id=org_id, job_id=job_id)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "ATS_RESCORE_FAILED",
+                "message": str(exc).strip() or repr(exc),
+                "exception_type": type(exc).__name__,
+            },
+        ) from exc
+    cached = db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == org_id))
+    if count > 0 and JobService.semantic_provider_configured():
+        sem = "queued"
+    elif not JobService.semantic_provider_configured():
+        sem = "disabled"
+    else:
+        sem = "none"
     return JobMatchTriggerResponse(
         job_id=job_id,
-        match_count=0,
-        generated_at=(cached.updated_at if cached is not None else datetime.now()),
+        match_count=count,
+        generated_at=(cached.updated_at if cached is not None else datetime.now(timezone.utc)),
         refresh_requested=True,
+        semantic_enrichment=sem,
     )

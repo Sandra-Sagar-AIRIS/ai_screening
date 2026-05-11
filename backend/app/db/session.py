@@ -29,6 +29,13 @@ def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
+    except BaseException:
+        # Prevent poisoned sessions from leaking pending rollback state to the pool.
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise
     finally:
         db.close()
 

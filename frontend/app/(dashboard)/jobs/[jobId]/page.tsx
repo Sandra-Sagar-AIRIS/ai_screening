@@ -1,19 +1,26 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { getJobById, getJobCandidates, getJobSubmissions, updateJob, deleteJob, changeJobStatus } from "@/lib/api/jobs";
 import { getPipelines } from "@/lib/api/pipeline";
-import { getJobMatchesAts, rescoreJobAts } from "@/lib/api/ats";
-import type { Job, JobCandidateListItem, JobSubmission, JobStatus, Pipeline } from "@/lib/api/types";
+import {
+  atsAwaitingSemanticEnrichment,
+  getJobMatchesAts,
+  pollAtsPairStatusesUntilSettled,
+  pollJobMatchesUntilEnriched,
+  rescoreJobAts,
+} from "@/lib/api/ats";
+import type { Job, JobCandidateListItem, JobMatchEntry, JobSubmission, JobStatus, Pipeline } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
 import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
 import { ATSMatchBreakdownPanel } from "@/components/ats/ats-match-breakdown-panel";
+import { normalizeCandidateId } from "@/lib/ats/candidate-id";
 import { 
   Clipboard, 
   Search,
@@ -131,12 +138,18 @@ export default function JobDetailPage() {
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [jobCandidates, setJobCandidates] = useState<JobCandidateListItem[]>([]);
-  const [atsMatches, setAtsMatches] = useState<Array<{ candidate_id: string; candidate_name?: string | null; fit_score: number; recommendation: string; matched_skills: string[]; missing_skills: string[]; category_scores?: { required_skills: number; preferred_skills: number; experience: number; title: number; education: number }; confidence_score?: number | null }>>([]);
+  const [atsMatches, setAtsMatches] = useState<JobMatchEntry[]>([]);
   const [atsLoading, setAtsLoading] = useState(false);
+  const [atsRescoreBusy, setAtsRescoreBusy] = useState(false);
+  const [atsFetchError, setAtsFetchError] = useState<string | null>(null);
+  const atsRequestSeqRef = useRef(0);
   const [atsOffset, setAtsOffset] = useState(0);
   const [atsLimit] = useState(10);
   const [atsTotal, setAtsTotal] = useState(0);
+  /** All scored candidate IDs for this job (first page fetch up to API max); used for pending banner — not paginated slice. */
+  const [atsScoredCandidateIdSet, setAtsScoredCandidateIdSet] = useState<Set<string>>(() => new Set());
   const [atsSortBy, setAtsSortBy] = useState<"score_desc" | "missing_critical_asc">("score_desc");
+  const atsSemanticInFlight = useMemo(() => atsAwaitingSemanticEnrichment(atsMatches), [atsMatches]);
 
   // Edit Job State
   const [showEdit, setShowEdit] = useState(false);
@@ -220,13 +233,40 @@ export default function JobDetailPage() {
 
   async function loadAtsMatches() {
     if (!params.jobId) return;
+    const seq = ++atsRequestSeqRef.current;
     setAtsLoading(true);
+    setAtsFetchError(null);
     try {
-      const ats = await getJobMatchesAts(params.jobId, { limit: atsLimit, offset: atsOffset, sort_by: atsSortBy }).catch(() => null);
-      setAtsMatches(ats?.matches ?? []);
-      setAtsTotal(ats?.total_count ?? 0);
+      const atsPage = await getJobMatchesAts(params.jobId, {
+        limit: atsLimit,
+        offset: atsOffset,
+        sort_by: atsSortBy,
+      });
+      if (seq !== atsRequestSeqRef.current) return;
+      setAtsMatches(atsPage.matches ?? []);
+      setAtsTotal(atsPage.total_count ?? 0);
+      // Refresh scored-ID set when listing from the first page (or sort changes), so banner ≠ paginated slice only.
+      if (atsOffset === 0) {
+        const atsIdPages = await getJobMatchesAts(params.jobId, {
+          limit: 200,
+          offset: 0,
+          sort_by: atsSortBy,
+        });
+        if (seq !== atsRequestSeqRef.current) return;
+        const ids = new Set<string>();
+        for (const m of atsIdPages.matches ?? []) {
+          const nid = normalizeCandidateId(m.candidate_id);
+          if (nid) ids.add(nid);
+        }
+        setAtsScoredCandidateIdSet(ids);
+      }
+    } catch (err) {
+      if (seq !== atsRequestSeqRef.current) return;
+      setAtsFetchError(err instanceof ApiError ? err.message : "Unable to load ATS matches.");
     } finally {
-      setAtsLoading(false);
+      if (seq === atsRequestSeqRef.current) {
+        setAtsLoading(false);
+      }
     }
   }
 
@@ -239,6 +279,12 @@ export default function JobDetailPage() {
       const data = await getJobById(params.jobId);
       setJob(data);
       await loadAtsMatches();
+      try {
+        const candidates = await getJobCandidates(params.jobId);
+        setJobCandidates(candidates);
+      } catch {
+        setJobCandidates([]);
+      }
       try {
         const candidates = await getJobCandidates(params.jobId);
         setJobCandidates(candidates);
@@ -333,8 +379,40 @@ export default function JobDetailPage() {
 
   async function handleRescoreAts() {
     if (!params.jobId) return;
-    await rescoreJobAts(params.jobId);
-    await loadAtsMatches();
+    if (atsSemanticInFlight || atsRescoreBusy) return;
+    setAtsRescoreBusy(true);
+    setAtsFetchError(null);
+    try {
+      const meta = await rescoreJobAts(params.jobId);
+      await loadAtsMatches();
+      if (meta.semantic_enrichment === "queued") {
+        const seq = atsRequestSeqRef.current;
+        const pairCandidates = Array.from(new Set(atsMatches.map((m) => m.candidate_id)));
+        if (pairCandidates.length > 0) {
+          await pollAtsPairStatusesUntilSettled(
+            pairCandidates.map((candidateId) => ({ candidate_id: candidateId, job_id: params.jobId })),
+          );
+        } else {
+          await pollJobMatchesUntilEnriched(
+            params.jobId,
+            { limit: atsLimit, offset: atsOffset, sort_by: atsSortBy },
+            {
+              onTick: (matches) => {
+                if (seq !== atsRequestSeqRef.current) return;
+                setAtsMatches(matches);
+              },
+            }
+          );
+        }
+        if (seq === atsRequestSeqRef.current) {
+          await loadAtsMatches();
+        }
+      }
+    } catch (err) {
+      setAtsFetchError(err instanceof ApiError ? err.message : "ATS rescore failed.");
+    } finally {
+      setAtsRescoreBusy(false);
+    }
   }
 
   const handleOpenJD = () => {
@@ -357,6 +435,34 @@ export default function JobDetailPage() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const candidateNamesByIdNorm = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const candidate of jobCandidates) {
+      const nid = normalizeCandidateId(candidate.id);
+      if (!nid) continue;
+      const fullName = `${candidate.first_name} ${candidate.last_name}`.trim();
+      map[nid] = fullName || candidate.email || candidate.id;
+    }
+    return map;
+  }, [jobCandidates]);
+
+  const pendingAtsBannerEntries = useMemo(() => {
+    if (!job) return [] as { candidateId: string; label: string }[];
+    const seen = new Set<string>();
+    const out: { candidateId: string; label: string }[] = [];
+    for (const p of pipelines) {
+      if (p.job_id !== job.id) continue;
+      const nid = normalizeCandidateId(p.candidate_id);
+      if (!nid || atsScoredCandidateIdSet.has(nid) || seen.has(nid)) continue;
+      seen.add(nid);
+      out.push({
+        candidateId: p.candidate_id,
+        label: candidateNamesByIdNorm[nid] ?? p.candidate_id,
+      });
+    }
+    return out;
+  }, [job, pipelines, atsScoredCandidateIdSet, candidateNamesByIdNorm]);
 
   if (loading) {
     return (
@@ -420,14 +526,6 @@ export default function JobDetailPage() {
     offered: pipelines.filter((item) => item.stage === "offer").length,
     hired: pipelines.filter((item) => item.stage === "placed").length,
   };
-  const candidateNamesById: Record<string, string> = {};
-  for (const candidate of jobCandidates) {
-    const fullName = `${candidate.first_name} ${candidate.last_name}`.trim();
-    candidateNamesById[candidate.id] = fullName || candidate.email || candidate.id;
-  }
-  const scoredCandidateIds = new Set(atsMatches.map((match) => match.candidate_id));
-  const pendingAtsCandidates = jobCandidates.filter((candidate) => !scoredCandidateIds.has(candidate.id));
-
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       {/* ── HEADER ────────────────────────────────────────────────── */}
@@ -612,54 +710,84 @@ export default function JobDetailPage() {
                         <option value="score_desc">Score desc</option>
                         <option value="missing_critical_asc">Least missing skills</option>
                       </select>
-                      <Button variant="outline" className="text-xs" onClick={() => void handleRescoreAts()}>
-                        Rescore
+                      <Button
+                        variant="outline"
+                        className="text-xs"
+                        disabled={atsRescoreBusy || atsSemanticInFlight || atsLoading}
+                        onClick={() => void handleRescoreAts()}
+                      >
+                        {atsRescoreBusy ? "Rescoring…" : atsSemanticInFlight ? "AI…" : "Rescore"}
                       </Button>
                     </div>
                   </div>
+                  {atsFetchError ? <p className="text-sm text-red-600">{atsFetchError}</p> : null}
                   {atsLoading ? (
-                    <p className="text-sm text-gray-500">Processing ATS...</p>
-                  ) : atsMatches.length === 0 && pendingAtsCandidates.length === 0 ? (
+                    <div className="space-y-2">
+                      <div className="h-3 w-40 animate-pulse rounded bg-gray-100" />
+                      <div className="h-20 animate-pulse rounded-lg border border-gray-100 bg-gray-50" />
+                    </div>
+                  ) : null}
+                  {!atsLoading && atsRescoreBusy ? (
+                    <p className="text-sm text-gray-500">Refreshing ATS rows (baseline + background AI)…</p>
+                  ) : null}
+                  {!atsLoading && !atsFetchError && atsMatches.length === 0 && pendingAtsBannerEntries.length === 0 ? (
                     <p className="text-sm text-gray-500">No ATS matches computed yet.</p>
-                  ) : (
+                  ) : null}
+                  {!atsLoading && (atsMatches.length > 0 || pendingAtsBannerEntries.length > 0) ? (
                     <div className="space-y-3">
                       {atsMatches.map((m) => (
                         <div key={m.candidate_id} className="rounded-lg border border-gray-100 p-3 space-y-2">
                           <div className="flex items-center justify-between gap-2">
                             <Link href={`/candidates/${m.candidate_id}`} className="text-sm font-semibold text-indigo-700 hover:underline">
-                              {m.candidate_name || candidateNamesById[m.candidate_id] || m.candidate_id}
+                              {m.candidate_name ||
+                                candidateNamesByIdNorm[normalizeCandidateId(m.candidate_id)] ||
+                                m.candidate_id}
                             </Link>
                             <div className="flex items-center gap-1.5">
                               <ATSScoreBadge score={m.fit_score} compact />
-                              <ATSRecommendationBadge recommendation={m.recommendation} compact />
+                              <ATSRecommendationBadge recommendation={m.recommendation} awaitingMatch={false} compact />
                             </div>
                           </div>
                           <ATSMatchBreakdownPanel
                             title="Match Breakdown"
                             data={{
                               fit_score: m.fit_score,
+                              deterministic_match_score: m.deterministic_match_score,
+                              semantic_match_score: m.semantic_match_score,
+                              ai_enrichment_status: m.ai_enrichment_status,
+                              ats_pipeline_status: m.ats_pipeline_status,
+                              enrichment_error: m.enrichment_error,
+                              deterministic_completed_at: m.deterministic_completed_at,
+                              semantic_completed_at: m.semantic_completed_at,
+                              recruiter_summary: m.recruiter_summary,
+                              confidence_reasoning: m.confidence_reasoning,
+                              semantic_skill_matches: m.semantic_skill_matches,
+                              transferable_skills: m.transferable_skills,
+                              inferred_strengths: m.inferred_strengths,
+                              inferred_gaps: m.inferred_gaps,
                               recommendation: m.recommendation,
                               category_scores: m.category_scores,
                               matched_skills: m.matched_skills,
                               missing_skills: m.missing_skills,
                               confidence_score: m.confidence_score,
+                              evaluated_at: m.evaluated_at ?? undefined,
                             }}
                           />
                         </div>
                       ))}
-                      {pendingAtsCandidates.length > 0 && (
+                      {pendingAtsBannerEntries.length > 0 && (
                         <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/60 p-3">
                           <p className="text-xs font-semibold text-amber-700">
-                            {pendingAtsCandidates.length} candidate(s) are submitted but ATS scoring is pending.
+                            {pendingAtsBannerEntries.length} candidate(s) on this job have no ATS row yet (pipeline only).
                           </p>
                           <div className="mt-2 space-y-1">
-                            {pendingAtsCandidates.map((candidate) => (
+                            {pendingAtsBannerEntries.map((entry) => (
                               <Link
-                                key={candidate.id}
-                                href={`/candidates/${candidate.id}`}
+                                key={entry.candidateId}
+                                href={`/candidates/${entry.candidateId}`}
                                 className="block text-xs text-amber-800 hover:underline"
                               >
-                                {candidateNamesById[candidate.id] || candidate.id}
+                                {entry.label}
                               </Link>
                             ))}
                           </div>
@@ -689,7 +817,7 @@ export default function JobDetailPage() {
                         </div>
                       </div>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
             )}

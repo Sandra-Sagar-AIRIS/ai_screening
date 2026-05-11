@@ -122,25 +122,54 @@ class JobSubmissionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class HybridScoreBreakdown(BaseModel):
+    """Persisted under category_scores.hybrid JSON (deterministic + semantic blend)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    deterministic_score: int | float | None = None
+    semantic_score: int | float | None = None
+    final_score: int | float | None = None
+    weights: dict[str, float] | None = None
+
+
 class JobMatchCategoryScores(BaseModel):
     required_skills: int
     preferred_skills: int
     experience: int
     title: int
     education: int
+    hybrid: HybridScoreBreakdown | None = None
 
 
 class JobMatchEntry(BaseModel):
+    """fit_score is hybrid (70% deterministic + 30% semantic when AI succeeds)."""
+
     rank: int
     candidate_id: UUID
     candidate_name: str | None = None
     fit_score: int
+    deterministic_match_score: int | None = None
+    semantic_match_score: int | None = None
+    ai_enrichment_status: str | None = None
+    ats_pipeline_status: str | None = None
+    enrichment_started_at: datetime | None = None
+    deterministic_completed_at: datetime | None = None
+    semantic_completed_at: datetime | None = None
+    enrichment_error: str | None = None
+    recruiter_summary: str | None = None
+    confidence_reasoning: str | None = None
+    semantic_skill_matches: list[str] = Field(default_factory=list)
+    transferable_skills: list[str] = Field(default_factory=list)
+    inferred_strengths: list[str] = Field(default_factory=list)
+    inferred_gaps: list[str] = Field(default_factory=list)
     category_scores: JobMatchCategoryScores
     already_submitted: bool
     matched_skills: list[str] = Field(default_factory=list)
     missing_skills: list[str] = Field(default_factory=list)
     recommendation: str = "Weak Match"
     confidence_score: float = 0.0
+    evaluated_at: datetime | None = None
 
 
 class JobMatchTriggerRequest(BaseModel):
@@ -152,6 +181,33 @@ class JobMatchTriggerResponse(BaseModel):
     match_count: int
     generated_at: datetime
     refresh_requested: bool
+    semantic_enrichment: str | None = None
+    """queued | disabled | none — background semantic pipeline after fast deterministic write."""
+
+
+class AtsCandidateRescoreResponse(BaseModel):
+    status: str
+    candidate_id: UUID
+    pairs_scored: int
+    semantic_enrichment: str
+    """queued | disabled | none | inline_full (sync=true full pipeline)."""
+
+    mode: str = "fast"
+    """fast (deterministic + async semantic) or full_sync."""
+
+
+class AtsPairStatusResponse(BaseModel):
+    candidate_id: UUID
+    job_id: UUID
+    processing_state: str
+    progress: int = 0
+    last_updated: datetime | None = None
+    deterministic_score: int | None = None
+    semantic_score: int | None = None
+    final_score: int | None = None
+    semantic_completion_status: str | None = None
+    enrichment_error: str | None = None
+    enqueue_delay_ms: int | None = None
 
 
 class JobMatchesResponse(BaseModel):
@@ -166,11 +222,26 @@ class JobMatchesResponse(BaseModel):
 class CandidateMatchEntry(BaseModel):
     job_id: UUID
     fit_score: int
+    deterministic_match_score: int | None = None
+    semantic_match_score: int | None = None
+    ai_enrichment_status: str | None = None
+    ats_pipeline_status: str | None = None
+    enrichment_started_at: datetime | None = None
+    deterministic_completed_at: datetime | None = None
+    semantic_completed_at: datetime | None = None
+    enrichment_error: str | None = None
+    recruiter_summary: str | None = None
+    confidence_reasoning: str | None = None
+    semantic_skill_matches: list[str] = Field(default_factory=list)
+    transferable_skills: list[str] = Field(default_factory=list)
+    inferred_strengths: list[str] = Field(default_factory=list)
+    inferred_gaps: list[str] = Field(default_factory=list)
     category_scores: JobMatchCategoryScores
     matched_skills: list[str] = Field(default_factory=list)
     missing_skills: list[str] = Field(default_factory=list)
     recommendation: str = "Weak Match"
     confidence_score: float = 0.0
+    evaluated_at: datetime | None = None
 
 
 class CandidateMatchesResponse(BaseModel):
@@ -179,6 +250,11 @@ class CandidateMatchesResponse(BaseModel):
     total_count: int
     limit: int
     offset: int
+    pipeline_job_count: int = 0
+    """Number of pipeline rows for this candidate in the org (applied jobs)."""
+
+    ats_hint: str | None = None
+    """UI hint when matches are empty: NO_PIPELINE_JOBS | NO_SCORE_ROWS_YET."""
 
 
 class JobResponse(BaseModel):

@@ -141,11 +141,20 @@ export type Candidate = {
   parsed_at?: string | null;
   parsed_resume_data?: {
     skills?: string[];
+    inferred_skills?: string[];
+    ecosystem_tags?: string[];
     years_of_experience?: number | null;
     previous_titles?: string[];
-    education?: string | null;
+    education?: string | string[] | null;
     certifications?: string[];
     normalized_keywords?: string[];
+    seniority_guess?: string | null;
+    cloud_platforms?: string[];
+    frameworks_enriched?: string[];
+    databases_enriched?: string[];
+    leadership_signals?: string[];
+    resume_recruiter_summary?: string | null;
+    extraction_version?: string | null;
   } | null;
 };
 
@@ -234,19 +243,42 @@ export type JobMatchEntry = {
   rank: number;
   candidate_id: string;
   candidate_name?: string | null;
+  /** Hybrid score when AI enrichment applied (else equals deterministic). */
   fit_score: number;
+  deterministic_match_score?: number | null;
+  semantic_match_score?: number | null;
+  ai_enrichment_status?: string | null;
+  ats_pipeline_status?: string | null;
+  enrichment_started_at?: string | null;
+  deterministic_completed_at?: string | null;
+  semantic_completed_at?: string | null;
+  enrichment_error?: string | null;
+  recruiter_summary?: string | null;
+  confidence_reasoning?: string | null;
+  semantic_skill_matches?: string[];
+  transferable_skills?: string[];
+  inferred_strengths?: string[];
+  inferred_gaps?: string[];
   category_scores: {
     required_skills: number;
     preferred_skills: number;
     experience: number;
     title: number;
     education: number;
+    hybrid?: {
+      deterministic_score?: number;
+      semantic_score?: number | null;
+      final_score?: number;
+      weights?: { deterministic?: number; semantic?: number };
+    };
   };
   already_submitted: boolean;
   matched_skills: string[];
   missing_skills: string[];
   recommendation: string;
   confidence_score?: number | null;
+  /** When this candidate–job match was last scored (ISO). */
+  evaluated_at?: string | null;
 };
 
 export type JobMatchesResponse = {
@@ -261,17 +293,38 @@ export type JobMatchesResponse = {
 export type CandidateMatchEntry = {
   job_id: string;
   fit_score: number;
+  deterministic_match_score?: number | null;
+  semantic_match_score?: number | null;
+  ai_enrichment_status?: string | null;
+  ats_pipeline_status?: string | null;
+  enrichment_started_at?: string | null;
+  deterministic_completed_at?: string | null;
+  semantic_completed_at?: string | null;
+  enrichment_error?: string | null;
+  recruiter_summary?: string | null;
+  confidence_reasoning?: string | null;
+  semantic_skill_matches?: string[];
+  transferable_skills?: string[];
+  inferred_strengths?: string[];
+  inferred_gaps?: string[];
   category_scores: {
     required_skills: number;
     preferred_skills: number;
     experience: number;
     title: number;
     education: number;
+    hybrid?: {
+      deterministic_score?: number;
+      semantic_score?: number | null;
+      final_score?: number;
+      weights?: { deterministic?: number; semantic?: number };
+    };
   };
   matched_skills: string[];
   missing_skills: string[];
   recommendation: string;
   confidence_score?: number | null;
+  evaluated_at?: string | null;
 };
 
 export type CandidateMatchesResponse = {
@@ -280,6 +333,23 @@ export type CandidateMatchesResponse = {
   total_count: number;
   limit: number;
   offset: number;
+  pipeline_job_count?: number;
+  /** NO_PIPELINE_JOBS | NO_SCORE_ROWS_YET when matches are empty */
+  ats_hint?: string | null;
+};
+
+export type AtsPairStatusResponse = {
+  candidate_id: string;
+  job_id: string;
+  processing_state: string;
+  progress: number;
+  last_updated?: string | null;
+  deterministic_score?: number | null;
+  semantic_score?: number | null;
+  final_score?: number | null;
+  semantic_completion_status?: string | null;
+  enrichment_error?: string | null;
+  enqueue_delay_ms?: number | null;
 };
 
 export type PipelineStage = "applied" | "screening" | "interview" | "offer" | "placed" | "rejected";

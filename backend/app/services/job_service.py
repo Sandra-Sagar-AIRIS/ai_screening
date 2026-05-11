@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
 import sqlalchemy as sa
-from sqlalchemy import Select, select
+from sqlalchemy import Select, or_, select, text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
 
@@ -19,8 +21,10 @@ from app.models.job_submission import JobSubmission
 from app.models.pipeline import Pipeline
 from app.schemas.auth import CurrentUser
 from app.schemas.job import (
+    AtsPairStatusResponse,
     CandidateMatchEntry,
     CandidateMatchesResponse,
+    HybridScoreBreakdown,
     JobCreate,
     JobStatus,
     JobMatchEntry,
@@ -45,9 +49,26 @@ from app.services.ats_matching_service import (
     JobScoringInput,
 )
 from app.services.task_runner import dispatch_task
+from app.services.semantic_matching_service import (
+    SemanticMatchingService,
+    build_condensed_candidate_job_payload,
+    hybrid_match_score,
+)
 from app.core.config import get_settings
+from app.services.ats_pair_cache import get_job_skills_cached, get_resume_extra_cached
+from app.services.ats_pipeline_status import (
+    ATS_AI_ENRICHING,
+    ATS_COMPLETED,
+    ATS_DETERMINISTIC_COMPLETE,
+    ATS_FAILED,
+    ATS_PARSING,
+    ATS_PENDING,
+    ATS_QUEUED,
+    SEMANTIC_INFLIGHT_DEDUP_SECONDS,
+)
 
 
+logger = logging.getLogger(__name__)
 DEV_MODE = True
 
 class JobService:
@@ -617,8 +638,16 @@ class JobService:
                         "job_id": str(job.id),
                     },
                 )
-            except Exception:
-                self.db.rollback()
+            except Exception as dispatch_exc:
+                # Submission is already committed; never rollback here — only log dispatch noise.
+                logger.warning(
+                    "SUBMIT_ATS_DISPATCH_FAILED org=%s job=%s candidate=%s err=%s",
+                    organization_id,
+                    job.id,
+                    candidate.id,
+                    dispatch_exc,
+                    exc_info=True,
+                )
             res = JobSubmissionResponse.model_validate(submission)
             logger.info(f"SUBMIT_SUCCESS: Submission {submission.id} created")
             return res
@@ -714,10 +743,10 @@ class JobService:
             refresh_requested=refresh,
         )
 
-    def get_matches(
+    def get_candidate_matches(
         self,
         *,
-        job_id: UUID,
+        candidate_id: UUID,
         organization_id: UUID,
         current_user: CurrentUser,
         limit: int,
@@ -777,7 +806,10 @@ class JobService:
         if rows:
             candidate_rows = self.db.execute(
                 select(Candidate.id, Candidate.first_name, Candidate.last_name).where(
-                    Candidate.organization_id == organization_id,
+                    or_(
+                        Candidate.organization_id == organization_id,
+                        Candidate.org_id == organization_id,
+                    ),
                     Candidate.id.in_([row.candidate_id for row in rows]),
                 )
             ).all()
@@ -793,18 +825,29 @@ class JobService:
                     candidate_id=row.candidate_id,
                     candidate_name=candidate_names.get(row.candidate_id),
                     fit_score=row.match_score,
-                    category_scores=JobMatchCategoryScores(
-                        required_skills=int(cs.get("required_skills") or 0),
-                        preferred_skills=int(cs.get("preferred_skills") or 0),
-                        experience=int(cs.get("experience") or 0),
-                        title=int(cs.get("title") or 0),
-                        education=int(cs.get("education") or 0),
+                    deterministic_match_score=getattr(row, "deterministic_match_score", None),
+                    semantic_match_score=getattr(row, "semantic_match_score", None),
+                    ai_enrichment_status=getattr(row, "ai_enrichment_status", None),
+                    ats_pipeline_status=getattr(row, "ats_pipeline_status", None),
+                    enrichment_started_at=getattr(row, "enrichment_started_at", None),
+                    deterministic_completed_at=getattr(row, "deterministic_completed_at", None),
+                    semantic_completed_at=getattr(row, "semantic_completed_at", None),
+                    enrichment_error=getattr(row, "enrichment_error", None),
+                    recruiter_summary=getattr(row, "recruiter_summary", None),
+                    confidence_reasoning=getattr(row, "confidence_reasoning", None),
+                    semantic_skill_matches=self._coerce_jsonb_str_list(
+                        getattr(row, "semantic_skill_matches", None)
                     ),
+                    transferable_skills=self._coerce_jsonb_str_list(getattr(row, "transferable_skills", None)),
+                    inferred_strengths=self._coerce_jsonb_str_list(getattr(row, "inferred_strengths", None)),
+                    inferred_gaps=self._coerce_jsonb_str_list(getattr(row, "inferred_gaps", None)),
+                    category_scores=JobService._match_category_scores_model(cs),
                     already_submitted=row.candidate_id in submitted_ids,
                     matched_skills=self._coerce_jsonb_str_list(row.matched_skills),
                     missing_skills=self._coerce_jsonb_str_list(row.missing_skills),
                     recommendation=row.recommendation,
                     confidence_score=float(row.confidence_score or 0),
+                    evaluated_at=getattr(row, "evaluated_at", None),
                 )
             )
         cached = self._scalar_job_match_cache(job.id)
@@ -837,6 +880,17 @@ class JobService:
             .where(*filters)
             .order_by(CandidateJobMatch.match_score.desc(), CandidateJobMatch.updated_at.desc())
         )
+        pipeline_job_count = int(
+            self.db.scalar(
+                select(sa.func.count())
+                .select_from(Pipeline)
+                .where(
+                    Pipeline.organization_id == organization_id,
+                    Pipeline.candidate_id == candidate_id,
+                )
+            )
+            or 0
+        )
         try:
             total_count = int(self.db.scalar(count_stmt) or 0)
             rows = list(self.db.scalars(stmt.offset(offset).limit(limit)))
@@ -850,6 +904,8 @@ class JobService:
                 total_count=0,
                 limit=limit,
                 offset=offset,
+                pipeline_job_count=pipeline_job_count,
+                ats_hint="NO_SCORE_ROWS_YET" if pipeline_job_count > 0 else "NO_PIPELINE_JOBS",
             )
         matches: list[CandidateMatchEntry] = []
         for row in rows:
@@ -858,28 +914,102 @@ class JobService:
                 CandidateMatchEntry(
                     job_id=row.job_id,
                     fit_score=row.match_score,
-                    category_scores=JobMatchCategoryScores(
-                        required_skills=int(cs.get("required_skills") or 0),
-                        preferred_skills=int(cs.get("preferred_skills") or 0),
-                        experience=int(cs.get("experience") or 0),
-                        title=int(cs.get("title") or 0),
-                        education=int(cs.get("education") or 0),
+                    deterministic_match_score=getattr(row, "deterministic_match_score", None),
+                    semantic_match_score=getattr(row, "semantic_match_score", None),
+                    ai_enrichment_status=getattr(row, "ai_enrichment_status", None),
+                    ats_pipeline_status=getattr(row, "ats_pipeline_status", None),
+                    enrichment_started_at=getattr(row, "enrichment_started_at", None),
+                    deterministic_completed_at=getattr(row, "deterministic_completed_at", None),
+                    semantic_completed_at=getattr(row, "semantic_completed_at", None),
+                    enrichment_error=getattr(row, "enrichment_error", None),
+                    recruiter_summary=getattr(row, "recruiter_summary", None),
+                    confidence_reasoning=getattr(row, "confidence_reasoning", None),
+                    semantic_skill_matches=self._coerce_jsonb_str_list(
+                        getattr(row, "semantic_skill_matches", None)
                     ),
+                    transferable_skills=self._coerce_jsonb_str_list(getattr(row, "transferable_skills", None)),
+                    inferred_strengths=self._coerce_jsonb_str_list(getattr(row, "inferred_strengths", None)),
+                    inferred_gaps=self._coerce_jsonb_str_list(getattr(row, "inferred_gaps", None)),
+                    category_scores=JobService._match_category_scores_model(cs),
                     matched_skills=self._coerce_jsonb_str_list(row.matched_skills),
                     missing_skills=self._coerce_jsonb_str_list(row.missing_skills),
                     recommendation=row.recommendation,
                     confidence_score=float(row.confidence_score or 0),
+                    evaluated_at=getattr(row, "evaluated_at", None),
                 )
             )
+        ats_hint: str | None = None
+        if total_count == 0:
+            ats_hint = "NO_PIPELINE_JOBS" if pipeline_job_count == 0 else "NO_SCORE_ROWS_YET"
+
         return CandidateMatchesResponse(
             candidate_id=candidate_id,
             matches=matches,
             total_count=total_count,
             limit=limit,
             offset=offset,
+            pipeline_job_count=pipeline_job_count,
+            ats_hint=ats_hint,
+        )
+
+    def get_ats_pair_status(
+        self,
+        *,
+        organization_id: UUID,
+        candidate_id: UUID,
+        job_id: UUID,
+    ) -> AtsPairStatusResponse:
+        row = self.db.scalar(
+            select(CandidateJobMatch).where(
+                CandidateJobMatch.organization_id == organization_id,
+                CandidateJobMatch.candidate_id == candidate_id,
+                CandidateJobMatch.job_id == job_id,
+            )
+        )
+        if row is None:
+            return AtsPairStatusResponse(
+                candidate_id=candidate_id,
+                job_id=job_id,
+                processing_state=ATS_QUEUED,
+                progress=5,
+                last_updated=None,
+                deterministic_score=None,
+                semantic_score=None,
+                final_score=None,
+                semantic_completion_status="pending",
+                enrichment_error=None,
+            )
+        state = getattr(row, "ats_pipeline_status", None) or ATS_PENDING
+        progress_map = {
+            ATS_QUEUED: 5,
+            ATS_PENDING: 10,
+            ATS_PARSING: 25,
+            ATS_DETERMINISTIC_COMPLETE: 60,
+            ATS_AI_ENRICHING: 80,
+            ATS_COMPLETED: 100,
+            ATS_FAILED: 100,
+        }
+        return AtsPairStatusResponse(
+            candidate_id=candidate_id,
+            job_id=job_id,
+            processing_state=state,
+            progress=progress_map.get(state, 0),
+            last_updated=getattr(row, "updated_at", None),
+            deterministic_score=getattr(row, "deterministic_match_score", None),
+            semantic_score=getattr(row, "semantic_match_score", None),
+            final_score=getattr(row, "match_score", None),
+            semantic_completion_status=getattr(row, "ai_enrichment_status", None),
+            enrichment_error=getattr(row, "enrichment_error", None),
+            enqueue_delay_ms=None,
         )
 
     def rescore_job_sync(self, *, organization_id: UUID, job_id: UUID) -> int:
+        return self.rescore_job_fast(organization_id=organization_id, job_id=job_id)
+
+    def rescore_candidate_sync(self, *, organization_id: UUID, candidate_id: UUID) -> int:
+        return self.rescore_candidate_fast(organization_id=organization_id, candidate_id=candidate_id)
+
+    def rescore_job_fast(self, *, organization_id: UUID, job_id: UUID) -> int:
         job = self.db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == organization_id))
         if job is None:
             return 0
@@ -891,14 +1021,29 @@ class JobService:
                 )
             )
         )
-        count = 0
+        t_job = time.monotonic()
         for cid in candidate_ids:
-            self.rescore_candidate_job_sync(organization_id=organization_id, candidate_id=cid, job_id=job_id)
-            count += 1
+            self.rescore_candidate_job_deterministic_sync(
+                organization_id=organization_id, candidate_id=cid, job_id=job_id
+            )
         self._refresh_job_match_cache(job_id=job_id, organization_id=organization_id)
-        return count
+        for cid in candidate_ids:
+            self.dispatch_enrich_candidate_job_semantic(
+                organization_id=organization_id, candidate_id=cid, job_id=job_id
+            )
+        logger.info(
+            "ats.rescore.job_fast_done",
+            extra={
+                "ats_phase": "rescore_job_fast",
+                "organization_id": str(organization_id),
+                "job_id": str(job_id),
+                "pairs": len(candidate_ids),
+                "duration_ms": int((time.monotonic() - t_job) * 1000),
+            },
+        )
+        return len(candidate_ids)
 
-    def rescore_candidate_sync(self, *, organization_id: UUID, candidate_id: UUID) -> int:
+    def rescore_candidate_fast(self, *, organization_id: UUID, candidate_id: UUID) -> int:
         job_ids = list(
             self.db.scalars(
                 select(Pipeline.job_id).where(
@@ -907,102 +1052,993 @@ class JobService:
                 )
             )
         )
-        count = 0
+        t0 = time.monotonic()
         for job_id in job_ids:
-            self.rescore_candidate_job_sync(organization_id=organization_id, candidate_id=candidate_id, job_id=job_id)
+            self.rescore_candidate_job_deterministic_sync(
+                organization_id=organization_id, candidate_id=candidate_id, job_id=job_id
+            )
             self._refresh_job_match_cache(job_id=job_id, organization_id=organization_id)
-            count += 1
-        return count
+            self.dispatch_enrich_candidate_job_semantic(
+                organization_id=organization_id, candidate_id=candidate_id, job_id=job_id
+            )
+        logger.info(
+            "ats.rescore.candidate_fast_done",
+            extra={
+                "ats_phase": "rescore_candidate_fast",
+                "organization_id": str(organization_id),
+                "candidate_id": str(candidate_id),
+                "pairs": len(job_ids),
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+            },
+        )
+        return len(job_ids)
 
-    def rescore_candidate_job_sync(self, *, organization_id: UUID, candidate_id: UUID, job_id: UUID) -> None:
+    def rescore_candidate_full_sync(self, *, organization_id: UUID, candidate_id: UUID) -> int:
+        """Synchronous full pipeline (deterministic + semantic) for every pipeline job."""
+        job_ids = list(
+            self.db.scalars(
+                select(Pipeline.job_id).where(
+                    Pipeline.organization_id == organization_id,
+                    Pipeline.candidate_id == candidate_id,
+                )
+            )
+        )
+        for job_id in job_ids:
+            self.rescore_candidate_job_full_sync(
+                organization_id=organization_id, candidate_id=candidate_id, job_id=job_id
+            )
+            self._refresh_job_match_cache(job_id=job_id, organization_id=organization_id)
+        return len(job_ids)
+
+    def rescore_job_full_sync(self, *, organization_id: UUID, job_id: UUID) -> int:
+        job = self.db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == organization_id))
+        if job is None:
+            return 0
+        candidate_ids = list(
+            self.db.scalars(
+                select(Pipeline.candidate_id).where(
+                    Pipeline.organization_id == organization_id,
+                    Pipeline.job_id == job_id,
+                )
+            )
+        )
+        for cid in candidate_ids:
+            self.rescore_candidate_job_full_sync(
+                organization_id=organization_id, candidate_id=cid, job_id=job_id
+            )
+        self._refresh_job_match_cache(job_id=job_id, organization_id=organization_id)
+        return len(candidate_ids)
+
+    @staticmethod
+    def semantic_provider_configured() -> bool:
+        s = get_settings()
+        return bool((s.groq_ats_api_key or "").strip() or (s.grok_api_key or "").strip())
+
+    def dispatch_enrich_candidate_job_semantic(
+        self, *, organization_id: UUID, candidate_id: UUID, job_id: UUID
+    ) -> None:
+        if not self.semantic_provider_configured():
+            return
+        now = datetime.now(timezone.utc)
+        row = self.db.scalar(
+            select(CandidateJobMatch).where(
+                CandidateJobMatch.organization_id == organization_id,
+                CandidateJobMatch.candidate_id == candidate_id,
+                CandidateJobMatch.job_id == job_id,
+            )
+        )
+        if row is not None and row.ats_pipeline_status == ATS_AI_ENRICHING and row.enrichment_started_at is not None:
+            age = (datetime.now(timezone.utc) - row.enrichment_started_at).total_seconds()
+            if 0 < age < SEMANTIC_INFLIGHT_DEDUP_SECONDS:
+                logger.info(
+                    "ats.semantic.dispatch_skip_inflight",
+                    extra={
+                        "organization_id": str(organization_id),
+                        "candidate_id": str(candidate_id),
+                        "job_id": str(job_id),
+                        "age_seconds": int(age),
+                    },
+                )
+                return
+        if row is not None and row.ats_pipeline_status not in (ATS_COMPLETED, ATS_AI_ENRICHING):
+            row.ats_pipeline_status = ATS_QUEUED
+            row.ai_enrichment_status = "pending"
+            row.enrichment_started_at = now
+            self.db.add(row)
+        from app.candidate_management.tasks_ats import (
+            enrich_candidate_job_semantic_task,
+            run_enrich_candidate_job_semantic,
+        )
+
+        dispatch_task(
+            task=enrich_candidate_job_semantic_task,
+            fallback=run_enrich_candidate_job_semantic,
+            kwargs={
+                "organization_id": str(organization_id),
+                "candidate_id": str(candidate_id),
+                "job_id": str(job_id),
+                "enqueued_at": now.isoformat(),
+            },
+        )
+
+    def rescore_candidate_job_deterministic_sync(
+        self, *, organization_id: UUID, candidate_id: UUID, job_id: UUID, force: bool = False
+    ) -> None:
+        """Persist baseline deterministic ATS quickly; semantic runs separately."""
+        t0 = time.monotonic()
+        extra_base = {
+            "ats_phase": "rescore_candidate_job_deterministic",
+            "organization_id": str(organization_id),
+            "candidate_id": str(candidate_id),
+            "job_id": str(job_id),
+        }
+        job = self.db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == organization_id))
+        if job is None:
+            logger.warning(
+                "ats.rescore.skip",
+                extra={**extra_base, "reason": "job_not_found", "duration_ms": int((time.monotonic() - t0) * 1000)},
+            )
+            return
+        candidate = self.db.scalar(
+            select(Candidate).where(
+                Candidate.id == candidate_id,
+                or_(
+                    Candidate.organization_id == organization_id,
+                    Candidate.org_id == organization_id,
+                ),
+            )
+        )
+        if candidate is None:
+            logger.warning(
+                "ats.rescore.skip",
+                extra={
+                    **extra_base,
+                    "reason": "candidate_not_in_org",
+                    "duration_ms": int((time.monotonic() - t0) * 1000),
+                },
+            )
+            return
+
+        logger.info("ats.rescore.started", extra={**extra_base, "mode": "deterministic_only"})
+
+    def _refresh_job_match_cache(self, *, job_id: UUID, organization_id: UUID) -> None:
+        try:
+            early = self.db.scalar(
+                select(CandidateJobMatch).where(
+                    CandidateJobMatch.organization_id == organization_id,
+                    CandidateJobMatch.candidate_id == candidate_id,
+                    CandidateJobMatch.job_id == job_id,
+                )
+            )
+        except ProgrammingError as exc:
+            # Backward compatibility: DB may not yet have lifecycle columns.
+            if "column" in str(exc).lower() and "candidate_job_matches" in str(exc).lower():
+                self.db.rollback()
+                logger.warning(
+                    "ats.rescore.lifecycle_columns_missing",
+                    extra={**extra_base, "exception_class": type(exc).__name__},
+                )
+                early = None
+            else:
+                raise
+        if not force:
+            if early is not None and early.ats_pipeline_status == ATS_AI_ENRICHING and early.enrichment_started_at is not None:
+                age = (datetime.now(timezone.utc) - early.enrichment_started_at).total_seconds()
+                if 0 < age < SEMANTIC_INFLIGHT_DEDUP_SECONDS:
+                    logger.info(
+                        "ats.rescore.skip_pair_inflight_semantic",
+                        extra={**extra_base, "age_seconds": int(age)},
+                    )
+                    return
+        if early is not None:
+            early.ats_pipeline_status = ATS_PARSING
+            early.ai_enrichment_status = "pending"
+            self.db.add(early)
+
+        empty_resume_extra: dict[str, object] = {
+            "skills": [],
+            "titles": [],
+            "years": None,
+            "education": [],
+            "certifications": [],
+            "summary": None,
+        }
+        try:
+            try:
+                t_resume_extract = time.monotonic()
+                extra = get_resume_extra_cached(
+                    candidate.id,
+                    loader=lambda: self._load_structured_resume_fields(candidate.id, organization_id),
+                )
+                logger.info(
+                    "ats.timing.resume_extract",
+                    extra={**extra_base, "duration_ms": int((time.monotonic() - t_resume_extract) * 1000)},
+                )
+            except Exception:
+                logger.exception(
+                    "ats.rescore.structured_fields_fallback",
+                    extra={**extra_base},
+                )
+                extra = dict(empty_resume_extra)
+
+            t_job_norm = time.monotonic()
+            required_skills, preferred_skills = get_job_skills_cached(
+                job.id,
+                loader=lambda: (
+                    list(
+                        self.db.scalars(
+                            select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(True))
+                        )
+                    ),
+                    list(
+                        self.db.scalars(
+                            select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(False))
+                        )
+                    ),
+                ),
+            )
+            logger.info(
+                "ats.timing.job_normalize",
+                extra={
+                    **extra_base,
+                    "duration_ms": int((time.monotonic() - t_job_norm) * 1000),
+                    "required_skills_count": len(required_skills),
+                    "preferred_skills_count": len(preferred_skills),
+                },
+            )
+            candidate_blob = " ".join(
+                [
+                    (candidate.experience_summary or ""),
+                    (candidate.education or ""),
+                    (candidate.notes or ""),
+                    (candidate.location or ""),
+                ]
+            ).lower()
+            candidate_skill_hits: list[str] = []
+            for skill in set(required_skills + preferred_skills):
+                norm = self._jd_normalizer.normalize_skill(skill)
+                if norm and norm in candidate_blob:
+                    candidate_skill_hits.append(norm)
+            years = self._extract_years_from_text(candidate.experience_summary)
+            previous_titles = self._extract_titles_from_text(candidate.experience_summary or "")
+            candidate_skills_for_scoring = list(
+                dict.fromkeys(
+                    [s for s in candidate_skill_hits if s]
+                    + [s for s in extra.get("skills", []) if s]
+                )
+            )
+            result = self._ats.score(
+                candidate=CandidateScoringInput(
+                    candidate_id=str(candidate.id),
+                    skills=candidate_skills_for_scoring,
+                    years_of_experience=years,
+                    previous_titles=previous_titles,
+                    education=[candidate.education] if candidate.education else [],
+                    parser_confidence=0.6,
+                ),
+                job=JobScoringInput(
+                    job_id=str(job.id),
+                    title=job.title,
+                    required_skills_normalized=required_skills,
+                    preferred_skills_normalized=preferred_skills,
+                    min_experience_years=float(job.experience_min_years)
+                    if job.experience_min_years is not None
+                    else None,
+                    max_experience_years=float(job.experience_max_years)
+                    if job.experience_max_years is not None
+                    else None,
+                    education_requirements=[],
+                ),
+            )
+            det_score = result.match_score
+            now = datetime.now(timezone.utc)
+            category_scores = dict(result.category_scores or {})
+            category_scores["hybrid"] = {
+                "deterministic_score": det_score,
+                "semantic_score": None,
+                "final_score": det_score,
+                "weights": {"deterministic": 1.0, "semantic": 0.0},
+            }
+            recommendation = ATSMatchingService._tier_for(det_score)
+            semantic_on = self.semantic_provider_configured()
+            if semantic_on:
+                pipe_status = ATS_DETERMINISTIC_COMPLETE
+                ai_status = "pending"
+            else:
+                pipe_status = ATS_COMPLETED
+                ai_status = "skipped"
+
+            t_persist = time.monotonic()
+            try:
+                row = self.db.scalar(
+                    select(CandidateJobMatch).where(
+                        CandidateJobMatch.organization_id == organization_id,
+                        CandidateJobMatch.candidate_id == candidate.id,
+                        CandidateJobMatch.job_id == job.id,
+                    )
+                )
+                if row is None:
+                    row = CandidateJobMatch(
+                        organization_id=organization_id,
+                        candidate_id=candidate.id,
+                        job_id=job.id,
+                        match_score=det_score,
+                        deterministic_match_score=det_score,
+                        semantic_match_score=None,
+                        ai_enrichment_status=ai_status,
+                        ats_pipeline_status=pipe_status,
+                        category_scores=category_scores,
+                        matched_skills=result.matched_skills,
+                        missing_skills=result.missing_skills,
+                        matched_preferred_skills=result.matched_preferred_skills,
+                        recommendation=recommendation,
+                        confidence_score=result.confidence_score,
+                        evaluated_at=now,
+                        deterministic_completed_at=now,
+                        semantic_completed_at=now if not semantic_on else None,
+                        enrichment_started_at=None,
+                        enrichment_error=None,
+                        recruiter_summary=None,
+                        confidence_reasoning=None,
+                        semantic_skill_matches=None,
+                        transferable_skills=None,
+                        inferred_strengths=None,
+                        inferred_gaps=None,
+                    )
+                    self.db.add(row)
+                else:
+                    row.match_score = det_score
+                    row.deterministic_match_score = det_score
+                    row.semantic_match_score = None
+                    row.ai_enrichment_status = ai_status
+                    row.ats_pipeline_status = pipe_status
+                    row.category_scores = category_scores
+                    row.matched_skills = result.matched_skills
+                    row.missing_skills = result.missing_skills
+                    row.matched_preferred_skills = result.matched_preferred_skills
+                    row.recommendation = recommendation
+                    row.confidence_score = result.confidence_score
+                    row.evaluated_at = now
+                    row.deterministic_completed_at = now
+                    row.semantic_completed_at = now if not semantic_on else None
+                    row.enrichment_started_at = None
+                    row.enrichment_error = None
+                    row.recruiter_summary = None
+                    row.confidence_reasoning = None
+                    row.semantic_skill_matches = None
+                    row.transferable_skills = None
+                    row.inferred_strengths = None
+                    row.inferred_gaps = None
+                    self.db.add(row)
+
+                det_ms = int((time.monotonic() - t0) * 1000)
+                compute_ms = int((t_persist - t0) * 1000)
+                db_ms = int((time.monotonic() - t_persist) * 1000)
+                logger.info(
+                    "ats.deterministic.completed",
+                    extra={
+                        **extra_base,
+                        "deterministic_score": det_score,
+                        "duration_ms": det_ms,
+                        "deterministic_compute_ms": compute_ms,
+                        "db_write_ms": db_ms,
+                        "semantic_queued": semantic_on,
+                    },
+                )
+            except ProgrammingError as exc:
+                if "candidate_job_match" not in str(exc).lower():
+                    raise
+                logger.warning(
+                    "ats.rescore.persist_skipped",
+                    extra={
+                        **extra_base,
+                        "reason": "candidate_job_matches_table",
+                        "exception_class": type(exc).__name__,
+                        "duration_ms": int((time.monotonic() - t0) * 1000),
+                    },
+                )
+                self.db.rollback()
+                return
+        except Exception as exc:
+            logger.exception(
+                "ats.rescore.failed",
+                extra={
+                    **extra_base,
+                    "exception_class": type(exc).__name__,
+                    "duration_ms": int((time.monotonic() - t0) * 1000),
+                },
+            )
+            raise
+
+    def enrich_candidate_job_semantic_sync(
+        self, *, organization_id: UUID, candidate_id: UUID, job_id: UUID
+    ) -> None:
+        """Background semantic enrichment; updates hybrid score when successful."""
+        if not self.semantic_provider_configured():
+            return
+        t0 = time.monotonic()
+        extra_base = {
+            "ats_phase": "enrich_candidate_job_semantic",
+            "organization_id": str(organization_id),
+            "candidate_id": str(candidate_id),
+            "job_id": str(job_id),
+        }
+        logger.info("ats.semantic.started", extra={**extra_base, "context": "background_pair"})
         job = self.db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == organization_id))
         candidate = self.db.scalar(
-            select(Candidate).where(Candidate.id == candidate_id, Candidate.organization_id == organization_id)
+            select(Candidate).where(
+                Candidate.id == candidate_id,
+                or_(
+                    Candidate.organization_id == organization_id,
+                    Candidate.org_id == organization_id,
+                ),
+            )
         )
         if job is None or candidate is None:
+            logger.warning("ats.semantic.failed", extra={**extra_base, "reason": "missing_job_or_candidate"})
             return
-        required_skills = list(
-            self.db.scalars(
-                select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(True))
+
+        try:
+            row = self.db.scalar(
+                select(CandidateJobMatch)
+                .where(
+                    CandidateJobMatch.organization_id == organization_id,
+                    CandidateJobMatch.candidate_id == candidate_id,
+                    CandidateJobMatch.job_id == job_id,
+                )
+                .with_for_update()
             )
-        )
-        preferred_skills = list(
-            self.db.scalars(
-                select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(False))
-            )
-        )
-        candidate_blob = " ".join(
-            [
-                (candidate.experience_summary or ""),
-                (candidate.education or ""),
-                (candidate.notes or ""),
-                (candidate.location or ""),
-            ]
-        ).lower()
-        candidate_skill_hits: list[str] = []
-        for skill in set(required_skills + preferred_skills):
-            norm = self._jd_normalizer.normalize_skill(skill)
-            if norm and norm in candidate_blob:
-                candidate_skill_hits.append(norm)
-        years = self._extract_years_from_text(candidate.experience_summary)
-        previous_titles = self._extract_titles_from_text(candidate.experience_summary or "")
-        result = self._ats.score(
-            candidate=CandidateScoringInput(
-                candidate_id=str(candidate.id),
-                skills=candidate_skill_hits,
-                years_of_experience=years,
-                previous_titles=previous_titles,
-                education=[candidate.education] if candidate.education else [],
-                parser_confidence=0.6,
-            ),
-            job=JobScoringInput(
-                job_id=str(job.id),
-                title=job.title,
-                required_skills_normalized=required_skills,
-                preferred_skills_normalized=preferred_skills,
-                min_experience_years=float(job.experience_min_years) if job.experience_min_years is not None else None,
-                max_experience_years=float(job.experience_max_years) if job.experience_max_years is not None else None,
-                education_requirements=[],
-            ),
-        )
+        except ProgrammingError:
+            self.db.rollback()
         try:
             row = self.db.scalar(
                 select(CandidateJobMatch).where(
                     CandidateJobMatch.organization_id == organization_id,
-                    CandidateJobMatch.candidate_id == candidate.id,
-                    CandidateJobMatch.job_id == job.id,
+                    CandidateJobMatch.candidate_id == candidate_id,
+                    CandidateJobMatch.job_id == job_id,
                 )
             )
-            if row is None:
-                row = CandidateJobMatch(
-                    organization_id=organization_id,
-                    candidate_id=candidate.id,
-                    job_id=job.id,
-                    match_score=result.match_score,
-                    category_scores=result.category_scores,
-                    matched_skills=result.matched_skills,
-                    missing_skills=result.missing_skills,
-                    matched_preferred_skills=result.matched_preferred_skills,
-                    recommendation=result.recommendation,
-                    confidence_score=result.confidence_score,
-                    evaluated_at=datetime.now(timezone.utc),
+        except ProgrammingError as exc:
+            if "column" in str(exc).lower() and "candidate_job_matches" in str(exc).lower():
+                self.db.rollback()
+                logger.warning(
+                    "ats.semantic.dispatch_lifecycle_columns_missing",
+                    extra={
+                        "organization_id": str(organization_id),
+                        "candidate_id": str(candidate_id),
+                        "job_id": str(job_id),
+                        "exception_class": type(exc).__name__,
+                    },
                 )
-                self.db.add(row)
-            else:
-                row.match_score = result.match_score
-                row.category_scores = result.category_scores
+                return
+            raise
+
+        if row is None:
+            logger.warning("ats.semantic.failed", extra={**extra_base, "reason": "no_match_row"})
+            return
+
+        if row.ats_pipeline_status == ATS_AI_ENRICHING and row.enrichment_started_at is not None:
+            age = (datetime.now(timezone.utc) - row.enrichment_started_at).total_seconds()
+            if 0 < age < SEMANTIC_INFLIGHT_DEDUP_SECONDS:
+                logger.info(
+                    "ats.semantic.skip_duplicate_inflight",
+                    extra={**extra_base, "age_seconds": int(age)},
+                )
+                return
+
+        now = datetime.now(timezone.utc)
+        row.ats_pipeline_status = ATS_AI_ENRICHING
+        row.ai_enrichment_status = "enriching"
+        row.enrichment_started_at = now
+        row.enrichment_error = None
+        self.db.add(row)
+        self.db.flush()
+
+        empty_resume_extra: dict[str, object] = {
+            "skills": [],
+            "titles": [],
+            "years": None,
+            "education": [],
+            "certifications": [],
+            "summary": None,
+        }
+        ai_ms = 0
+        try:
+            try:
+                t_resume_extract = time.monotonic()
+                extra = get_resume_extra_cached(
+                    candidate.id,
+                    loader=lambda: self._load_structured_resume_fields(candidate.id, organization_id),
+                )
+                logger.info(
+                    "ats.timing.resume_extract",
+                    extra={**extra_base, "duration_ms": int((time.monotonic() - t_resume_extract) * 1000)},
+                )
+            except Exception:
+                logger.exception("ats.rescore.structured_fields_fallback", extra={**extra_base})
+                extra = dict(empty_resume_extra)
+
+            t_job_norm = time.monotonic()
+            required_skills, preferred_skills = get_job_skills_cached(
+                job.id,
+                loader=lambda: (
+                    list(
+                        self.db.scalars(
+                            select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(True))
+                        )
+                    ),
+                    list(
+                        self.db.scalars(
+                            select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(False))
+                        )
+                    ),
+                ),
+            )
+            logger.info(
+                "ats.timing.job_normalize",
+                extra={
+                    **extra_base,
+                    "duration_ms": int((time.monotonic() - t_job_norm) * 1000),
+                    "required_skills_count": len(required_skills),
+                    "preferred_skills_count": len(preferred_skills),
+                },
+            )
+            candidate_blob = " ".join(
+                [
+                    (candidate.experience_summary or ""),
+                    (candidate.education or ""),
+                    (candidate.notes or ""),
+                    (candidate.location or ""),
+                ]
+            ).lower()
+            candidate_skill_hits: list[str] = []
+            for skill in set(required_skills + preferred_skills):
+                norm = self._jd_normalizer.normalize_skill(skill)
+                if norm and norm in candidate_blob:
+                    candidate_skill_hits.append(norm)
+            years = self._extract_years_from_text(candidate.experience_summary)
+            previous_titles = self._extract_titles_from_text(candidate.experience_summary or "")
+            candidate_skills_for_scoring = list(
+                dict.fromkeys(
+                    [s for s in candidate_skill_hits if s]
+                    + [s for s in extra.get("skills", []) if s]
+                )
+            )
+            result = self._ats.score(
+                candidate=CandidateScoringInput(
+                    candidate_id=str(candidate.id),
+                    skills=candidate_skills_for_scoring,
+                    years_of_experience=years,
+                    previous_titles=previous_titles,
+                    education=[candidate.education] if candidate.education else [],
+                    parser_confidence=0.6,
+                ),
+                job=JobScoringInput(
+                    job_id=str(job.id),
+                    title=job.title,
+                    required_skills_normalized=required_skills,
+                    preferred_skills_normalized=preferred_skills,
+                    min_experience_years=float(job.experience_min_years)
+                    if job.experience_min_years is not None
+                    else None,
+                    max_experience_years=float(job.experience_max_years)
+                    if job.experience_max_years is not None
+                    else None,
+                    education_requirements=[],
+                ),
+            )
+            det_score = result.match_score
+            merged_skills = candidate_skills_for_scoring
+            merged_titles = list(
+                dict.fromkeys(
+                    [t for t in previous_titles if t]
+                    + [t for t in extra.get("titles", []) if t]
+                )
+            )
+            merged_years = years if years is not None else extra.get("years")
+            merged_edu = ([candidate.education] if candidate.education else []) + list(extra.get("education", []))
+            merged_edu = list(dict.fromkeys([e for e in merged_edu if e]))[:8]
+            exp_summary = candidate.experience_summary or extra.get("summary") or ""
+            job_summary_text = (job.description or "")[:1200] if job.description else None
+
+            condensed = build_condensed_candidate_job_payload(
+                candidate_skills=merged_skills,
+                candidate_titles=merged_titles[:8],
+                years_experience=float(merged_years) if merged_years is not None else None,
+                education=merged_edu,
+                certifications=list(extra.get("certifications", []))[:12],
+                experience_summary=exp_summary,
+                job_title=job.title,
+                job_summary=job_summary_text,
+                job_required_skills=required_skills,
+                job_preferred_skills=preferred_skills,
+                deterministic_score=det_score,
+                deterministic_matched=list(result.matched_skills or []),
+                deterministic_missing=list(result.missing_skills or []),
+            )
+            t_ai = time.monotonic()
+            sem_svc = SemanticMatchingService()
+            sem_result = sem_svc.enrich_pair(condensed)
+            ai_ms = int((time.monotonic() - t_ai) * 1000)
+            sem_int: int | None = sem_result.payload.semantic_match_score if sem_result else None
+            final_score = hybrid_match_score(det_score, sem_int)
+            logger.info(
+                "ats.hybrid.final_score",
+                extra={
+                    **extra_base,
+                    "deterministic_score": det_score,
+                    "semantic_score": sem_int,
+                    "final_score": final_score,
+                    "ai_provider_latency_ms": ai_ms,
+                },
+            )
+            recommendation = ATSMatchingService._tier_for(final_score)
+            category_scores = dict(result.category_scores or {})
+            category_scores["hybrid"] = {
+                "deterministic_score": det_score,
+                "semantic_score": sem_int,
+                "final_score": final_score,
+                "weights": {"deterministic": 0.7, "semantic": 0.3},
+            }
+
+            t_db0 = time.monotonic()
+            if sem_result:
+                row.match_score = final_score
+                row.deterministic_match_score = det_score
+                row.semantic_match_score = sem_int
+                row.ai_enrichment_status = "complete"
+                row.ats_pipeline_status = ATS_COMPLETED
+                row.category_scores = category_scores
                 row.matched_skills = result.matched_skills
                 row.missing_skills = result.missing_skills
                 row.matched_preferred_skills = result.matched_preferred_skills
-                row.recommendation = result.recommendation
+                row.recommendation = recommendation
                 row.confidence_score = result.confidence_score
                 row.evaluated_at = datetime.now(timezone.utc)
-                self.db.add(row)
-        except ProgrammingError as exc:
-            if "candidate_job_match" not in str(exc).lower():
-                raise
-            self.db.rollback()
+                row.semantic_completed_at = datetime.now(timezone.utc)
+                row.enrichment_error = None
+                row.recruiter_summary = sem_result.payload.recruiter_summary
+                row.confidence_reasoning = sem_result.payload.confidence_reasoning
+                row.semantic_skill_matches = sem_result.payload.semantic_skill_matches
+                row.transferable_skills = sem_result.payload.transferable_skills
+                row.inferred_strengths = sem_result.payload.inferred_strengths
+                row.inferred_gaps = sem_result.payload.inferred_gaps
+            else:
+                row.match_score = det_score
+                row.deterministic_match_score = det_score
+                row.semantic_match_score = None
+                row.ai_enrichment_status = "failed"
+                row.ats_pipeline_status = ATS_FAILED
+                row.category_scores = category_scores
+                row.enrichment_error = "Semantic enrichment returned no payload (provider error or parse failure)."
+                row.semantic_completed_at = datetime.now(timezone.utc)
+
+            self.db.add(row)
+            self.db.flush()
+            db_write_ms = int((time.monotonic() - t_db0) * 1000)
+            logger.info(
+                "ats.semantic.completed",
+                extra={
+                    **extra_base,
+                    "duration_ms": int((time.monotonic() - t0) * 1000),
+                    "ai_provider_latency_ms": ai_ms,
+                    "db_write_ms": db_write_ms,
+                    "final_score": row.match_score,
+                },
+            )
+        except Exception as exc:
+            logger.exception(
+                "ats.semantic.failed",
+                extra={
+                    **extra_base,
+                    "exception_class": type(exc).__name__,
+                    "duration_ms": int((time.monotonic() - t0) * 1000),
+                    "ai_provider_latency_ms": ai_ms,
+                },
+            )
+            row.match_score = row.deterministic_match_score
+            row.semantic_match_score = None
+            row.ai_enrichment_status = "failed"
+            row.ats_pipeline_status = ATS_FAILED
+            row.enrichment_error = str(exc)[:2000]
+            row.semantic_completed_at = datetime.now(timezone.utc)
+            self.db.add(row)
+
+    def rescore_candidate_job_full_sync(self, *, organization_id: UUID, candidate_id: UUID, job_id: UUID) -> None:
+        t0 = time.monotonic()
+        extra_base = {
+            "ats_phase": "rescore_candidate_job_full_sync",
+            "organization_id": str(organization_id),
+            "candidate_id": str(candidate_id),
+            "job_id": str(job_id),
+        }
+        job = self.db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == organization_id))
+        if job is None:
+            logger.warning(
+                "ats.rescore.skip",
+                extra={**extra_base, "reason": "job_not_found", "duration_ms": int((time.monotonic() - t0) * 1000)},
+            )
             return
+        candidate = self.db.scalar(
+            select(Candidate).where(
+                Candidate.id == candidate_id,
+                or_(
+                    Candidate.organization_id == organization_id,
+                    Candidate.org_id == organization_id,
+                ),
+            )
+        )
+        if candidate is None:
+            logger.warning(
+                "ats.rescore.skip",
+                extra={
+                    **extra_base,
+                    "reason": "candidate_not_in_org",
+                    "duration_ms": int((time.monotonic() - t0) * 1000),
+                },
+            )
+            return
+
+        logger.info("ats.rescore.started", extra={**extra_base})
+
+        empty_resume_extra: dict[str, object] = {
+            "skills": [],
+            "titles": [],
+            "years": None,
+            "education": [],
+            "certifications": [],
+            "summary": None,
+        }
+        try:
+            try:
+                extra = self._load_structured_resume_fields(candidate.id, organization_id)
+            except Exception:
+                logger.exception(
+                    "ats.rescore.structured_fields_fallback",
+                    extra={**extra_base},
+                )
+                extra = dict(empty_resume_extra)
+
+            required_skills = list(
+                self.db.scalars(
+                    select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(True))
+                )
+            )
+            preferred_skills = list(
+                self.db.scalars(
+                    select(JobSkill.skill).where(JobSkill.job_id == job.id, JobSkill.is_required.is_(False))
+                )
+            )
+            candidate_blob = " ".join(
+                [
+                    (candidate.experience_summary or ""),
+                    (candidate.education or ""),
+                    (candidate.notes or ""),
+                    (candidate.location or ""),
+                ]
+            ).lower()
+            candidate_skill_hits: list[str] = []
+            for skill in set(required_skills + preferred_skills):
+                norm = self._jd_normalizer.normalize_skill(skill)
+                if norm and norm in candidate_blob:
+                    candidate_skill_hits.append(norm)
+            years = self._extract_years_from_text(candidate.experience_summary)
+            previous_titles = self._extract_titles_from_text(candidate.experience_summary or "")
+            # Build a richer skill set for deterministic scoring by combining
+            # blob hits with structured extracted skills (when available).
+            candidate_skills_for_scoring = list(
+                dict.fromkeys(
+                    [s for s in candidate_skill_hits if s]
+                    + [s for s in extra.get("skills", []) if s]
+                )
+            )
+            result = self._ats.score(
+                candidate=CandidateScoringInput(
+                    candidate_id=str(candidate.id),
+                    skills=candidate_skills_for_scoring,
+                    years_of_experience=years,
+                    previous_titles=previous_titles,
+                    education=[candidate.education] if candidate.education else [],
+                    parser_confidence=0.6,
+                ),
+                job=JobScoringInput(
+                    job_id=str(job.id),
+                    title=job.title,
+                    required_skills_normalized=required_skills,
+                    preferred_skills_normalized=preferred_skills,
+                    min_experience_years=float(job.experience_min_years)
+                    if job.experience_min_years is not None
+                    else None,
+                    max_experience_years=float(job.experience_max_years)
+                    if job.experience_max_years is not None
+                    else None,
+                    education_requirements=[],
+                ),
+            )
+            det_score = result.match_score
+            merged_skills = candidate_skills_for_scoring
+            merged_titles = list(
+                dict.fromkeys(
+                    [t for t in previous_titles if t]
+                    + [t for t in extra.get("titles", []) if t]
+                )
+            )
+            merged_years = years if years is not None else extra.get("years")
+            merged_edu = ([candidate.education] if candidate.education else []) + list(extra.get("education", []))
+            merged_edu = list(dict.fromkeys([e for e in merged_edu if e]))[:8]
+            exp_summary = candidate.experience_summary or extra.get("summary") or ""
+            job_summary_text = (job.description or "")[:1200] if job.description else None
+
+            condensed = build_condensed_candidate_job_payload(
+                candidate_skills=merged_skills,
+                candidate_titles=merged_titles[:8],
+                years_experience=float(merged_years) if merged_years is not None else None,
+                education=merged_edu,
+                certifications=list(extra.get("certifications", []))[:12],
+                experience_summary=exp_summary,
+                job_title=job.title,
+                job_summary=job_summary_text,
+                job_required_skills=required_skills,
+                job_preferred_skills=preferred_skills,
+                deterministic_score=det_score,
+                deterministic_matched=list(result.matched_skills or []),
+                deterministic_missing=list(result.missing_skills or []),
+            )
+            sem_svc = SemanticMatchingService()
+            sem_result = sem_svc.enrich_pair(condensed)
+            sem_int: int | None = sem_result.payload.semantic_match_score if sem_result else None
+            final_score = hybrid_match_score(det_score, sem_int)
+            logger.info(
+                "ats.hybrid.final_score",
+                extra={
+                    **extra_base,
+                    "deterministic_score": det_score,
+                    "semantic_score": sem_int,
+                    "final_score": final_score,
+                },
+            )
+            recommendation = ATSMatchingService._tier_for(final_score)
+            category_scores = dict(result.category_scores or {})
+            category_scores["hybrid"] = {
+                "deterministic_score": det_score,
+                "semantic_score": sem_int,
+                "final_score": final_score,
+                "weights": {"deterministic": 0.7, "semantic": 0.3},
+            }
+
+            settings = get_settings()
+            semantic_configured = bool((settings.groq_ats_api_key or "").strip() or (settings.grok_api_key or "").strip())
+            if sem_result:
+                ai_status = "complete"
+            elif not semantic_configured:
+                ai_status = "skipped"
+            else:
+                ai_status = "failed"
+
+            logger.info(
+                "ats.rescore.semantic_enrichment",
+                extra={
+                    **extra_base,
+                    "semantic_score": sem_int,
+                    "ai_enrichment_status": ai_status,
+                    "grok_configured": bool((settings.grok_api_key or "").strip()),
+                },
+            )
+
+            finalize_ts = datetime.now(timezone.utc)
+            if sem_result:
+                pipe_final = ATS_COMPLETED
+                enrich_err = None
+            elif not semantic_configured:
+                pipe_final = ATS_COMPLETED
+                enrich_err = None
+            else:
+                pipe_final = ATS_FAILED
+                enrich_err = "Semantic enrichment returned no payload (provider error or parse failure)."
+
+            try:
+                row = self.db.scalar(
+                    select(CandidateJobMatch).where(
+                        CandidateJobMatch.organization_id == organization_id,
+                        CandidateJobMatch.candidate_id == candidate.id,
+                        CandidateJobMatch.job_id == job.id,
+                    )
+                )
+                if row is None:
+                    row = CandidateJobMatch(
+                        organization_id=organization_id,
+                        candidate_id=candidate.id,
+                        job_id=job.id,
+                        match_score=final_score,
+                        deterministic_match_score=det_score,
+                        semantic_match_score=sem_int,
+                        ai_enrichment_status=ai_status,
+                        ats_pipeline_status=pipe_final,
+                        category_scores=category_scores,
+                        matched_skills=result.matched_skills,
+                        missing_skills=result.missing_skills,
+                        matched_preferred_skills=result.matched_preferred_skills,
+                        recommendation=recommendation,
+                        confidence_score=result.confidence_score,
+                        evaluated_at=finalize_ts,
+                        deterministic_completed_at=finalize_ts,
+                        semantic_completed_at=finalize_ts,
+                        enrichment_started_at=None,
+                        enrichment_error=enrich_err,
+                        recruiter_summary=sem_result.payload.recruiter_summary if sem_result else None,
+                        confidence_reasoning=sem_result.payload.confidence_reasoning if sem_result else None,
+                        semantic_skill_matches=sem_result.payload.semantic_skill_matches if sem_result else None,
+                        transferable_skills=sem_result.payload.transferable_skills if sem_result else None,
+                        inferred_strengths=sem_result.payload.inferred_strengths if sem_result else None,
+                        inferred_gaps=sem_result.payload.inferred_gaps if sem_result else None,
+                    )
+                    self.db.add(row)
+                else:
+                    row.match_score = final_score
+                    row.deterministic_match_score = det_score
+                    row.semantic_match_score = sem_int
+                    row.ai_enrichment_status = ai_status
+                    row.ats_pipeline_status = pipe_final
+                    row.category_scores = category_scores
+                    row.matched_skills = result.matched_skills
+                    row.missing_skills = result.missing_skills
+                    row.matched_preferred_skills = result.matched_preferred_skills
+                    row.recommendation = recommendation
+                    row.confidence_score = result.confidence_score
+                    row.evaluated_at = finalize_ts
+                    row.deterministic_completed_at = finalize_ts
+                    row.semantic_completed_at = finalize_ts
+                    row.enrichment_started_at = None
+                    row.enrichment_error = enrich_err
+                    if sem_result:
+                        row.recruiter_summary = sem_result.payload.recruiter_summary
+                        row.confidence_reasoning = sem_result.payload.confidence_reasoning
+                        row.semantic_skill_matches = sem_result.payload.semantic_skill_matches
+                        row.transferable_skills = sem_result.payload.transferable_skills
+                        row.inferred_strengths = sem_result.payload.inferred_strengths
+                        row.inferred_gaps = sem_result.payload.inferred_gaps
+                    else:
+                        row.recruiter_summary = None
+                        row.confidence_reasoning = None
+                        row.semantic_skill_matches = None
+                        row.transferable_skills = None
+                        row.inferred_strengths = None
+                        row.inferred_gaps = None
+                    self.db.add(row)
+                logger.info(
+                    "ats.rescore.completed",
+                    extra={
+                        **extra_base,
+                        "deterministic_score": det_score,
+                        "final_score": final_score,
+                        "ai_enrichment_status": ai_status,
+                        "duration_ms": int((time.monotonic() - t0) * 1000),
+                    },
+                )
+            except ProgrammingError as exc:
+                if "candidate_job_match" not in str(exc).lower():
+                    raise
+                logger.warning(
+                    "ats.rescore.persist_skipped",
+                    extra={
+                        **extra_base,
+                        "reason": "candidate_job_matches_table",
+                        "exception_class": type(exc).__name__,
+                        "duration_ms": int((time.monotonic() - t0) * 1000),
+                    },
+                )
+                self.db.rollback()
+                return
+        except Exception as exc:
+            logger.exception(
+                "ats.rescore.failed",
+                extra={
+                    **extra_base,
+                    "exception_class": type(exc).__name__,
+                    "duration_ms": int((time.monotonic() - t0) * 1000),
+                },
+            )
+            raise
 
     def dispatch_rescore_job(self, *, organization_id: UUID, job_id: UUID) -> None:
         from app.candidate_management.tasks_ats import rescore_job_task, run_rescore_job
@@ -1068,6 +2104,109 @@ class JobService:
         exists = self.db.scalar(sa.text("select to_regclass(:t) is not null"), {"t": table_fqn})
         return bool(exists)
 
+    def _load_structured_resume_fields(self, candidate_id: UUID, organization_id: UUID) -> dict[str, object]:
+        """Best-effort JSON resume fields from unified `candidates` row (org_id / organization_id)."""
+        t0 = time.monotonic()
+        empty: dict[str, object] = {
+            "skills": [],
+            "titles": [],
+            "years": None,
+            "education": [],
+            "certifications": [],
+            "summary": None,
+        }
+        try:
+            row = self.db.execute(
+                text(
+                    """
+                    SELECT parsed_resume_data, summary, headline, years_experience
+                    FROM candidates
+                    WHERE id = :cid
+                      AND (
+                        organization_id = :oid
+                        OR org_id = :oid
+                      )
+                    LIMIT 1
+                    """
+                ),
+                {"cid": candidate_id, "oid": organization_id},
+            ).mappings().first()
+        except ProgrammingError:
+            self.db.rollback()
+            logger.warning("structured_resume_fields_query_failed candidate=%s", candidate_id)
+            return empty
+        except Exception:
+            logger.exception("structured_resume_fields_unexpected candidate=%s", candidate_id)
+            self.db.rollback()
+            return empty
+
+        if not row:
+            logger.info(
+                "ats.resume.extract.completed",
+                extra={
+                    "ats_phase": "resume_extract",
+                    "candidate_id": str(candidate_id),
+                    "organization_id": str(organization_id),
+                    "duration_ms": int((time.monotonic() - t0) * 1000),
+                    "status": "empty",
+                },
+            )
+            return empty
+
+        parsed = row.get("parsed_resume_data")
+        skills: list[str] = []
+        titles: list[str] = []
+        education: list[str] = []
+        certs: list[str] = []
+        if isinstance(parsed, dict):
+            for key in ("skills", "normalized_keywords", "inferred_skills"):
+                raw = parsed.get(key)
+                if isinstance(raw, list):
+                    skills.extend(str(x).strip().lower() for x in raw if x)
+            pt = parsed.get("previous_titles")
+            if isinstance(pt, list):
+                titles.extend(str(x).strip() for x in pt if x)
+            edu = parsed.get("education")
+            if isinstance(edu, str) and edu.strip():
+                education.append(edu.strip())
+            elif isinstance(edu, list):
+                education.extend(str(x).strip() for x in edu if x)
+            c = parsed.get("certifications")
+            if isinstance(c, list):
+                certs.extend(str(x).strip() for x in c if x)
+
+        y = row.get("years_experience")
+        years_val: int | float | None = None
+        if y is not None:
+            try:
+                years_val = float(y)
+            except (TypeError, ValueError):
+                years_val = None
+
+        summary_parts = [row.get("summary"), row.get("headline")]
+        summary = " ".join(str(p).strip() for p in summary_parts if p).strip() or None
+
+        result = {
+            "skills": list(dict.fromkeys(skills))[:50],
+            "titles": titles[:8],
+            "years": years_val,
+            "education": education[:8],
+            "certifications": certs[:12],
+            "summary": summary,
+        }
+        logger.info(
+            "ats.resume.extract.completed",
+            extra={
+                "ats_phase": "resume_extract",
+                "candidate_id": str(candidate_id),
+                "organization_id": str(organization_id),
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+                "skills_count": len(result["skills"]),
+                "titles_count": len(result["titles"]),
+            },
+        )
+        return result
+
     @staticmethod
     def _extract_years_from_text(text: str | None) -> float | None:
         if not text:
@@ -1092,6 +2231,25 @@ class JobService:
     # -------------------------------
     # Internal helpers
     # -------------------------------
+    @staticmethod
+    def _match_category_scores_model(cs: dict[str, object]) -> JobMatchCategoryScores:
+        """Map JSONB category_scores to API model, including optional hybrid sub-object."""
+        hybrid: HybridScoreBreakdown | None = None
+        raw_h = cs.get("hybrid")
+        if isinstance(raw_h, dict):
+            try:
+                hybrid = HybridScoreBreakdown.model_validate(raw_h)
+            except Exception:  # noqa: BLE001 — invalid legacy blobs must not 500 list endpoints
+                hybrid = None
+        return JobMatchCategoryScores(
+            required_skills=int(cs.get("required_skills") or 0),
+            preferred_skills=int(cs.get("preferred_skills") or 0),
+            experience=int(cs.get("experience") or 0),
+            title=int(cs.get("title") or 0),
+            education=int(cs.get("education") or 0),
+            hybrid=hybrid,
+        )
+
     @staticmethod
     def _coerce_match_category_scores(raw: object) -> dict[str, object]:
         """JSONB may contain non-dicts from legacy or manual edits; avoid 500s on read."""

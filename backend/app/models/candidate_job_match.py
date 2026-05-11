@@ -23,6 +23,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -52,6 +53,18 @@ class CandidateJobMatch(Base):
             "candidate_id",
             "match_score",
         ),
+        Index(
+            "ix_cjm_org_candidate_job",
+            "organization_id",
+            "candidate_id",
+            "job_id",
+        ),
+        Index(
+            "ix_cjm_org_status_updated",
+            "organization_id",
+            "ats_pipeline_status",
+            "updated_at",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -74,9 +87,37 @@ class CandidateJobMatch(Base):
         index=True,
     )
 
-    # Scores: match_score is the rolled-up 0..100 value used for ranking;
-    # category_scores keeps the breakdown so the UI can explain "why".
+    # Scores: match_score is hybrid (deterministic + semantic) 0..100 for ranking.
+    # deterministic_match_score is the explainable rules-based score before AI blend.
     match_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    deterministic_match_score: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    semantic_match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    ai_enrichment_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ats_pipeline_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default="pending",
+    )
+    enrichment_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    deterministic_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    semantic_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    enrichment_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recruiter_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    semantic_skill_matches: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    transferable_skills: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    inferred_strengths: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    inferred_gaps: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     category_scores: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     matched_skills: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)

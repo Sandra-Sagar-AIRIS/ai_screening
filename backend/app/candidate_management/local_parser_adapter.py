@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # Local fallback confidence threshold below which we will try the AI fallback
 # (if configured). Tunable via env so prod can be more aggressive.
-_LOCAL_PARSER_VERSION = "local-ats-v1"
+_LOCAL_PARSER_VERSION = "local-ats-v2"
 _FALLBACK_THRESHOLD = float(os.getenv("ATS_LOCAL_FALLBACK_THRESHOLD", "0.35"))
 
 
@@ -47,6 +48,7 @@ class LocalResumeParser:
 
     # AIServicePort
     def parse_resume(self, *, resume_s3_key: str) -> ResumeParseResult:
+        t0 = time.monotonic()
         file_path = _resolve_local_file(resume_s3_key)
         try:
             parsed = parse_resume_file(file_path)
@@ -55,7 +57,17 @@ class LocalResumeParser:
             return _empty_result(reason=str(exc))
 
         extractor = ATSExtractionService(known_skills=self._known_skills())
+        t_extract = time.monotonic()
         profile = extractor.extract(parsed)
+        logger.info(
+            "ats.resume.normalize.completed",
+            extra={
+                "ats_phase": "candidate_normalization",
+                "resume_s3_key": resume_s3_key,
+                "duration_ms": int((time.monotonic() - t_extract) * 1000),
+                "skills_count": len(profile.skills or []),
+            },
+        )
         contact = _extract_contact(parsed.text)
         name_parts = _extract_name(parsed.text)
 
@@ -75,23 +87,83 @@ class LocalResumeParser:
             "certifications": profile.certifications,
             "previous_titles": profile.previous_titles,
             "normalized_keywords": profile.normalized_keywords,
+            "skills": profile.skills,
+            "ecosystem_tags": profile.ecosystem_tags,
             "parser": parsed.parser,
+            "extraction_version": _LOCAL_PARSER_VERSION,
         }
 
-        return ResumeParseResult(
+        merged_skills = list(profile.skills)
+        enrich_version = ""
+        try:
+            from app.core.config import get_settings
+
+            if get_settings().resume_grok_intelligence:
+                from app.services.resume_intelligence_service import enrich_resume_with_grok
+
+                enriched = enrich_resume_with_grok(resume_excerpt=parsed.text, local_skills=profile.skills)
+                if enriched is not None:
+                    enrich_version = "+grok-resume"
+                    seen_m = {s.lower() for s in merged_skills}
+                    for s in enriched.normalized_skills:
+                        sl = (s or "").strip().lower()
+                        if sl and sl not in seen_m:
+                            seen_m.add(sl)
+                            merged_skills.append(sl)
+                    inferred_only = [s for s in enriched.inferred_skills if (s or "").strip()]
+                    parsed_resume_data["inferred_skills"] = inferred_only[:40]
+                    parsed_resume_data["seniority_guess"] = enriched.seniority
+                    parsed_resume_data["cloud_platforms"] = enriched.cloud_platforms[:25]
+                    parsed_resume_data["frameworks_enriched"] = enriched.frameworks[:25]
+                    parsed_resume_data["databases_enriched"] = enriched.databases[:25]
+                    parsed_resume_data["leadership_signals"] = enriched.leadership_signals[:15]
+                    if enriched.recruiter_summary:
+                        parsed_resume_data["resume_recruiter_summary"] = enriched.recruiter_summary.strip()[:2000]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("resume intelligence enrichment skipped: %s", exc)
+
+        parsed_resume_data["skills"] = merged_skills
+
+        extracted_skill_rows: list[CandidateSkillInput] = []
+        skill_seen: set[str] = set()
+        for skill in merged_skills:
+            name = (skill or "").strip()
+            key = name.lower()
+            if not key or key in skill_seen:
+                continue
+            skill_seen.add(key)
+            extracted_skill_rows.append(CandidateSkillInput(name=name, source="local-extractor"))
+        for raw_inf in parsed_resume_data.get("inferred_skills") or []:
+            if not isinstance(raw_inf, str):
+                continue
+            name = raw_inf.strip()
+            key = name.lower()
+            if not key or key in skill_seen:
+                continue
+            skill_seen.add(key)
+            extracted_skill_rows.append(CandidateSkillInput(name=name, source="grok-resume-inferred"))
+
+        result = ResumeParseResult(
             parsed_resume_data=parsed_resume_data,
             parse_confidence=profile.confidence,
-            ai_parse_version=_LOCAL_PARSER_VERSION,
-            extracted_skills=[
-                CandidateSkillInput(name=skill, source="local-extractor")
-                for skill in profile.skills
-            ],
+            ai_parse_version=_LOCAL_PARSER_VERSION + enrich_version,
+            extracted_skills=extracted_skill_rows,
             years_of_experience=profile.years_of_experience,
             education=profile.education,
             certifications=profile.certifications,
             previous_titles=profile.previous_titles,
             normalized_keywords=profile.normalized_keywords,
         )
+        logger.info(
+            "ats.resume.pipeline.completed",
+            extra={
+                "ats_phase": "resume_pipeline",
+                "resume_s3_key": resume_s3_key,
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+                "parse_confidence": float(profile.confidence or 0),
+            },
+        )
+        return result
 
     # Pass-through stub: smart_search isn't part of local parsing. Caller should
     # use a different adapter for AI search. We keep this method so this class

@@ -25,6 +25,7 @@ import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
 import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
+import { normalizeCandidateId } from "@/lib/ats/candidate-id";
 
 type BoardStage = "applied" | "screening" | "interview" | "offered" | "hired";
 
@@ -61,6 +62,10 @@ function CandidateCard({
   candidate,
   atsScore,
   recommendation,
+  semanticInsight,
+  aiEnrichmentStatus,
+  awaitingAtsMatch,
+  boardLoading,
   isMoving,
   isTopMatch,
 }: {
@@ -68,6 +73,14 @@ function CandidateCard({
   candidate?: Candidate;
   atsScore?: number;
   recommendation?: string;
+  /** Truncated AI recruiter summary when enrichment completed. */
+  semanticInsight?: string | null;
+  /** From candidate_job_matches; drives compact semantic / fallback copy. */
+  aiEnrichmentStatus?: string | null;
+  /** No row in candidate_job_matches for this job yet (or data not loaded). */
+  awaitingAtsMatch?: boolean;
+  /** Full pipeline board is fetching jobs + ATS matches — do not show “pending” on every card. */
+  boardLoading?: boolean;
   isMoving?: boolean;
   isTopMatch?: boolean;
 }) {
@@ -95,9 +108,22 @@ function CandidateCard({
                 Top Match
               </span>
             ) : null}
-            <ATSScoreBadge score={atsScore} compact />
-            <ATSRecommendationBadge recommendation={recommendation} compact />
+            <ATSScoreBadge
+              score={atsScore}
+              scorePending={Boolean(awaitingAtsMatch && !boardLoading)}
+              compact
+            />
+            <ATSRecommendationBadge recommendation={recommendation} awaitingMatch={awaitingAtsMatch && !boardLoading} compact />
           </div>
+          {semanticInsight ? (
+            <p className="mt-2 line-clamp-2 text-[11px] leading-snug text-violet-800" title={semanticInsight}>
+              {semanticInsight}
+            </p>
+          ) : aiEnrichmentStatus === "failed" ? (
+            <p className="mt-2 line-clamp-2 text-[11px] leading-snug text-slate-500">
+              AI semantic layer unavailable — deterministic score shown.
+            </p>
+          ) : null}
         </Link>
         {isMoving ? <p className="mt-2 text-xs text-blue-600">Updating stage...</p> : null}
       </div>
@@ -110,6 +136,10 @@ function DraggableCandidateCard({
   candidate,
   atsScore,
   recommendation,
+  semanticInsight,
+  aiEnrichmentStatus,
+  awaitingAtsMatch,
+  boardLoading,
   canDrag,
   isMoving,
   isTopMatch,
@@ -118,6 +148,10 @@ function DraggableCandidateCard({
   candidate?: Candidate;
   atsScore?: number;
   recommendation?: string;
+  semanticInsight?: string | null;
+  aiEnrichmentStatus?: string | null;
+  awaitingAtsMatch?: boolean;
+  boardLoading?: boolean;
   canDrag: boolean;
   isMoving: boolean;
   isTopMatch?: boolean;
@@ -139,7 +173,18 @@ function DraggableCandidateCard({
       {...attributes}
       {...listeners}
     >
-      <CandidateCard pipeline={pipeline} candidate={candidate} atsScore={atsScore} recommendation={recommendation} isMoving={isMoving} isTopMatch={isTopMatch} />
+      <CandidateCard
+        pipeline={pipeline}
+        candidate={candidate}
+        atsScore={atsScore}
+        recommendation={recommendation}
+        semanticInsight={semanticInsight}
+        aiEnrichmentStatus={aiEnrichmentStatus}
+        awaitingAtsMatch={awaitingAtsMatch}
+        boardLoading={boardLoading}
+        isMoving={isMoving}
+        isTopMatch={isTopMatch}
+      />
     </div>
   );
 }
@@ -208,9 +253,20 @@ export default function PipelinePage() {
   const permissions = useAuthStore((state) => state.permissions);
   const [movingPipelineId, setMovingPipelineId] = useState<string | null>(null);
   const [activePipelineId, setActivePipelineId] = useState<string | null>(null);
-  const [atsByCandidateId, setAtsByCandidateId] = useState<Record<string, { score: number; recommendation: string }>>({});
+  const [atsByCandidateId, setAtsByCandidateId] = useState<
+    Record<
+      string,
+      {
+        score: number;
+        recommendation: string;
+        recruiter_summary?: string | null;
+        ai_enrichment_status?: string | null;
+      }
+    >
+  >({});
   const [sortMode, setSortMode] = useState<"ats_desc" | "newest" | "updated">("ats_desc");
   const boardScrollRef = useRef<HTMLDivElement | null>(null);
+  const pipelineLoadSeqRef = useRef(0);
   const rescoreRequestedJobIdsRef = useRef<Set<string>>(new Set());
   const canUpdatePipeline = hasPermission(permissions, PIPELINE_UPDATE_PERMISSION);
   const canReadCandidates = permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
@@ -253,6 +309,7 @@ export default function PipelinePage() {
   }, [canReadCandidates]);
 
   async function loadPipelines(jobId: string) {
+    const seq = ++pipelineLoadSeqRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -260,17 +317,38 @@ export default function PipelinePage() {
         getPipelines(200, 0, jobId),
         getJobMatchesAts(jobId, { limit: 200, offset: 0, sort_by: "score_desc" }),
       ]);
+      if (seq !== pipelineLoadSeqRef.current) return;
       console.info("[pipeline-board] fetched", { jobId, count: pipelineData.length });
       setPipelines(pipelineData);
-      const nextAtsByCandidate: Record<string, { score: number; recommendation: string }> = {};
+      const nextAtsByCandidate: Record<
+        string,
+        {
+          score: number;
+          recommendation: string;
+          recruiter_summary?: string | null;
+          ai_enrichment_status?: string | null;
+        }
+      > = {};
       for (const item of atsMatches.matches) {
-        nextAtsByCandidate[item.candidate_id] = {
+        const rawId = typeof item.candidate_id === "string" ? item.candidate_id : String(item.candidate_id);
+        const cid = normalizeCandidateId(rawId);
+        if (!cid) continue;
+        const summary = item.recruiter_summary?.trim();
+        nextAtsByCandidate[cid] = {
           score: item.fit_score,
-          recommendation: item.recommendation,
+          recommendation: item.recommendation?.trim() ?? "",
+          recruiter_summary: summary
+            ? summary.length > 160
+              ? `${summary.slice(0, 157)}…`
+              : summary
+            : null,
+          ai_enrichment_status: item.ai_enrichment_status,
         };
       }
       setAtsByCandidateId(nextAtsByCandidate);
-      const hasUnscoredCandidates = pipelineData.some((pipeline) => !nextAtsByCandidate[pipeline.candidate_id]);
+      const hasUnscoredCandidates = pipelineData.some(
+        (pipeline) => !nextAtsByCandidate[normalizeCandidateId(pipeline.candidate_id)]
+      );
       if (pipelineData.length > 0 && hasUnscoredCandidates && !rescoreRequestedJobIdsRef.current.has(jobId)) {
         rescoreRequestedJobIdsRef.current.add(jobId);
         void rescoreJobAts(jobId).catch(() => {
@@ -278,13 +356,16 @@ export default function PipelinePage() {
         });
       }
     } catch (err) {
+      if (seq !== pipelineLoadSeqRef.current) return;
       if (err instanceof ApiError) {
         setError(err.message);
       } else {
         setError("Unable to load pipeline board.");
       }
     } finally {
-      setLoading(false);
+      if (seq === pipelineLoadSeqRef.current) {
+        setLoading(false);
+      }
     }
   }
 
@@ -299,11 +380,13 @@ export default function PipelinePage() {
   }, [selectedJobId]);
 
   const grouped = useMemo(() => {
-    const candidateMap = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+    const candidateMap = new Map(
+      candidates.map((candidate) => [normalizeCandidateId(candidate.id), candidate])
+    );
     return STAGES.reduce<Record<BoardStage, Array<{ pipeline: Pipeline; candidate: Candidate | undefined }>>>((acc, stage) => {
       acc[stage] = pipelines
         .filter((pipeline) => toBoardStage(pipeline.stage) === stage)
-        .map((pipeline) => ({ pipeline, candidate: candidateMap.get(pipeline.candidate_id) }))
+        .map((pipeline) => ({ pipeline, candidate: candidateMap.get(normalizeCandidateId(pipeline.candidate_id)) }))
         // Hide orphan pipeline cards so "Unknown candidate" rows don't pollute the board.
         .filter((item) => Boolean(item.candidate))
         .sort((a, b) => {
@@ -314,8 +397,8 @@ export default function PipelinePage() {
             return new Date(b.pipeline.updated_at).getTime() - new Date(a.pipeline.updated_at).getTime();
           }
           return (
-            (atsByCandidateId[b.pipeline.candidate_id]?.score ?? -1) -
-            (atsByCandidateId[a.pipeline.candidate_id]?.score ?? -1)
+            (atsByCandidateId[normalizeCandidateId(b.pipeline.candidate_id)]?.score ?? -1) -
+            (atsByCandidateId[normalizeCandidateId(a.pipeline.candidate_id)]?.score ?? -1)
           );
         });
       return acc;
@@ -323,7 +406,10 @@ export default function PipelinePage() {
   }, [candidates, pipelines, atsByCandidateId, sortMode]);
 
   const pipelineById = useMemo(() => new Map(pipelines.map((pipeline) => [pipeline.id, pipeline])), [pipelines]);
-  const candidateById = useMemo(() => new Map(candidates.map((candidate) => [candidate.id, candidate])), [candidates]);
+  const candidateById = useMemo(
+    () => new Map(candidates.map((candidate) => [normalizeCandidateId(candidate.id), candidate])),
+    [candidates]
+  );
   const activePipeline = activePipelineId ? pipelineById.get(activePipelineId) : undefined;
 
   function handleBoardWheel(event: React.WheelEvent<HTMLDivElement>) {
@@ -481,18 +567,27 @@ export default function PipelinePage() {
                   activePipelineId={activePipelineId}
                 >
                   {grouped[stage]?.length ? (
-                    grouped[stage].map(({ pipeline, candidate }) => (
-                      <DraggableCandidateCard
-                        key={pipeline.id}
-                        pipeline={pipeline}
-                        candidate={candidate}
-                        atsScore={atsByCandidateId[pipeline.candidate_id]?.score}
-                        recommendation={atsByCandidateId[pipeline.candidate_id]?.recommendation}
-                        isTopMatch={(atsByCandidateId[pipeline.candidate_id]?.score ?? -1) >= 85}
-                        canDrag={canUpdatePipeline && movingPipelineId === null}
-                        isMoving={movingPipelineId === pipeline.id}
-                      />
-                    ))
+                    grouped[stage].map(({ pipeline, candidate }) => {
+                      const ats = atsByCandidateId[normalizeCandidateId(pipeline.candidate_id)];
+                      return (
+                        <DraggableCandidateCard
+                          key={pipeline.id}
+                          pipeline={pipeline}
+                          candidate={candidate}
+                          atsScore={ats?.score}
+                          recommendation={ats?.recommendation}
+                          semanticInsight={
+                            ats?.ai_enrichment_status === "complete" ? ats?.recruiter_summary : null
+                          }
+                          aiEnrichmentStatus={ats?.ai_enrichment_status}
+                          awaitingAtsMatch={!ats}
+                          boardLoading={loading}
+                          isTopMatch={(ats?.score ?? -1) >= 85}
+                          canDrag={canUpdatePipeline && movingPipelineId === null}
+                          isMoving={movingPipelineId === pipeline.id}
+                        />
+                      );
+                    })
                   ) : null}
                 </StageColumn>
               ))}
@@ -501,14 +596,25 @@ export default function PipelinePage() {
           <DragOverlay>
             {activePipeline ? (
               <div className="w-[260px] rotate-1 scale-105 opacity-95 shadow-xl">
+                {(() => {
+                  const ats = atsByCandidateId[normalizeCandidateId(activePipeline.candidate_id)];
+                  return (
                 <CandidateCard
                   pipeline={activePipeline}
-                  candidate={candidateById.get(activePipeline.candidate_id)}
-                  atsScore={atsByCandidateId[activePipeline.candidate_id]?.score}
-                  recommendation={atsByCandidateId[activePipeline.candidate_id]?.recommendation}
-                  isTopMatch={(atsByCandidateId[activePipeline.candidate_id]?.score ?? -1) >= 85}
+                  candidate={candidateById.get(normalizeCandidateId(activePipeline.candidate_id))}
+                  atsScore={ats?.score}
+                  recommendation={ats?.recommendation}
+                  semanticInsight={
+                    ats?.ai_enrichment_status === "complete" ? ats?.recruiter_summary : null
+                  }
+                  aiEnrichmentStatus={ats?.ai_enrichment_status}
+                  awaitingAtsMatch={!ats}
+                  boardLoading={loading}
+                  isTopMatch={(ats?.score ?? -1) >= 85}
                   isMoving={false}
                 />
+                  );
+                })()}
               </div>
             ) : null}
           </DragOverlay>

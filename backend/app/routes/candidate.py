@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_any_permissions, require_permission
@@ -13,7 +13,7 @@ from app.schemas.auth import CurrentUser
 from app.schemas.candidate import CandidateCreate, CandidateResponse, CandidateUpdate
 from app.services.candidate_service import CandidateService
 from app.services.job_service import JobService
-from app.schemas.job import CandidateMatchesResponse
+from app.schemas.job import AtsCandidateRescoreResponse, CandidateMatchesResponse
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -97,17 +97,64 @@ def get_candidate_matches(
     )
 
 
-@router.post("/{candidate_id}/rescore", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{candidate_id}/rescore", response_model=AtsCandidateRescoreResponse)
 def rescore_candidate_matches(
     candidate_id: UUID,
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[CurrentUser, Depends(require_any_permissions(CANDIDATES_UPDATE, ATS_RESCORE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> dict[str, str]:
+    sync: Annotated[
+        bool,
+        Query(description="Run full deterministic+semantic pipeline in-request (slow; for debugging)."),
+    ] = False,
+) -> AtsCandidateRescoreResponse:
+    org_id = UUID(current_user.organization_id)
     service = JobService(db)
-    service.dispatch_rescore_candidate(
-        organization_id=UUID(current_user.organization_id),
+    if sync:
+        try:
+            pairs = service.rescore_candidate_full_sync(organization_id=org_id, candidate_id=candidate_id)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "error": "ATS_RESCORE_FAILED",
+                    "message": str(exc).strip() or repr(exc),
+                    "exception_type": type(exc).__name__,
+                },
+            ) from exc
+        return AtsCandidateRescoreResponse(
+            status="completed",
+            candidate_id=candidate_id,
+            pairs_scored=pairs,
+            semantic_enrichment="inline_full" if JobService.semantic_provider_configured() else "disabled",
+            mode="full_sync",
+        )
+    try:
+        pairs = service.rescore_candidate_fast(organization_id=org_id, candidate_id=candidate_id)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "ATS_RESCORE_FAILED",
+                "message": str(exc).strip() or repr(exc),
+                "exception_type": type(exc).__name__,
+            },
+        ) from exc
+    if pairs > 0 and JobService.semantic_provider_configured():
+        sem = "queued"
+    elif not JobService.semantic_provider_configured():
+        sem = "disabled"
+    else:
+        sem = "none"
+    return AtsCandidateRescoreResponse(
+        status="completed",
         candidate_id=candidate_id,
+        pairs_scored=pairs,
+        semantic_enrichment=sem,
+        mode="fast",
     )
-    return {"status": "queued", "candidate_id": str(candidate_id)}
 

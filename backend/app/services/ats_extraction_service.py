@@ -23,7 +23,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from app.services.jd_normalization_service import JDNormalizationService
 from app.services.resume_parser import ParsedResume
+from app.services.resume_skill_text import (
+    normalize_resume_text_for_skill_matching,
+    tokenize_skill_section_lines,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +42,7 @@ BASELINE_SKILLS: tuple[str, ...] = (
     # Web frameworks / runtimes
     "fastapi", "django", "flask", "spring", "spring boot", "node.js", "node",
     "express", "nestjs", "next.js", "nextjs", "react", "react native",
-    "angular", "vue", "vue.js", "svelte", "rails", "laravel",
+    "angular", "vue", "vue.js", "svelte", "rails", "laravel", "redux",
     # Data / DB
     "postgresql", "postgres", "mysql", "mariadb", "sqlite", "mongodb",
     "redis", "elasticsearch", "cassandra", "dynamodb", "bigquery", "snowflake",
@@ -52,6 +57,9 @@ BASELINE_SKILLS: tuple[str, ...] = (
     # Other tooling
     "git", "linux", "bash", "graphql", "rest", "grpc", "openapi",
     "celery", "rabbitmq", "nginx", "prometheus", "grafana", "datadog",
+    # Methodologies / collaboration (often listed as skills)
+    "agile", "scrum", "kanban", "jira", "confluence",
+    "sql server", "opentelemetry",
 )
 
 _DEGREE_KEYWORDS: tuple[str, ...] = (
@@ -87,12 +95,26 @@ class ExtractedCandidateProfile:
     """
 
     skills: list[str] = field(default_factory=list)
+    ecosystem_tags: list[str] = field(default_factory=list)
     years_of_experience: float | None = None
     education: list[str] = field(default_factory=list)
     certifications: list[str] = field(default_factory=list)
     previous_titles: list[str] = field(default_factory=list)
     normalized_keywords: list[str] = field(default_factory=list)
     confidence: float = 0.0
+
+
+# Rule-based ecosystem tags for recruiter insights + semantic ATS payloads.
+_ECOSYSTEM_TRIGGERS: tuple[tuple[frozenset[str], str], ...] = (
+    (frozenset({"nestjs", "express", "node.js", "javascript", "typescript"}), "node-ecosystem"),
+    (frozenset({"react", "next.js", "redux", "angular", "vue"}), "frontend-modern"),
+    (frozenset({"kafka", "rabbitmq", "activemq"}), "event-driven"),
+    (frozenset({"terraform", "ansible", "pulumi"}), "infrastructure-as-code"),
+    (frozenset({"docker", "kubernetes", "k8s"}), "containers-orchestration"),
+    (frozenset({"prometheus", "grafana", "datadog", "opentelemetry"}), "observability"),
+    (frozenset({"postgresql", "mysql", "mongodb", "redis", "cassandra", "dynamodb"}), "data-stores"),
+    (frozenset({"aws", "azure", "google cloud", "gcp"}), "cloud-platforms"),
+)
 
 
 class ATSExtractionService:
@@ -107,23 +129,34 @@ class ATSExtractionService:
         # Sort by length desc so multi-word skills win over their substrings
         # (e.g. "spring boot" matches before "spring").
         self._skills_index: list[str] = sorted(skills, key=lambda s: (-len(s), s))
+        self._norm = JDNormalizationService()
+        self._canonical_skill_set: set[str] = set()
+        for s in self._skills_index:
+            cn = self._norm.normalize_skill(s)
+            if cn:
+                self._canonical_skill_set.add(cn)
 
     def extract(self, parsed: ParsedResume) -> ExtractedCandidateProfile:
         text_lower = parsed.text.lower()
-        skills_section = parsed.sections.get("skills", "")
+        skills_section_raw = parsed.sections.get("skills", "")
         experience_section = parsed.sections.get("experience", "")
         education_section = parsed.sections.get("education", "")
         certifications_section = parsed.sections.get("certifications", "")
 
-        skills = self._extract_skills(text_lower=text_lower, skills_section=skills_section.lower())
+        skills_norm = self._extract_skills(
+            text_lower=text_lower,
+            skills_section_lower=skills_section_raw.lower(),
+            skills_section_original=skills_section_raw,
+        )
+        ecosystem_tags = self._infer_ecosystem_tags(skills_norm)
         years = self._extract_years(text=parsed.text, experience_section=experience_section)
         education = self._extract_education(education_section or parsed.text)
         certifications = self._extract_certifications(certifications_section or parsed.text)
         titles = self._extract_titles(experience_section or parsed.text)
-        keywords = self._normalize_keywords(skills, titles)
+        keywords = self._normalize_keywords(skills_norm, titles)
 
         confidence = self._coverage_confidence(
-            skills=skills,
+            skills=skills_norm,
             years=years,
             education=education,
             certifications=certifications,
@@ -131,7 +164,8 @@ class ATSExtractionService:
             parser=parsed.parser,
         )
         return ExtractedCandidateProfile(
-            skills=skills,
+            skills=skills_norm,
+            ecosystem_tags=ecosystem_tags,
             years_of_experience=years,
             education=education,
             certifications=certifications,
@@ -140,21 +174,52 @@ class ATSExtractionService:
             confidence=confidence,
         )
 
-    def _extract_skills(self, *, text_lower: str, skills_section: str) -> list[str]:
-        # Prefer the dedicated skills section when we have one — it produces
-        # far less noise than a whole-document scan. Fall back to the full
-        # text if the section was missing.
-        scan_target = skills_section or text_lower
+    @staticmethod
+    def _infer_ecosystem_tags(normalized_skills: list[str]) -> list[str]:
+        skill_set = set(normalized_skills)
+        tags: list[str] = []
+        seen: set[str] = set()
+        for triggers, tag in _ECOSYSTEM_TRIGGERS:
+            if skill_set & triggers and tag not in seen:
+                tags.append(tag)
+                seen.add(tag)
+        return tags
+
+    def _extract_skills(
+        self,
+        *,
+        text_lower: str,
+        skills_section_lower: str,
+        skills_section_original: str,
+    ) -> list[str]:
+        """Dictionary scan over alias-normalized text plus tokenized skill lines."""
+        scan_full = normalize_resume_text_for_skill_matching(text_lower)
+        scan_skills = (
+            normalize_resume_text_for_skill_matching(skills_section_lower) if skills_section_lower.strip() else ""
+        )
+        blob = scan_full
+        if scan_skills.strip():
+            blob = scan_skills + "\n" + scan_full
+
         found: list[str] = []
         seen: set[str] = set()
+
         for skill in self._skills_index:
-            if skill in seen:
+            ns = self._norm.normalize_skill(skill)
+            if not ns or ns in seen:
                 continue
-            # Word-boundary check so "go" doesn't fire on "google" but does on "go,".
-            pattern = rf"(?<![a-z0-9+#.]){re.escape(skill)}(?![a-z0-9+#.])"
-            if re.search(pattern, scan_target):
-                found.append(skill)
-                seen.add(skill)
+            pattern = rf"(?<![a-z0-9+#]){re.escape(skill)}(?![a-z0-9+#])"
+            if re.search(pattern, blob):
+                seen.add(ns)
+                found.append(ns)
+
+        if skills_section_original.strip():
+            for tok in tokenize_skill_section_lines(skills_section_original):
+                nt = self._norm.normalize_skill(tok)
+                if nt and nt in self._canonical_skill_set and nt not in seen:
+                    seen.add(nt)
+                    found.append(nt)
+
         return found
 
     def _extract_years(self, *, text: str, experience_section: str) -> float | None:

@@ -22,12 +22,12 @@ depends_on: str | Sequence[str] | None = None
 
 def _column_names(table: str, schema: str | None) -> set[str]:
     inspector = inspect(op.get_bind())
-    return {col["name"] for col in inspector.get_columns(table, schema=schema)}
+    return {n for col in inspector.get_columns(table, schema=schema) if (n := col.get("name")) is not None}
 
 
 def _index_names(table: str, schema: str | None) -> set[str]:
     inspector = inspect(op.get_bind())
-    return {idx["name"] for idx in inspector.get_indexes(table, schema=schema)}
+    return {n for idx in inspector.get_indexes(table, schema=schema) if (n := idx.get("name")) is not None}
 
 
 def upgrade() -> None:

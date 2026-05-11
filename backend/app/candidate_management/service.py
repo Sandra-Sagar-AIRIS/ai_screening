@@ -350,7 +350,14 @@ class CandidateManagementService:
                 },
             )
         except Exception:
-            self.db.rollback()
+            logger.exception(
+                "ats.dispatch_after_resume_failed",
+                extra={
+                    "ats_phase": "dispatch_rescore_candidate",
+                    "organization_id": str(org_id),
+                    "candidate_id": str(candidate.id),
+                },
+            )
         return self._require_candidate(org_id=org_id, workspace_id=workspace_id, candidate_id=candidate.id), parse_result
 
     def get_candidate(self, *, org_id: UUID, workspace_id: UUID, candidate_id: UUID) -> Candidate:

@@ -34,6 +34,8 @@ class Candidate(Base):
         server_default=sa.text("gen_random_uuid()"),
     )
     organization_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    # Candidate-management module stores the tenant key here; legacy rows may only have organization_id.
+    org_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True, index=True)
 
     created_by: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),

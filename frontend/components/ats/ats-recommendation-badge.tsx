@@ -2,6 +2,8 @@
 
 type ATSRecommendationBadgeProps = {
   recommendation?: string | null;
+  /** When true and recommendation is empty, show “Score pending…”. Default false (neutral dash). */
+  awaitingMatch?: boolean;
   isLoading?: boolean;
   compact?: boolean;
   className?: string;
@@ -17,6 +19,7 @@ function recommendationTone(recommendation: string) {
 
 export function ATSRecommendationBadge({
   recommendation,
+  awaitingMatch = false,
   isLoading,
   compact = false,
   className = "",
@@ -29,17 +32,25 @@ export function ATSRecommendationBadge({
     );
   }
 
-  if (!recommendation) {
+  const trimmed = recommendation?.trim() ?? "";
+  if (!trimmed) {
+    if (awaitingMatch) {
+      return (
+        <span className={`inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 ${className}`}>
+          Score pending…
+        </span>
+      );
+    }
     return (
-      <span className={`inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 ${className}`}>
-        Processing ATS...
+      <span className={`inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-400 ${className}`}>
+        —
       </span>
     );
   }
 
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${recommendationTone(recommendation)} ${className}`}>
-      {recommendation}
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${recommendationTone(trimmed)} ${className}`}>
+      {trimmed}
     </span>
   );
 }

@@ -76,6 +76,10 @@ function shouldSuppressApiErrorLog(path: string, status: number): boolean {
   if (status === 404 && /^\/candidates\/[^/]+\/matches(?:\?|$)/.test(path)) {
     return true;
   }
+  // Older backends without POST /jobs/{id}/submit, or rollout mismatch — candidates page PATCH-fallback.
+  if (status === 404 && /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path)) {
+    return true;
+  }
   // Candidate is already submitted to this job (idempotent UX flow).
   if (status === 409 && /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path)) {
     return true;

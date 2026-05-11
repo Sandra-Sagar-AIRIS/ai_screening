@@ -101,6 +101,57 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GROQ_API_KEY", "groq_api_key"),
     )
 
+    # Groq API key for ATS semantic enrichment (OpenAI-compatible API).
+    groq_ats_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GROQ_API_KEY_ATS", "groq_ats_api_key"),
+    )
+    groq_ats_api_base: str = Field(
+        default="https://api.groq.com/openai/v1",
+        validation_alias=AliasChoices("GROQ_ATS_API_BASE", "groq_ats_api_base"),
+    )
+    groq_ats_model: str = Field(
+        default="llama-3.3-70b-versatile",
+        validation_alias=AliasChoices("GROQ_ATS_MODEL", "groq_ats_model"),
+    )
+    groq_ats_timeout_seconds: float = Field(
+        default=10.0,
+        validation_alias=AliasChoices("GROQ_ATS_TIMEOUT_SECONDS", "groq_ats_timeout_seconds"),
+    )
+
+    # xAI Grok — hybrid ATS semantic enrichment (OpenAI-compatible API).
+    grok_api_key: str | None = Field(
+        default=None,
+        # Support older/mistyped env var names used in some deployments.
+        validation_alias=AliasChoices(
+            "GROK_API_KEY",
+            "GROK_API_KEY_ATS",
+            "GROQ_API_KEY_ATS",
+            "grok_api_key",
+            "XAI_API_KEY",
+            "xai_api_key",
+        ),
+    )
+    grok_api_base: str = Field(
+        default="https://api.x.ai/v1",
+        validation_alias=AliasChoices("GROK_API_BASE", "grok_api_base"),
+    )
+    grok_model: str = Field(
+        # xAI model IDs change over time; use a conservative default that exists
+        # on current accounts, and allow override via env.
+        default="grok-3-mini",
+        validation_alias=AliasChoices("GROK_MODEL", "grok_model"),
+    )
+    grok_timeout_seconds: float = Field(
+        default=10.0,
+        validation_alias=AliasChoices("GROK_TIMEOUT_SECONDS", "grok_timeout_seconds"),
+    )
+    # Optional Grok pass after local resume extraction (adds latency on upload/parse).
+    resume_grok_intelligence: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("RESUME_GROK_INTELLIGENCE", "resume_grok_intelligence"),
+    )
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",

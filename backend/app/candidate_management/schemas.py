@@ -193,6 +193,9 @@ class CandidateResponse(BaseModel):
     ai_parse_version: str | None
     parse_confidence: float | None
     parsed_resume_data: dict[str, Any] | None
+    parse_status: str | None = None
+    parse_error: str | None = None
+    parsed_at: datetime | None = None
     merged_into_candidate_id: UUID | None
     merged_at: datetime | None
     created_by: UUID | None

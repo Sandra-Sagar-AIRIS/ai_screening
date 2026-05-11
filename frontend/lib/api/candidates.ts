@@ -57,6 +57,10 @@ type CandidateManagementCandidate = {
   source: "manual" | "resume_upload" | "bulk_upload" | "referral" | "agency" | "import" | "merge";
   created_at: string;
   updated_at: string;
+  parse_status?: "pending" | "processing" | "completed" | "failed" | null;
+  parse_error?: string | null;
+  parsed_at?: string | null;
+  parsed_resume_data?: Candidate["parsed_resume_data"] | Record<string, unknown> | null;
 };
 
 function shouldUseCandidateManagementApi(): boolean {
@@ -73,6 +77,16 @@ function getWorkspaceHeader(): Record<string, string> {
 }
 
 function mapCandidateManagementCandidate(candidate: CandidateManagementCandidate): Candidate {
+  const pr = candidate.parsed_resume_data;
+  let educationFromParse: string | null = null;
+  if (pr && typeof pr === "object" && "education" in pr) {
+    const edu = (pr as { education?: unknown }).education;
+    if (typeof edu === "string" && edu.trim()) educationFromParse = edu.trim();
+    else if (Array.isArray(edu)) {
+      const joined = edu.map(String).filter(Boolean).join(", ");
+      educationFromParse = joined || null;
+    }
+  }
   return {
     id: candidate.id,
     organization_id: candidate.org_id,
@@ -90,10 +104,17 @@ function mapCandidateManagementCandidate(candidate: CandidateManagementCandidate
     source: candidate.source,
     years_experience: candidate.years_experience,
     experience_summary: candidate.summary,
-    education: null,
+    education: educationFromParse,
     notes: null,
     created_at: candidate.created_at,
     updated_at: candidate.updated_at,
+    parse_status: candidate.parse_status ?? undefined,
+    parse_error: candidate.parse_error ?? undefined,
+    parsed_at: candidate.parsed_at ?? undefined,
+    parsed_resume_data:
+      pr && typeof pr === "object"
+        ? (pr as Candidate["parsed_resume_data"])
+        : undefined,
   };
 }
 

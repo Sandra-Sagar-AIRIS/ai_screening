@@ -3,6 +3,8 @@
 type ATSScoreBadgeProps = {
   score?: number | null;
   isLoading?: boolean;
+  /** Pipeline / job-candidate row exists but match API has not returned a row yet (async rescore). */
+  scorePending?: boolean;
   compact?: boolean;
   className?: string;
 };
@@ -14,7 +16,13 @@ function scoreTone(score: number) {
   return "bg-rose-100 text-rose-700 border-rose-200";
 }
 
-export function ATSScoreBadge({ score, isLoading, compact = false, className = "" }: ATSScoreBadgeProps) {
+export function ATSScoreBadge({
+  score,
+  isLoading,
+  scorePending = false,
+  compact = false,
+  className = "",
+}: ATSScoreBadgeProps) {
   if (isLoading) {
     return (
       <span
@@ -24,9 +32,19 @@ export function ATSScoreBadge({ score, isLoading, compact = false, className = "
   }
 
   if (score === null || score === undefined) {
+    if (scorePending) {
+      return (
+        <span
+          className={`inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ${className}`}
+          title="ATS score is generated asynchronously — refresh shortly"
+        >
+          Score pending
+        </span>
+      );
+    }
     return (
       <span className={`inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 ${className}`}>
-        ATS unavailable
+        No ATS data
       </span>
     );
   }

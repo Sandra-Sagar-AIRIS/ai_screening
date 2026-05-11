@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import Select, select
+from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.candidate import Candidate
@@ -65,7 +65,10 @@ class CandidateService:
         stmt: Select[tuple[Candidate]] = (
             select(Candidate)
             .where(
-                Candidate.organization_id == organization_id,
+                or_(
+                    Candidate.organization_id == organization_id,
+                    Candidate.org_id == organization_id,
+                ),
                 Candidate.is_deleted.is_(False),
             )
             .order_by(Candidate.created_at.desc())
@@ -88,7 +91,10 @@ class CandidateService:
     def get_candidate_by_id(self, candidate_id: UUID, organization_id: UUID, current_user: CurrentUser) -> Candidate:
         stmt: Select[tuple[Candidate]] = select(Candidate).where(
             Candidate.id == candidate_id,
-            Candidate.organization_id == organization_id,
+            or_(
+                Candidate.organization_id == organization_id,
+                Candidate.org_id == organization_id,
+            ),
             Candidate.is_deleted.is_(False),
         )
         if self._scope.is_client_user(current_user):
