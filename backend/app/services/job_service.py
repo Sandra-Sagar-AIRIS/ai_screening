@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -90,6 +92,76 @@ class JobService:
 
         self._pipelines = PipelineService(db)
 
+    @staticmethod
+    def _extra_str_list(extra: dict[str, object], key: str) -> list[str]:
+        v = extra.get(key, [])
+        if not isinstance(v, list):
+            return []
+        return [x for x in v if isinstance(x, str) and x]
+
+    @staticmethod
+    def _extra_str_list_loose(extra: dict[str, object], key: str) -> list[str]:
+        v = extra.get(key, [])
+        if not isinstance(v, list):
+            return []
+        out: list[str] = []
+        for item in v:
+            if item is None:
+                continue
+            s = item.strip() if isinstance(item, str) else str(item).strip()
+            if s:
+                out.append(s)
+        return out
+
+    @staticmethod
+    def _extra_optional_float(extra: dict[str, object], key: str) -> float | None:
+        v = extra.get(key)
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return float(v)
+        if isinstance(v, (int, float)):
+            return float(v)
+        try:
+            return float(v)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _extra_summary_line(extra: dict[str, object]) -> str:
+        raw = extra.get("summary")
+        if raw is None:
+            return ""
+        if isinstance(raw, str):
+            return raw
+        return str(raw)
+
+    @staticmethod
+    def _decimal_confidence(score: object | None) -> Decimal | None:
+        if score is None:
+            return None
+        if isinstance(score, Decimal):
+            return score
+        try:
+            return Decimal(str(score))
+        except (ArithmeticError, ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _category_json_int(val: object) -> int:
+        if val is None:
+            return 0
+        if isinstance(val, bool):
+            return int(val)
+        if isinstance(val, int):
+            return val
+        if isinstance(val, float):
+            return int(val)
+        try:
+            return int(val)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 0
+
     def _get_job_response(self, job: Job) -> JobResponse:
         """Helper to construct JobResponse including skills (Task 4/1)."""
         required_skills = []
@@ -174,6 +246,8 @@ class JobService:
                 logger.error(f"Error in job creation: Client not found for id {payload.client_id}")
                 raise HTTPException(status_code=400, detail="Client not found")
         else:
+            if valid_client_id is None:
+                raise HTTPException(status_code=400, detail="Client resolution failed")
             payload.client_id = valid_client_id
 
         if payload.salary_min is not None and payload.salary_max is not None and payload.salary_min > payload.salary_max:
@@ -325,10 +399,18 @@ class JobService:
         def _to_float(val: object) -> float | None:
             if val is None:
                 return None
-            try:
-                return float(val)  # supports Decimal/numeric/float
-            except Exception:  # noqa: BLE001
-                return None
+            if isinstance(val, bool):
+                return float(val)
+            if isinstance(val, (int, float)):
+                return float(val)
+            if isinstance(val, Decimal):
+                return float(val)
+            if isinstance(val, str):
+                try:
+                    return float(val.strip())
+                except ValueError:
+                    return None
+            return None
 
         salary_min = _to_float(update_data.get("salary_min", job.salary_min))
         salary_max = _to_float(update_data.get("salary_max", job.salary_max))
@@ -553,11 +635,8 @@ class JobService:
                     .having(sa.func.count(sa.func.distinct(sa.func.lower(JobSkill.skill))) == len(set(normalized)))
                 )
 
-        allowed_job_ids = self._scope.allowed_job_ids(current_user)
-        if self._scope.is_client_user(current_user):
-            if not allowed_job_ids:
-                return []
-            stmt = stmt.where(Job.id.in_(allowed_job_ids))
+        if self._scope.is_scoped_user(current_user):
+            stmt = stmt.where(Job.id.in_(self._scope.allowed_job_ids_subquery(current_user)))
 
         # Urgency-first sorting when urgency filtering is used; else use newest first.
         if urgency is not None or status_filter is not None or location is not None or skills:
@@ -692,10 +771,16 @@ class JobService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[JobSubmissionResponse]:
-        # Scope enforcement: if client user, ensure this job is in their allowed set.
-        if self._scope.is_client_user(current_user):
-            allowed_job_ids = self._scope.allowed_job_ids(current_user)
-            if job_id not in set(allowed_job_ids):
+        # Scope enforcement: scoped users only see submissions for jobs they can access.
+        if self._scope.is_scoped_user(current_user):
+            in_scope = self.db.scalar(
+                select(Job.id).where(
+                    Job.id == job_id,
+                    Job.organization_id == organization_id,
+                    Job.id.in_(self._scope.allowed_job_ids_subquery(current_user)),
+                ).limit(1)
+            )
+            if in_scope is None:
                 return []
 
         stmt: Select[tuple[JobSubmission]] = select(JobSubmission).where(
@@ -738,7 +823,7 @@ class JobService:
                 detail="Job submission not found."
             )
             
-        submission.submission_status = payload.submission_status.value
+        submission.submission_status = payload.status.value
         self.db.add(submission)
         self.db.commit()
         self.db.refresh(submission)
@@ -769,10 +854,10 @@ class JobService:
             refresh_requested=refresh,
         )
 
-    def get_candidate_matches(
+    def get_matches(
         self,
         *,
-        candidate_id: UUID,
+        job_id: UUID,
         organization_id: UUID,
         current_user: CurrentUser,
         limit: int,
@@ -1227,7 +1312,6 @@ class JobService:
 
         logger.info("ats.rescore.started", extra={**extra_base, "mode": "deterministic_only"})
 
-    def _refresh_job_match_cache(self, *, job_id: UUID, organization_id: UUID) -> None:
         try:
             early = self.db.scalar(
                 select(CandidateJobMatch).where(
@@ -1330,7 +1414,7 @@ class JobService:
             candidate_skills_for_scoring = list(
                 dict.fromkeys(
                     [s for s in candidate_skill_hits if s]
-                    + [s for s in extra.get("skills", []) if s]
+                    + self._extra_str_list(extra, "skills")
                 )
             )
             result = self._ats.score(
@@ -1358,7 +1442,7 @@ class JobService:
             )
             det_score = result.match_score
             now = datetime.now(timezone.utc)
-            category_scores = dict(result.category_scores or {})
+            category_scores: dict[str, Any] = dict(result.category_scores or {})
             category_scores["hybrid"] = {
                 "deterministic_score": det_score,
                 "semantic_score": None,
@@ -1398,7 +1482,7 @@ class JobService:
                         missing_skills=result.missing_skills,
                         matched_preferred_skills=result.matched_preferred_skills,
                         recommendation=recommendation,
-                        confidence_score=result.confidence_score,
+                        confidence_score=self._decimal_confidence(result.confidence_score),
                         evaluated_at=now,
                         deterministic_completed_at=now,
                         semantic_completed_at=now if not semantic_on else None,
@@ -1423,7 +1507,7 @@ class JobService:
                     row.missing_skills = result.missing_skills
                     row.matched_preferred_skills = result.matched_preferred_skills
                     row.recommendation = recommendation
-                    row.confidence_score = result.confidence_score
+                    row.confidence_score = self._decimal_confidence(result.confidence_score)
                     row.evaluated_at = now
                     row.deterministic_completed_at = now
                     row.semantic_completed_at = now if not semantic_on else None
@@ -1627,7 +1711,7 @@ class JobService:
             candidate_skills_for_scoring = list(
                 dict.fromkeys(
                     [s for s in candidate_skill_hits if s]
-                    + [s for s in extra.get("skills", []) if s]
+                    + self._extra_str_list(extra, "skills")
                 )
             )
             result = self._ats.score(
@@ -1658,13 +1742,15 @@ class JobService:
             merged_titles = list(
                 dict.fromkeys(
                     [t for t in previous_titles if t]
-                    + [t for t in extra.get("titles", []) if t]
+                    + self._extra_str_list(extra, "titles")
                 )
             )
-            merged_years = years if years is not None else extra.get("years")
-            merged_edu = ([candidate.education] if candidate.education else []) + list(extra.get("education", []))
+            merged_years = years if years is not None else self._extra_optional_float(extra, "years")
+            merged_edu = ([candidate.education] if candidate.education else []) + self._extra_str_list_loose(
+                extra, "education"
+            )
             merged_edu = list(dict.fromkeys([e for e in merged_edu if e]))[:8]
-            exp_summary = candidate.experience_summary or extra.get("summary") or ""
+            exp_summary = (candidate.experience_summary or self._extra_summary_line(extra) or "").strip()
             job_summary_text = (job.description or "")[:1200] if job.description else None
 
             condensed = build_condensed_candidate_job_payload(
@@ -1672,7 +1758,7 @@ class JobService:
                 candidate_titles=merged_titles[:8],
                 years_experience=float(merged_years) if merged_years is not None else None,
                 education=merged_edu,
-                certifications=list(extra.get("certifications", []))[:12],
+                certifications=self._extra_str_list_loose(extra, "certifications")[:12],
                 experience_summary=exp_summary,
                 job_title=job.title,
                 job_summary=job_summary_text,
@@ -1699,7 +1785,7 @@ class JobService:
                 },
             )
             recommendation = ATSMatchingService._tier_for(final_score)
-            category_scores = dict(result.category_scores or {})
+            category_scores: dict[str, Any] = dict(result.category_scores or {})
             category_scores["hybrid"] = {
                 "deterministic_score": det_score,
                 "semantic_score": sem_int,
@@ -1719,7 +1805,7 @@ class JobService:
                 row.missing_skills = result.missing_skills
                 row.matched_preferred_skills = result.matched_preferred_skills
                 row.recommendation = recommendation
-                row.confidence_score = result.confidence_score
+                row.confidence_score = self._decimal_confidence(result.confidence_score)
                 row.evaluated_at = datetime.now(timezone.utc)
                 row.semantic_completed_at = datetime.now(timezone.utc)
                 row.enrichment_error = None
@@ -1855,7 +1941,7 @@ class JobService:
             candidate_skills_for_scoring = list(
                 dict.fromkeys(
                     [s for s in candidate_skill_hits if s]
-                    + [s for s in extra.get("skills", []) if s]
+                    + self._extra_str_list(extra, "skills")
                 )
             )
             result = self._ats.score(
@@ -1886,13 +1972,15 @@ class JobService:
             merged_titles = list(
                 dict.fromkeys(
                     [t for t in previous_titles if t]
-                    + [t for t in extra.get("titles", []) if t]
+                    + self._extra_str_list(extra, "titles")
                 )
             )
-            merged_years = years if years is not None else extra.get("years")
-            merged_edu = ([candidate.education] if candidate.education else []) + list(extra.get("education", []))
+            merged_years = years if years is not None else self._extra_optional_float(extra, "years")
+            merged_edu = ([candidate.education] if candidate.education else []) + self._extra_str_list_loose(
+                extra, "education"
+            )
             merged_edu = list(dict.fromkeys([e for e in merged_edu if e]))[:8]
-            exp_summary = candidate.experience_summary or extra.get("summary") or ""
+            exp_summary = (candidate.experience_summary or self._extra_summary_line(extra) or "").strip()
             job_summary_text = (job.description or "")[:1200] if job.description else None
 
             condensed = build_condensed_candidate_job_payload(
@@ -1900,7 +1988,7 @@ class JobService:
                 candidate_titles=merged_titles[:8],
                 years_experience=float(merged_years) if merged_years is not None else None,
                 education=merged_edu,
-                certifications=list(extra.get("certifications", []))[:12],
+                certifications=self._extra_str_list_loose(extra, "certifications")[:12],
                 experience_summary=exp_summary,
                 job_title=job.title,
                 job_summary=job_summary_text,
@@ -1924,7 +2012,7 @@ class JobService:
                 },
             )
             recommendation = ATSMatchingService._tier_for(final_score)
-            category_scores = dict(result.category_scores or {})
+            category_scores: dict[str, Any] = dict(result.category_scores or {})
             category_scores["hybrid"] = {
                 "deterministic_score": det_score,
                 "semantic_score": sem_int,
@@ -1985,7 +2073,7 @@ class JobService:
                         missing_skills=result.missing_skills,
                         matched_preferred_skills=result.matched_preferred_skills,
                         recommendation=recommendation,
-                        confidence_score=result.confidence_score,
+                        confidence_score=self._decimal_confidence(result.confidence_score),
                         evaluated_at=finalize_ts,
                         deterministic_completed_at=finalize_ts,
                         semantic_completed_at=finalize_ts,
@@ -2010,7 +2098,7 @@ class JobService:
                     row.missing_skills = result.missing_skills
                     row.matched_preferred_skills = result.matched_preferred_skills
                     row.recommendation = recommendation
-                    row.confidence_score = result.confidence_score
+                    row.confidence_score = self._decimal_confidence(result.confidence_score)
                     row.evaluated_at = finalize_ts
                     row.deterministic_completed_at = finalize_ts
                     row.semantic_completed_at = finalize_ts
@@ -2268,11 +2356,11 @@ class JobService:
             except Exception:  # noqa: BLE001 — invalid legacy blobs must not 500 list endpoints
                 hybrid = None
         return JobMatchCategoryScores(
-            required_skills=int(cs.get("required_skills") or 0),
-            preferred_skills=int(cs.get("preferred_skills") or 0),
-            experience=int(cs.get("experience") or 0),
-            title=int(cs.get("title") or 0),
-            education=int(cs.get("education") or 0),
+            required_skills=JobService._category_json_int(cs.get("required_skills")),
+            preferred_skills=JobService._category_json_int(cs.get("preferred_skills")),
+            experience=JobService._category_json_int(cs.get("experience")),
+            title=JobService._category_json_int(cs.get("title")),
+            education=JobService._category_json_int(cs.get("education")),
             hybrid=hybrid,
         )
 

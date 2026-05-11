@@ -653,8 +653,6 @@ export default function JobDetailPage() {
                    </div>
                 </div>
 
-<<<<<<< HEAD
-=======
                 {/* Job Details Card */}
                 <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
                   <h3 className="text-base font-bold text-gray-900 mb-5 flex items-center gap-2">
@@ -821,7 +819,6 @@ export default function JobDetailPage() {
                     </div>
                   ) : null}
                 </div>
->>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
               </div>
             )}
 
