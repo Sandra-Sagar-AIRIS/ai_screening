@@ -540,8 +540,8 @@ export default function CandidatesPage() {
           <div key={step} className="flex items-center">
             <div className={cn(
               "flex h-8 w-8 items-center justify-center rounded-full border text-sm font-medium transition-colors",
-              isActive ? "border-[#FF5A1F] bg-orange-50 text-[#FF5A1F]" : 
-              isCompleted ? "border-green-600 bg-green-50 text-green-600" : "border-gray-200 text-gray-400"
+              isActive ? "border-[#FF5A1F] bg-orange-50 text-[#FF5A1F]" :
+                isCompleted ? "border-green-600 bg-green-50 text-green-600" : "border-gray-200 text-gray-400"
             )}>
               {isCompleted ? <CheckCircle2 className="w-4 h-4" /> : idx + 1}
             </div>
@@ -580,7 +580,7 @@ export default function CandidatesPage() {
               <h2 className="text-lg font-semibold text-gray-900">Select Method</h2>
               <p className="text-sm text-gray-500 mt-1">Choose how you want to add the candidate.</p>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {[
                 { id: "manual", title: "Add Manually", desc: "Type details yourself", icon: Edit3 },
@@ -592,8 +592,8 @@ export default function CandidatesPage() {
                   onClick={() => setAddMode(m.id as AddMode)}
                   className={cn(
                     "flex flex-col p-5 rounded-xl border transition-all text-left group",
-                    addMode === m.id 
-                      ? "border-[#FF5A1F] bg-orange-50/30 ring-1 ring-[#FF5A1F]" 
+                    addMode === m.id
+                      ? "border-[#FF5A1F] bg-orange-50/30 ring-1 ring-[#FF5A1F]"
                       : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
                   )}
                 >
@@ -632,10 +632,10 @@ export default function CandidatesPage() {
               ].map((f) => (
                 <div key={f.label} className="space-y-2">
                   <label className="text-sm font-medium text-gray-700">{f.label}</label>
-                  <Input 
-                    placeholder={f.placeholder} 
-                    value={f.value} 
-                    onChange={(e) => f.setter(e.target.value)} 
+                  <Input
+                    placeholder={f.placeholder}
+                    value={f.value}
+                    onChange={(e) => f.setter(e.target.value)}
                     type={f.type || "text"}
                     className="h-10 border-gray-200 focus:border-[#FF5A1F] focus:ring-[#FF5A1F]/20"
                   />
@@ -645,11 +645,11 @@ export default function CandidatesPage() {
 
             <div className="flex items-center justify-between pt-8 mt-8 border-t border-gray-100">
               <Button variant="outline" onClick={handleBack} className="border-gray-200 text-gray-600 hover:bg-gray-50">Back</Button>
-              <Button 
+              <Button
                 onClick={async () => {
                   const success = await handleCreateCandidate();
                   if (success) setActiveStep(4);
-                }} 
+                }}
                 disabled={creating}
                 className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white min-w-[120px]"
               >
@@ -837,12 +837,15 @@ export default function CandidatesPage() {
                 { label: "Phone Number", value: draftCandidate.phone, key: 'phone' },
                 { label: "Location", value: draftCandidate.location, key: 'location' },
                 { label: "Role / Title", value: draftCandidate.headline, key: 'headline' },
+                { label: "Years Experience", value: draftCandidate.years_experience, key: 'years_experience', type: 'number' },
+                { label: "Summary", value: draftCandidate.summary, key: 'summary' },
               ].map((f) => (
                 <div key={f.label} className="space-y-2">
                   <label className="text-sm font-medium text-gray-700">{f.label}</label>
                   <Input 
                     value={f.value} 
-                    onChange={(e) => setDraftCandidate(p => p ? {...p, [f.key]: e.target.value} : p)}
+                    onChange={(e) => setDraftCandidate(p => p ? {...p, [f.key as keyof CandidateDraft]: e.target.value} : p)}
+                    type={f.type || "text"}
                     className="h-10 border-gray-200 focus:border-[#FF5A1F] focus:ring-[#FF5A1F]/20"
                   />
                 </div>

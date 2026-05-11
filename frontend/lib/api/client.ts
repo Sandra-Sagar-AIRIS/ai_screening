@@ -82,6 +82,10 @@ function shouldSuppressApiErrorLog(path: string, status: number): boolean {
   if (status === 404 && /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path)) {
     return true;
   }
+  // Rescore 404 is expected when the candidate has no job submissions / ATS rows yet.
+  if (status === 404 && /^\/candidates\/[^/]+\/rescore(?:\?|$)/.test(path)) {
+    return true;
+  }
   // Candidate is already submitted to this job (idempotent UX flow).
   if (status === 409 && /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path)) {
     return true;
