@@ -71,35 +71,54 @@ export default function SignupPage() {
   }
 
   return (
-    <AuthShell title="Create your AIRIS account" subtitle="Set up your account to access candidates, jobs, and pipeline.">
+    <AuthShell 
+      title="Create your AIRIS account" 
+      subtitle="Set up your account to access candidates, jobs, and pipeline."
+      leftTitle="Create your workspace"
+      leftSubtitle="Join AIRIS to automate workflows, engage candidates, and close more placements."
+    >
       <form className="space-y-4" onSubmit={onSubmit}>
         <div className="space-y-2">
-          <label className="text-sm font-medium text-slate-700" htmlFor="email">
+          <label className="text-[13px] font-semibold text-gray-700" htmlFor="email">
             Work email
           </label>
-          <Input
-            id="email"
-            type="email"
-            placeholder="you@company.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+              <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg>
+            </div>
+            <Input
+              id="email"
+              type="email"
+              placeholder="you@company.com"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+              className="pl-10 h-11 bg-white border-gray-200 text-sm focus-visible:ring-1 focus-visible:ring-[#111827] focus-visible:border-[#111827] transition-all rounded-lg"
+            />
+          </div>
         </div>
+
         <div className="space-y-2">
-          <label className="text-sm font-medium text-slate-700" htmlFor="organization">
+          <label className="text-[13px] font-semibold text-gray-700" htmlFor="organization">
             Organization name
           </label>
-          <Input
-            id="organization"
-            type="text"
-            placeholder="Your company or team name"
-            value={organizationName}
-            onChange={(event) => setOrganizationName(event.target.value)}
-            required
-            autoComplete="organization"
-          />
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+              <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect><path d="M9 22v-4h6v4"></path><path d="M8 6h.01"></path><path d="M16 6h.01"></path><path d="M12 6h.01"></path><path d="M12 10h.01"></path><path d="M12 14h.01"></path><path d="M16 10h.01"></path><path d="M16 14h.01"></path><path d="M8 10h.01"></path><path d="M8 14h.01"></path></svg>
+            </div>
+            <Input
+              id="organization"
+              type="text"
+              placeholder="Your company or team name"
+              value={organizationName}
+              onChange={(event) => setOrganizationName(event.target.value)}
+              required
+              autoComplete="organization"
+              className="pl-10 h-11 bg-white border-gray-200 text-sm focus-visible:ring-1 focus-visible:ring-[#111827] focus-visible:border-[#111827] transition-all rounded-lg"
+            />
+          </div>
         </div>
+
         <PasswordField
           id="password"
           label="Password"
@@ -107,6 +126,7 @@ export default function SignupPage() {
           onChange={setPassword}
           placeholder="Minimum 8 characters"
         />
+
         <PasswordField
           id="confirm-password"
           label="Confirm password"
@@ -114,18 +134,27 @@ export default function SignupPage() {
           onChange={setConfirmPassword}
           placeholder="Re-enter password"
         />
-        <p className="text-xs text-slate-500">Use at least 8 characters. Avoid common passwords.</p>
+
         {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</p> : null}
-        <Button className="w-full" type="submit" disabled={loading}>
-          {loading ? "Creating account..." : "Create account"}
-        </Button>
-        <p className="text-center text-sm text-slate-600">
-          Already have an account?{" "}
-          <Link href="/login" className="font-medium text-slate-900 hover:underline">
-            Sign in
-          </Link>
-        </p>
+
+        <div className="pt-1 space-y-3">
+          <Button 
+            className="w-full h-11 bg-[#0A101D] hover:bg-gray-800 text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2" 
+            type="submit" 
+            disabled={loading}
+          >
+            {loading ? "Creating account..." : "Create account"}
+            {!loading && <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>}
+          </Button>
+
+          <p className="text-center text-[13px] text-gray-500 font-medium pt-2">
+            Already have an account?{" "}
+            <Link href="/login" className="text-[#111827] hover:underline font-semibold transition-colors">
+              Sign in
+            </Link>
+          </p>
+        </div>
       </form>
     </AuthShell>
   );

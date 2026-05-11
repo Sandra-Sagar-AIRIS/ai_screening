@@ -28,8 +28,12 @@ import {
 import type { Candidate, CandidateMatchEntry, Job, OrganizationUser, Pipeline } from "@/lib/api/types";
 import { getUsers } from "@/lib/api/users";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+<<<<<<< HEAD
+import { Mail, Phone, MapPin, Briefcase, Calendar, FileText, Download, ExternalLink, MessageSquare, Clock, ArrowLeft, Edit3, Save, X, Plus, User, Star } from "lucide-react";
+import { cn } from "@/lib/utils";
+import Link from "next/link";
+=======
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
 import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
 import { ATSMatchBreakdownPanel } from "@/components/ats/ats-match-breakdown-panel";
@@ -37,6 +41,7 @@ import { ATSMatchBreakdownPanel } from "@/components/ats/ats-match-breakdown-pan
 function snapJobIdsFromMatches(matches: CandidateMatchEntry[]): string[] {
   return matches.map((m) => m.job_id).filter(Boolean);
 }
+>>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
 
 export default function CandidateDetailPage() {
   const params = useParams<{ candidateId: string }>();
@@ -617,105 +622,74 @@ export default function CandidateDetailPage() {
 
 
   return (
-    <section className="space-y-4">
-      <div className="sticky top-0 z-10 rounded-md border border-slate-200 bg-white/95 p-4 backdrop-blur">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold">
-              {candidate.first_name} {candidate.last_name}
-            </h1>
-            <p className="text-sm text-slate-600">{candidate.role ?? "Role not specified"}</p>
-          </div>
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">{stageLabel}</span>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-3 text-sm text-slate-600">
-          {candidate.email && <span className="flex items-center gap-1"><span className="font-medium text-slate-800">📧</span> {candidate.email}</span>}
-          {candidate.phone && <span className="flex items-center gap-1"><span className="font-medium text-slate-800">📞</span> {candidate.phone}</span>}
-          {candidate.location && <span className="flex items-center gap-1"><span className="font-medium text-slate-800">📍</span> {candidate.location}</span>}
-          {jobTitle !== "-" && <span className="flex items-center gap-1"><span className="font-medium text-slate-800">💼</span> {jobTitle}</span>}
-        </div>
+    <section className="mx-auto max-w-5xl space-y-6 pb-12">
+      <div className="flex items-center justify-between mb-2">
+        <Link href="/candidates" className="text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors flex items-center gap-2">
+          <ArrowLeft className="w-4 h-4" /> Back to Candidates
+        </Link>
+        <span className={cn(
+          "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider",
+          stageLabel === "Hired" ? "bg-green-100 text-green-700" :
+          stageLabel === "Rejected" ? "bg-red-100 text-red-700" :
+          "bg-orange-100 text-[#FF5A1F]"
+        )}>
+          {stageLabel}
+        </span>
       </div>
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Profile</h2>
-        <div className="flex items-center gap-2">
-        <select
-          className="rounded-md border border-slate-200 px-3 py-2 text-sm"
-          value={submitJobId}
-          onChange={(event) => setSubmitJobId(event.target.value)}
-        >
-          <option value="">Select job</option>
-          {jobs.map((job) => (
-            <option key={job.id} value={job.id}>
-              {job.title}
-            </option>
-          ))}
-        </select>
-        <Button variant="outline" onClick={handleSubmitToJob} disabled={!submitJobId || submittingToJob}>
-          {submittingToJob ? "Submitting..." : "Submit to Job"}
-        </Button>
-        {isEditing ? (
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={handleCancel} disabled={isSaving}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? "Saving..." : "Save changes"}
-            </Button>
-          </div>
-        ) : (
-          <Button onClick={() => setIsEditing(true)}>Edit candidate</Button>
-        )}</div>
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            {isEditing ? (
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="First name" />
-                <Input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Last name" />
-              </div>
-            ) : (
-              <>{candidate.first_name} {candidate.last_name}</>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <p><span className="font-medium">Email:</span> {isEditing ? <Input value={email} onChange={(e) => setEmail(e.target.value)} /> : candidate.email}</p>
-          <p><span className="font-medium">Phone:</span> {isEditing ? <Input value={phone} onChange={(e) => setPhone(e.target.value)} /> : (candidate.phone ?? "-")}</p>
-          <p><span className="font-medium">Location:</span> {isEditing ? <Input value={location} onChange={(e) => setLocation(e.target.value)} /> : (candidate.location ?? "-")}</p>
-          <p><span className="font-medium">Role:</span> {isEditing ? <Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Role / Title" /> : (candidate.role ?? "-")}</p>
-          <p><span className="font-medium">Years Experience:</span> {isEditing ? <Input type="number" min={0} value={yearsExperience} onChange={(e) => setYearsExperience(e.target.value)} /> : (candidate.years_experience !== null && candidate.years_experience !== undefined ? `${candidate.years_experience} years` : "-")}</p>
-          {candidate.experience_summary && <p><span className="font-medium">Experience:</span> {candidate.experience_summary}</p>}
-          {candidate.education && <p><span className="font-medium">Education:</span> {candidate.education}</p>}
-        </CardContent>
-      </Card>
 
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Resume</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {candidate.resume_file_name || candidate.resume_s3_key ? (
-            <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-100 text-red-600 text-lg">📄</div>
-                <div>
-                  <p className="text-sm font-medium text-slate-800">{candidate.resume_file_name ?? "Resume"}</p>
-                  <p className="text-xs text-slate-500">Resume document</p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                {candidate.resume_s3_key ? (
-                  <>
-                    <Button variant="outline" onClick={() => handleResumeAction("open")}>Open</Button>
-                    <Button onClick={() => handleResumeAction("download")}>⬇ Download</Button>
-                  </>
-                ) : (
-                  <span className="text-xs text-slate-400">File unavailable</span>
+      {/* Header Profile Card */}
+      <div className="bg-white p-6 md:p-8 rounded-xl shadow-sm border border-gray-200">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
+          <div className="flex items-start gap-5 flex-1 min-w-0">
+            <div className="h-16 w-16 rounded-full bg-orange-100 flex items-center justify-center text-[#FF5A1F] text-2xl font-bold shrink-0">
+              {candidate.first_name?.[0]}{candidate.last_name?.[0]}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-2xl font-bold text-gray-900 truncate">
+                {candidate.first_name} {candidate.last_name}
+              </h1>
+              <p className="text-sm text-gray-500 font-medium flex items-center gap-2 mt-1 truncate">
+                <Briefcase className="w-4 h-4 shrink-0" /> <span className="truncate">{candidate.role ?? "Role not specified"}</span>
+              </p>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-sm text-gray-600">
+                {candidate.email && (
+                  <a href={`mailto:${candidate.email}`} className="flex items-center gap-1.5 hover:text-[#FF5A1F] transition-colors truncate max-w-full">
+                    <Mail className="w-4 h-4 shrink-0" /> <span className="truncate">{candidate.email}</span>
+                  </a>
+                )}
+                {candidate.phone && (
+                  <a href={`tel:${candidate.phone}`} className="flex items-center gap-1.5 hover:text-[#FF5A1F] transition-colors shrink-0">
+                    <Phone className="w-4 h-4 shrink-0" /> {candidate.phone}
+                  </a>
+                )}
+                {candidate.location && (
+                  <span className="flex items-center gap-1.5 truncate max-w-full">
+                    <MapPin className="w-4 h-4 shrink-0" /> <span className="truncate">{candidate.location}</span>
+                  </span>
+                )}
+                {jobTitle !== "-" && (
+                  <span className="flex items-center gap-1.5 text-indigo-600 font-medium bg-indigo-50 px-2 py-0.5 rounded-md shrink-0">
+                    <Briefcase className="w-3.5 h-3.5 shrink-0" /> {jobTitle}
+                  </span>
                 )}
               </div>
             </div>
+<<<<<<< HEAD
+          </div>
+          
+          <div className="flex flex-col gap-3 w-full md:w-[320px] shrink-0">
+            <div className="flex flex-col space-y-2">
+              <label className="text-xs font-semibold text-gray-500 uppercase">Submit to Job</label>
+              <div className="flex items-center gap-2">
+                <select
+                  className="flex-1 w-full min-w-0 truncate rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F] outline-none transition-all bg-white"
+                  value={submitJobId}
+                  onChange={(event) => setSubmitJobId(event.target.value)}
+                >
+                  <option value="">Select job...</option>
+                  {jobs.map((job) => (
+                    <option key={job.id} value={job.id}>{job.title}</option>
+=======
           ) : (
             <p className="text-sm text-slate-500">No resume uploaded for this candidate.</p>
           )}
@@ -898,93 +872,303 @@ export default function CandidateDetailPage() {
                       </td>
                       <td className="px-2 py-2 text-xs text-slate-500">{new Date(pipeline.updated_at).toLocaleString()}</td>
                     </tr>
+>>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
                   ))}
-                </tbody>
-              </table>
+                </select>
+                <Button 
+                  onClick={handleSubmitToJob} 
+                  disabled={!submitJobId || submittingToJob}
+                  className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm shrink-0"
+                >
+                  {submittingToJob ? "..." : "Submit"}
+                </Button>
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
-      <h2 className="text-lg font-semibold">Interviews</h2>
-      <Card>
-        <CardHeader>
-          <CardTitle>Schedule Interview</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
-            <Input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
-            <Input placeholder="Interviewer name" value={interviewerName} onChange={(e) => setInterviewerName(e.target.value)} />
-            <select
-              className="rounded-md border border-slate-200 px-3 py-2 text-sm"
-              value={interviewType}
-              onChange={(e) => setInterviewType(e.target.value as "HR" | "TECH")}
-            >
-              <option value="HR">HR</option>
-              <option value="TECH">TECH</option>
-            </select>
-            <Button onClick={handleScheduleInterview}>Schedule</Button>
           </div>
-          {interviews.length === 0 ? (
-            <p className="text-slate-500">No interviews scheduled.</p>
-          ) : (
-            interviews.map((interview) => (
-              <div key={interview.id} className="rounded-md border border-slate-200 p-3">
-                <p className="font-medium">{interview.interviewer_name ?? "Interviewer TBD"}</p>
-                <p className="text-xs text-slate-500">
-                  {new Date(interview.scheduled_at).toLocaleString()} | {interview.status}
-                </p>
-                <p className="text-xs text-slate-600">
-                  Type: {interviewMetaById.get(interview.id)?.interview_type ?? "HR"} | Rating:{" "}
-                  {interviewMetaById.get(interview.id)?.rating ?? "-"}
-                </p>
-                <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-4">
-                  <Input
-                    type="datetime-local"
-                    value={rescheduleTimes[interview.id] ?? ""}
-                    onChange={(e) => setRescheduleTimes((prev) => ({ ...prev, [interview.id]: e.target.value }))}
-                  />
-                  <Button
-                    variant="outline"
-                    onClick={() => handleReschedule(interview.id)}
-                    disabled={interviewUpdatingId === interview.id || !rescheduleTimes[interview.id]}
-                  >
-                    Reschedule
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column: Details & Resume */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Detailed Profile */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="border-b border-gray-100 bg-gray-50/50 p-5 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <User className="w-4 h-4 text-[#FF5A1F]" /> Profile Details
+              </h2>
+              {isEditing ? (
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={handleCancel} disabled={isSaving} className="h-8 text-xs">
+                    <X className="w-3 h-3 mr-1" /> Cancel
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => handleCancelInterview(interview.id)}
-                    disabled={interviewUpdatingId === interview.id || interview.status === "cancelled"}
-                  >
-                    Cancel
+                  <Button size="sm" onClick={handleSave} disabled={isSaving} className="h-8 text-xs bg-[#FF5A1F] hover:bg-[#E54E1A] text-white">
+                    <Save className="w-3 h-3 mr-1" /> {isSaving ? "Saving..." : "Save"}
                   </Button>
                 </div>
-                <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-4">
-                  <Input
-                    placeholder="Feedback notes"
-                    value={feedbackNotes[interview.id] ?? ""}
-                    onChange={(e) => setFeedbackNotes((prev) => ({ ...prev, [interview.id]: e.target.value }))}
-                  />
-                  <select
-                    className="rounded-md border border-slate-200 px-3 py-2 text-sm"
-                    value={feedbackRatings[interview.id] ?? ""}
-                    onChange={(e) => setFeedbackRatings((prev) => ({ ...prev, [interview.id]: e.target.value }))}
-                  >
-                    <option value="">Rating</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3</option>
-                    <option value="4">4</option>
-                    <option value="5">5</option>
-                  </select>
-                  <Button
-                    variant="outline"
-                    onClick={() => handleSaveFeedback(interview.id)}
-                    disabled={interviewUpdatingId === interview.id}
-                  >
-                    Save feedback
-                  </Button>
+              ) : (
+                <Button variant="outline" size="sm" onClick={() => setIsEditing(true)} className="h-8 text-xs bg-white border-gray-200 hover:bg-gray-50 text-gray-700">
+                  <Edit3 className="w-3 h-3 mr-1" /> Edit
+                </Button>
+              )}
+            </div>
+            
+            <div className="p-6">
+              {isEditing ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">First Name</label><Input value={firstName} onChange={(e) => setFirstName(e.target.value)} /></div>
+                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Last Name</label><Input value={lastName} onChange={(e) => setLastName(e.target.value)} /></div>
+                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Email</label><Input value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Phone</label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
+                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Location</label><Input value={location} onChange={(e) => setLocation(e.target.value)} /></div>
+                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Role</label><Input value={role} onChange={(e) => setRole(e.target.value)} /></div>
+                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Years Experience</label><Input type="number" min={0} value={yearsExperience} onChange={(e) => setYearsExperience(e.target.value)} /></div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-4">
+                  <div><p className="text-xs font-medium text-gray-500 mb-1">Email</p><p className="text-sm font-medium text-gray-900">{candidate.email}</p></div>
+                  <div><p className="text-xs font-medium text-gray-500 mb-1">Phone</p><p className="text-sm font-medium text-gray-900">{candidate.phone || "-"}</p></div>
+                  <div><p className="text-xs font-medium text-gray-500 mb-1">Location</p><p className="text-sm font-medium text-gray-900">{candidate.location || "-"}</p></div>
+                  <div><p className="text-xs font-medium text-gray-500 mb-1">Role</p><p className="text-sm font-medium text-gray-900">{candidate.role || "-"}</p></div>
+                  <div><p className="text-xs font-medium text-gray-500 mb-1">Experience</p><p className="text-sm font-medium text-gray-900">{candidate.years_experience != null ? `${candidate.years_experience} years` : "-"}</p></div>
+                  
+                  {candidate.experience_summary && (
+                    <div className="md:col-span-2">
+                      <p className="text-xs font-medium text-gray-500 mb-1">Experience Summary</p>
+                      <p className="text-sm text-gray-800 leading-relaxed bg-gray-50 p-4 rounded-lg">{candidate.experience_summary}</p>
+                    </div>
+                  )}
+                  {candidate.education && (
+                    <div className="md:col-span-2">
+                      <p className="text-xs font-medium text-gray-500 mb-1">Education</p>
+                      <p className="text-sm text-gray-800">{candidate.education}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Resume */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-[#FF5A1F]" /> Resume
+              </h2>
+            </div>
+            <div className="p-6">
+              {candidate.resume_file_name || candidate.resume_s3_key ? (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center gap-4 mb-4 sm:mb-0">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-50 text-[#FF5A1F]">
+                      <FileText className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">{candidate.resume_file_name ?? "Resume Document"}</p>
+                      <p className="text-xs text-gray-500">PDF Document</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 w-full sm:w-auto">
+                    {candidate.resume_s3_key ? (
+                      <>
+                        <Button variant="outline" className="flex-1 sm:flex-none border-gray-200 hover:bg-gray-50 hover:text-gray-900" onClick={() => handleResumeAction("open")}>
+                          <ExternalLink className="w-4 h-4 mr-2" /> Open
+                        </Button>
+                        <Button className="flex-1 sm:flex-none bg-slate-900 hover:bg-slate-800 text-white" onClick={() => handleResumeAction("download")}>
+                          <Download className="w-4 h-4 mr-2" /> Download
+                        </Button>
+                      </>
+                    ) : (
+                      <span className="text-xs font-medium text-gray-400 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-100">File unavailable</span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 px-4 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50">
+                  <FileText className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-gray-900">No resume available</p>
+                  <p className="text-xs text-gray-500 mt-1">This candidate was added manually or the file is missing.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Applied Jobs */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <Briefcase className="w-4 h-4 text-[#FF5A1F]" /> Applied Jobs
+              </h2>
+            </div>
+            <div className="p-0">
+              {sortedPipelines.length === 0 ? (
+                <div className="p-8 text-center">
+                  <Briefcase className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                  <p className="text-sm text-gray-500">No jobs applied yet.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50/50 border-b border-gray-100">
+                      <tr>
+                        <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider">Job Title</th>
+                        <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider">Current Stage</th>
+                        <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider text-right">Last Updated</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {sortedPipelines.map((pipeline) => (
+                        <tr key={pipeline.id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="px-6 py-4 font-medium text-gray-900">
+                            {jobs.find((job) => job.id === pipeline.job_id)?.title ?? pipeline.job_id}
+                          </td>
+                          <td className="px-6 py-4">
+                            <select
+                              className={cn(
+                                "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider outline-none border transition-colors",
+                                pipeline.stage === "placed" ? "bg-green-50 border-green-200 text-green-700" :
+                                pipeline.stage === "offer" ? "bg-indigo-50 border-indigo-200 text-indigo-700" :
+                                pipeline.stage === "interview" ? "bg-blue-50 border-blue-200 text-blue-700" :
+                                "bg-gray-50 border-gray-200 text-gray-700 hover:border-gray-300 focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F]"
+                              )}
+                              value={pipeline.stage}
+                              onChange={(event) => void handleQuickStageUpdate(pipeline.id, event.target.value as Pipeline["stage"])}
+                              disabled={updatingPipelineId === pipeline.id}
+                            >
+                              <option value="applied">Applied</option>
+                              <option value="screening">Screening</option>
+                              <option value="interview">Interview</option>
+                              <option value="offer">Offered</option>
+                              <option value="placed">Hired</option>
+                            </select>
+                          </td>
+                          <td className="px-6 py-4 text-xs text-gray-500 text-right">
+                            {new Date(pipeline.updated_at).toLocaleDateString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Timeline & Interviews */}
+        <div className="space-y-6">
+          
+          {/* Interviews */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-[#FF5A1F]" /> Interviews
+              </h2>
+            </div>
+            <div className="p-5 space-y-5">
+              {/* Schedule New */}
+              <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 space-y-3">
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Schedule New</h3>
+                <div className="space-y-2">
+                  <Input type="datetime-local" className="text-sm h-9" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
+                  <Input placeholder="Interviewer Name" className="text-sm h-9" value={interviewerName} onChange={(e) => setInterviewerName(e.target.value)} />
+                  <div className="flex gap-2">
+                    <select
+                      className="flex-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-[#FF5A1F]"
+                      value={interviewType}
+                      onChange={(e) => setInterviewType(e.target.value as "HR" | "TECH")}
+                    >
+                      <option value="HR">HR</option>
+                      <option value="TECH">Technical</option>
+                    </select>
+                    <Button onClick={handleScheduleInterview} size="sm" className="bg-slate-900 hover:bg-slate-800 text-white">
+                      <Plus className="w-4 h-4 mr-1" /> Add
+                    </Button>
+                  </div>
                 </div>
               </div>
+<<<<<<< HEAD
+
+              {/* List */}
+              <div className="space-y-3">
+                {interviews.length === 0 ? (
+                  <p className="text-sm text-center text-gray-500 py-4">No upcoming interviews.</p>
+                ) : (
+                  interviews.map((interview) => (
+                    <div key={interview.id} className="relative rounded-xl border border-gray-200 p-4 hover:border-[#FF5A1F]/30 transition-colors">
+                      <div className="absolute top-4 right-4">
+                        <span className={cn(
+                          "px-2 py-1 text-[10px] font-bold uppercase rounded-md tracking-wider",
+                          interview.status === "scheduled" ? "bg-blue-100 text-blue-700" :
+                          interview.status === "completed" ? "bg-green-100 text-green-700" :
+                          interview.status === "cancelled" ? "bg-red-100 text-red-700" :
+                          "bg-gray-100 text-gray-700"
+                        )}>
+                          {interview.status}
+                        </span>
+                      </div>
+                      <p className="font-semibold text-gray-900 text-sm pr-16">{interview.interviewer_name ?? "Interviewer TBD"}</p>
+                      
+                      <div className="mt-2 space-y-1 text-xs text-gray-600">
+                        <p className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-gray-400" /> {new Date(interview.scheduled_at).toLocaleString()}</p>
+                        <p className="flex items-center gap-1.5"><Briefcase className="w-3.5 h-3.5 text-gray-400" /> Type: {interviewMetaById.get(interview.id)?.interview_type ?? "HR"}</p>
+                        <p className="flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-gray-400" /> Rating: {interviewMetaById.get(interview.id)?.rating ?? "-"}/5</p>
+                      </div>
+
+                      {interview.status !== "completed" && interview.status !== "cancelled" && (
+                        <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+                          <div className="flex gap-2">
+                            <Input
+                              type="datetime-local"
+                              className="text-xs h-8"
+                              value={rescheduleTimes[interview.id] ?? ""}
+                              onChange={(e) => setRescheduleTimes((prev) => ({ ...prev, [interview.id]: e.target.value }))}
+                            />
+                            <Button
+                              variant="outline" size="sm" className="h-8 text-xs px-2"
+                              onClick={() => handleReschedule(interview.id)}
+                              disabled={interviewUpdatingId === interview.id || !rescheduleTimes[interview.id]}
+                            >
+                              Reschedule
+                            </Button>
+                          </div>
+                          
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="Feedback..."
+                              className="text-xs h-8 flex-1"
+                              value={feedbackNotes[interview.id] ?? ""}
+                              onChange={(e) => setFeedbackNotes((prev) => ({ ...prev, [interview.id]: e.target.value }))}
+                            />
+                            <select
+                              className="w-16 rounded-md border border-gray-200 px-1 py-1 text-xs outline-none"
+                              value={feedbackRatings[interview.id] ?? ""}
+                              onChange={(e) => setFeedbackRatings((prev) => ({ ...prev, [interview.id]: e.target.value }))}
+                            >
+                              <option value="">Rtg</option>
+                              {[1,2,3,4,5].map(n => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                            <Button
+                              size="sm" className="h-8 text-xs px-2 bg-green-600 hover:bg-green-700 text-white"
+                              onClick={() => handleSaveFeedback(interview.id)}
+                              disabled={interviewUpdatingId === interview.id}
+                            >
+                              Complete
+                            </Button>
+                          </div>
+                          <Button
+                            variant="ghost" size="sm" className="w-full h-8 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                            onClick={() => handleCancelInterview(interview.id)}
+                            disabled={interviewUpdatingId === interview.id || interview.status === "cancelled"}
+                          >
+                            Cancel Interview
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+=======
             ))
           )}
         </CardContent>
@@ -1016,11 +1200,56 @@ export default function CandidateDetailPage() {
                     {JSON.stringify(item.metadata, null, 2)}
                   </pre>
                 ) : null}
+>>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
               </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+            </div>
+          </div>
+
+          {/* Timeline / Interactions */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-[#FF5A1F]" /> Activity Timeline
+              </h2>
+            </div>
+            <div className="p-5">
+              <div className="flex gap-2 mb-6 relative">
+                <Input placeholder="Add a note..." className="pr-20" value={newNote} onChange={(e) => setNewNote(e.target.value)} />
+                <Button size="sm" className="absolute right-1 top-1 bottom-1 h-auto bg-[#FF5A1F] hover:bg-[#E54E1A] text-white" onClick={handleAddNote} disabled={addingNote || !newNote.trim()}>
+                  {addingNote ? "..." : "Post"}
+                </Button>
+              </div>
+
+              <div className="space-y-4 relative before:absolute before:inset-0 before:ml-4 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-200 before:to-transparent">
+                {orderedTimeline.length === 0 ? (
+                  <p className="text-sm text-center text-gray-500 py-4 relative z-10 bg-white">No activity yet.</p>
+                ) : (
+                  orderedTimeline.map((item) => (
+                    <div key={item.id} className="relative z-10 pl-10 md:pl-0">
+                      {/* Timeline dot */}
+                      <div className="absolute left-0 md:left-1/2 md:-ml-2.5 top-1.5 h-5 w-5 rounded-full border-4 border-white bg-[#FF5A1F] shadow-sm"></div>
+                      
+                      <div className="bg-gray-50 md:w-[calc(50%-1.5rem)] rounded-xl p-4 border border-gray-100 shadow-sm ml-0 md:ml-auto md:even:mr-auto md:even:ml-0 transition-transform hover:-translate-y-0.5">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <p className="font-semibold text-gray-900 text-sm">{item.title ?? item.interaction_type}</p>
+                          <span className="text-[10px] font-medium text-gray-400 whitespace-nowrap">{new Date(item.created_at).toLocaleDateString()}</span>
+                        </div>
+                        {item.body && <p className="text-xs text-gray-600 leading-relaxed">{item.body}</p>}
+                        {item.metadata && (
+                          <pre className="mt-3 overflow-x-auto rounded-lg bg-gray-100 p-2.5 text-[10px] text-gray-700 font-mono border border-gray-200">
+                            {JSON.stringify(item.metadata, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
     </section>
   );
 }

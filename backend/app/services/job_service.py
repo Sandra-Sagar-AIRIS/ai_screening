@@ -394,7 +394,33 @@ class JobService:
         logger = logging.getLogger(__name__)
         logger.info(f"DELETE_START: Job={job_id} Org={organization_id}")
         job = self.get_job_by_id(job_id, organization_id, current_user)
+        
+        from app.models.pipeline import Pipeline
+        from app.models.job_vendor import JobVendor
+        from app.models.client_job_access import ClientJobAccess
+        from app.models.application import Application
+        
+        # Helper to safely delete from a model using savepoints
+        def _safe_delete(model):
+            try:
+                with self.db.begin_nested():
+                    self.db.execute(sa.delete(model).where(model.job_id == job.id))
+            except sa.exc.ProgrammingError as e:
+                # Catch "relation does not exist" for missing tables without aborting outer transaction
+                logger.warning(f"Table for {model.__name__} might be missing, ignoring: {e}")
+            except Exception as e:
+                logger.warning(f"Error deleting from {model.__name__}: {e}")
+                
         try:
+            # Delete dependent records safely
+            _safe_delete(Pipeline)
+            _safe_delete(JobVendor)
+            _safe_delete(JobSubmission)
+            _safe_delete(JobMatchCache)
+            _safe_delete(JobSkill)
+            _safe_delete(ClientJobAccess)
+            _safe_delete(Application)
+            
             self.db.delete(job)
             self.db.commit()
             logger.info(f"DELETE_SUCCESS: Job {job_id} deleted")

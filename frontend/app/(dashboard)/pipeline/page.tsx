@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { RefreshCw } from "lucide-react";
 import {
   closestCorners,
   DndContext,
@@ -85,21 +86,20 @@ function CandidateCard({
   isTopMatch?: boolean;
 }) {
   return (
-    <div className={`relative group transition-transform duration-300 w-full max-w-[240px] cursor-grab active:cursor-grabbing ${isMoving ? 'opacity-70' : 'hover:-translate-y-1.5'}`}>
-      <div className={`absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 opacity-0 blur transition duration-300 ${!isMoving ? 'group-hover:opacity-30' : ''}`}></div>
-      <div className="relative rounded-xl bg-white p-4 text-sm border border-slate-200 shadow-sm transition-colors duration-300 group-hover:border-indigo-200/50 h-full">
+    <div className={`relative group transition-transform duration-300 w-full cursor-grab active:cursor-grabbing ${isMoving ? 'opacity-70' : 'hover:-translate-y-1'}`}>
+      <div className="relative rounded-2xl bg-white p-5 border border-slate-100/80 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all duration-300 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-slate-200 h-full">
         <Link href={`/candidates/${pipeline.candidate_id}`} className="block">
           <div className="mb-2.5 flex items-center gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-medium text-slate-600 transition-colors duration-300 group-hover:bg-indigo-50 group-hover:text-indigo-600">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 border border-slate-100/80 text-[10px] font-bold text-slate-500 transition-colors duration-300 group-hover:bg-orange-50 group-hover:text-[#FF5A1F] group-hover:border-orange-100">
               {candidate ? `${candidate.first_name.charAt(0)}${candidate.last_name.charAt(0)}` : "?"}
             </div>
-            <p className="text-sm font-medium leading-tight text-slate-900 group-hover:text-indigo-900 transition-colors duration-300">
+            <p className="text-sm font-bold leading-tight text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">
               {candidate ? `${candidate.first_name} ${candidate.last_name}` : "Unknown candidate"}
             </p>
           </div>
-          <p className="text-sm leading-snug text-slate-500">{candidate?.role ?? "Role not specified"}</p>
-          <p className="mt-1.5 text-xs text-slate-400">
-            Experience:{" "}
+          <p className="text-[13px] leading-snug text-slate-500 font-medium">{candidate?.role ?? "Role not specified"}</p>
+          <p className="mt-2 text-xs text-slate-400 font-medium">
+            Exp:{" "}
             {candidate?.years_experience !== null && candidate?.years_experience !== undefined ? `${candidate.years_experience}y` : "-"}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -125,7 +125,7 @@ function CandidateCard({
             </p>
           ) : null}
         </Link>
-        {isMoving ? <p className="mt-2 text-xs text-blue-600">Updating stage...</p> : null}
+        {isMoving ? <p className="mt-3 text-xs font-semibold text-[#FF5A1F]">Updating stage...</p> : null}
       </div>
     </div>
   );
@@ -210,35 +210,31 @@ function StageColumn({
   const isDraggingAny = Boolean(activePipelineId);
 
   return (
-    <div className="relative group transition-transform duration-300 hover:-translate-y-1.5 cursor-default">
-      <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 opacity-0 blur transition duration-300 group-hover:opacity-30"></div>
+    <div className="relative group transition-transform duration-300 hover:-translate-y-1 cursor-default">
       <div
         ref={setNodeRef}
-        className={`relative flex flex-col min-h-[420px] min-w-[280px] rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 ${
-          isDropTarget ? "bg-blue-50/90 ring-blue-200 shadow-md" : "group-hover:ring-indigo-200/50"
-        }`}
+        className={`relative flex flex-col min-h-[420px] min-w-[300px] rounded-[20px] bg-slate-50/50 p-4 border transition-all duration-300 ${isDropTarget ? "bg-orange-50/50 border-[#FF5A1F]/30 shadow-md" : "border-slate-100/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] hover:border-slate-200"
+          }`}
       >
-        <div className="flex-1 rounded-xl bg-slate-50 p-3">
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-white/80 backdrop-blur">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-transparent pb-3 border-b border-slate-100/80 mb-4">
           <div className="flex min-w-0 items-center gap-2.5">
-            <span className={`h-2 w-2 shrink-0 rounded-full ${STAGE_ACCENT[stage]}`} />
-            <p className="truncate text-sm font-medium text-slate-800">{STAGE_LABELS[stage]}</p>
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${STAGE_ACCENT[stage]} shadow-sm`} />
+            <p className="truncate text-sm font-bold tracking-wide uppercase text-slate-700">{STAGE_LABELS[stage]}</p>
           </div>
-          <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-500">
+          <span className="flex items-center justify-center h-6 min-w-6 rounded-full bg-white px-2 text-[11px] font-bold text-slate-500 shadow-sm border border-slate-100">
             {count}
           </span>
         </div>
-        <div className="mt-3 space-y-3">
+        <div className="flex-1 space-y-3">
           {isDropTarget ? (
-            <div className="rounded-lg bg-blue-100/60 py-2 text-center text-[11px] font-medium text-blue-600">
+            <div className="rounded-xl border border-dashed border-[#FF5A1F]/40 bg-orange-50/50 py-3 text-center text-[12px] font-bold text-[#FF5A1F]">
               Drop here
             </div>
           ) : null}
-          {!count && !isDraggingAny ? <div className="h-14 rounded-lg bg-white/60" /> : null}
+          {!count && !isDraggingAny ? <div className="h-20 rounded-2xl border border-dashed border-slate-200/60 bg-white/40" /> : null}
           {children}
         </div>
       </div>
-    </div>
     </div>
   );
 }
@@ -525,22 +521,40 @@ export default function PipelinePage() {
             </Button>
           </div>
         </div>
+        <div className="flex items-center gap-3">
+          {canUpdatePipeline ? <p className="text-[12px] font-semibold text-slate-400 uppercase tracking-wide">Drag candidates to update</p> : null}
+          <Button
+            variant="outline"
+            className="h-10 w-10 !p-0 rounded-full border-slate-200/80 bg-white shadow-sm hover:bg-slate-50 transition-all text-slate-500 hover:text-slate-800"
+            disabled={!selectedJobId || loading}
+            onClick={() => {
+              if (!selectedJobId) return;
+              void loadPipelines(selectedJobId);
+            }}
+            title="Refresh Pipeline"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            <span className="sr-only">Refresh</span>
+          </Button>
+        </div>
       </div>
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {error ? <p className="text-sm font-medium text-red-600">{error}</p> : null}
       {!selectedJobId ? (
-        <Card className="rounded-xl border-slate-200 bg-white shadow-sm">
-          <CardContent className="py-10 text-center text-sm text-slate-500">
-            Select a job to load its candidate pipeline.
-          </CardContent>
-        </Card>
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white border border-slate-100/50 mt-6">
+          <div className="py-20 flex flex-col items-center justify-center text-slate-400">
+            <svg className="w-12 h-12 mb-4 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+            <p className="text-sm font-medium">Select a job to load its candidate pipeline.</p>
+          </div>
+        </div>
       ) : null}
-      {selectedJobId && loading ? <p className="text-sm text-slate-600">Loading pipeline...</p> : null}
+      {selectedJobId && loading ? <p className="text-sm font-medium text-slate-500 mt-6">Loading pipeline...</p> : null}
       {selectedJobId && !loading && pipelines.length === 0 ? (
-        <Card className="rounded-xl border-slate-200 bg-white shadow-sm">
-          <CardContent className="py-10 text-center text-sm text-slate-500">
-            No candidates submitted to this job yet.
-          </CardContent>
-        </Card>
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white border border-slate-100/50 mt-6">
+          <div className="py-20 flex flex-col items-center justify-center text-slate-400">
+            <svg className="w-12 h-12 mb-4 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+            <p className="text-sm font-medium">No candidates submitted to this job yet.</p>
+          </div>
+        </div>
       ) : null}
       {selectedJobId && !loading && pipelines.length > 0 ? (
         <DndContext
@@ -599,20 +613,20 @@ export default function PipelinePage() {
                 {(() => {
                   const ats = atsByCandidateId[normalizeCandidateId(activePipeline.candidate_id)];
                   return (
-                <CandidateCard
-                  pipeline={activePipeline}
-                  candidate={candidateById.get(normalizeCandidateId(activePipeline.candidate_id))}
-                  atsScore={ats?.score}
-                  recommendation={ats?.recommendation}
-                  semanticInsight={
-                    ats?.ai_enrichment_status === "complete" ? ats?.recruiter_summary : null
-                  }
-                  aiEnrichmentStatus={ats?.ai_enrichment_status}
-                  awaitingAtsMatch={!ats}
-                  boardLoading={loading}
-                  isTopMatch={(ats?.score ?? -1) >= 85}
-                  isMoving={false}
-                />
+                    <CandidateCard
+                      pipeline={activePipeline}
+                      candidate={candidateById.get(normalizeCandidateId(activePipeline.candidate_id))}
+                      atsScore={ats?.score}
+                      recommendation={ats?.recommendation}
+                      semanticInsight={
+                        ats?.ai_enrichment_status === "complete" ? ats?.recruiter_summary : null
+                      }
+                      aiEnrichmentStatus={ats?.ai_enrichment_status}
+                      awaitingAtsMatch={!ats}
+                      boardLoading={loading}
+                      isTopMatch={(ats?.score ?? -1) >= 85}
+                      isMoving={false}
+                    />
                   );
                 })()}
               </div>

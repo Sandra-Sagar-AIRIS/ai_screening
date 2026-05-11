@@ -40,7 +40,7 @@ function LoginForm() {
     try {
       const data = await login({ email: normalizedEmail, password });
       setAuth(data.access_token, data.role, data.user_type, data.organization_id, data.permissions);
-      router.push("/");
+      router.push("/dashboard");
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -53,20 +53,31 @@ function LoginForm() {
   }
 
   return (
-    <AuthShell title="Welcome back" subtitle="Sign in to continue to your AIRIS workspace.">
-      <form className="space-y-4" onSubmit={onSubmit}>
+    <AuthShell 
+      title="Sign in to your account" 
+      subtitle="Enter your credentials to access your workspace."
+      leftTitle="Welcome back"
+      leftSubtitle="Sign in to continue to your AIRIS workspace."
+    >
+      <form className="space-y-5" onSubmit={onSubmit}>
         <div className="space-y-2">
-          <label className="text-sm font-medium text-slate-700" htmlFor="email">
+          <label className="text-[13px] font-semibold text-gray-700" htmlFor="email">
             Work email
           </label>
-          <Input
-            id="email"
-            type="email"
-            placeholder="you@company.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+              <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg>
+            </div>
+            <Input
+              id="email"
+              type="email"
+              placeholder="name@company.com"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+              className="pl-10 h-11 bg-white border-gray-200 text-sm focus-visible:ring-1 focus-visible:ring-[#111827] focus-visible:border-[#111827] transition-all rounded-lg"
+            />
+          </div>
         </div>
         <PasswordField id="password" label="Password" value={password} onChange={setPassword} />
         {inviteAccepted ? (
@@ -74,16 +85,26 @@ function LoginForm() {
             Your account has been created. You can now log in.
           </p>
         ) : null}
+        
         {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
-        <Button className="w-full" type="submit" disabled={loading}>
-          {loading ? "Signing in..." : "Sign in"}
-        </Button>
-        <p className="text-center text-sm text-slate-600">
-          Do not have an account?{" "}
-          <Link href="/signup" className="font-medium text-slate-900 hover:underline">
-            Create account
-          </Link>
-        </p>
+        
+        <div className="pt-2 space-y-4">
+          <Button 
+            className="w-full h-11 bg-[#0A101D] hover:bg-gray-800 text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2" 
+            type="submit" 
+            disabled={loading}
+          >
+            {loading ? "Signing in..." : "Sign in"}
+            {!loading && <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>}
+          </Button>
+
+          <p className="text-center text-[13px] text-gray-500 font-medium pt-2">
+            Don't have an account?{" "}
+            <Link href="/signup" className="text-[#111827] hover:underline font-semibold transition-colors">
+              Create an account
+            </Link>
+          </p>
+        </div>
       </form>
     </AuthShell>
   );

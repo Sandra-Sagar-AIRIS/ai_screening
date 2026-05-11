@@ -11,7 +11,7 @@ import type { Job, JobStatus } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Briefcase, CircleDot, Shield, CheckCircle2 } from "lucide-react";
+import { Briefcase, CircleDot, Shield, CheckCircle2, RefreshCw } from "lucide-react";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -38,10 +38,10 @@ function SkillTags({
         {skills.map((s, i) => (
           <span
             key={i}
-            className="flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800"
+            className="flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-[#FF5A1F] border border-[#FF5A1F]/20"
           >
             {s}
-            <button type="button" onClick={() => onRemove(i)} className="text-blue-500 hover:text-red-500">
+            <button type="button" onClick={() => onRemove(i)} className="text-[#FF5A1F]/70 hover:text-red-500">
               ×
             </button>
           </span>
@@ -176,7 +176,7 @@ function JDInputModal({
               key={t}
               onClick={() => { setTab(t); setError(null); }}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                tab === t ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-700"
+                tab === t ? "border-[#FF5A1F] text-[#FF5A1F]" : "border-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
               {t === "paste" ? "📋 Paste JD" : "📄 Upload JD"}
@@ -186,7 +186,7 @@ function JDInputModal({
 
         {tab === "paste" ? (
           <textarea
-            className="w-full h-64 rounded-md border border-slate-200 p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="w-full h-64 rounded-md border border-slate-200 p-3 text-sm resize-none focus:outline-none focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F]"
             placeholder="Paste the full job description here…"
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -194,11 +194,15 @@ function JDInputModal({
         ) : (
           <div
             onClick={() => fileRef.current?.click()}
-            className="flex h-40 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-400 hover:border-blue-400 hover:text-blue-500 transition-colors"
+            className="flex h-40 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-400 hover:border-[#FF5A1F]/50 hover:bg-orange-50/30 hover:text-[#FF5A1F] transition-colors"
           >
             <span className="text-3xl">📂</span>
+<<<<<<< HEAD
+            <p className="mt-2 text-sm">{file ? file.name : "Select JD"}</p>
+=======
             <p className="mt-2 text-sm">{file ? file.name : "Click to select a JD file"}</p>
             <p className="text-xs mt-1">Accepted: .pdf, .doc, .docx</p>
+>>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
             <input
               ref={fileRef}
               type="file"
@@ -219,7 +223,7 @@ function JDInputModal({
         )}
 
         <div className="mt-4 flex justify-end">
-          <Button onClick={handleParse} disabled={parsing}>
+          <Button onClick={handleParse} disabled={parsing} className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white">
             {parsing ? PARSE_STEPS[parseStep] : "Parse JD →"}
           </Button>
         </div>
@@ -395,7 +399,7 @@ function JDPreviewModal({
 
         <div className="flex justify-between pt-2">
           <Button variant="outline" onClick={onBack}>← Back</Button>
-          <Button onClick={handleCreate} disabled={creating}>
+          <Button onClick={handleCreate} disabled={creating} className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white">
             {creating ? "Creating…" : "Create Job ✓"}
           </Button>
         </div>
@@ -411,6 +415,7 @@ export default function JobsPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const permissions = useAuthStore((state) => state.permissions);
   const role = useAuthStore((state) => state.role);
   const token = useAuthStore((state) => state.token);
@@ -444,18 +449,26 @@ export default function JobsPage() {
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   
   // Import from JD flow state
-  const [showClientPrompt, setShowClientPrompt] = useState(false);
   const [showJDInput, setShowJDInput] = useState(false);
   const [jdClientId, setJdClientId] = useState("");
   const [parsedResult, setParsedResult] = useState<JobParseResult | null>(null);
 
   async function refreshJobs() {
+<<<<<<< HEAD
+    setIsRefreshing(true);
+    try {
+      const data = await getJobs(50, 0);
+      setJobs(data);
+    } finally {
+      setIsRefreshing(false);
+=======
     try {
       const data = await getJobs(50, 0);
       setJobs(data);
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load jobs.");
+>>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
     }
   }
 
@@ -478,8 +491,7 @@ export default function JobsPage() {
   }, []);
 
   function handleImportClick() {
-    // Ask for client ID before opening the JD input modal
-    setShowClientPrompt(true);
+    setShowJDInput(true);
   }
 
   function resetForm() {
@@ -529,15 +541,23 @@ export default function JobsPage() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Jobs</h1>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => void refreshJobs()}>
-            Refresh
+          <Button
+            type="button"
+            variant="outline"
+            className="h-8 w-8 !p-0 rounded-full"
+            onClick={() => void refreshJobs()}
+            disabled={isRefreshing}
+            title="Refresh Jobs"
+          >
+            <RefreshCw className={`h-4 w-4 text-slate-600 ${isRefreshing ? "animate-spin" : ""}`} />
+            <span className="sr-only">Refresh</span>
           </Button>
         {canCreateJobs ? (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={handleImportClick}>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={handleImportClick} className="h-11 rounded-2xl border-slate-200/80 text-slate-600 hover:bg-slate-50 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all font-semibold">
               ✨ Import from JD
             </Button>
-            <Button onClick={() => setShowCreate(true)}>
+            <Button onClick={() => setShowCreate(true)} className="h-11 bg-[#FF5A1F] hover:bg-[#e04814] text-white rounded-2xl px-5 font-bold shadow-sm transition-colors">
               + Create Job
             </Button>
           </div>
@@ -549,34 +569,43 @@ export default function JobsPage() {
 
       {/* ── KPI Strip ─────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Card className="cursor-pointer border-slate-200 shadow-sm transition-shadow hover:shadow-md">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-indigo-50 rounded-xl text-indigo-500">
-              <Briefcase className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-500">Total Jobs</p>
-              <h3 className="text-xl font-bold text-slate-900">{jobs.length}</h3>
-              <p className="text-[10px] text-emerald-600 font-medium mt-0.5">All time</p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">Total Jobs</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{jobs.length}</p>
+          </div>
+        </div>
 
-        <Card className="cursor-pointer border-slate-200 shadow-sm transition-shadow hover:shadow-md">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-emerald-50 rounded-xl text-emerald-500">
-              <CircleDot className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-500">Open Jobs</p>
-              <h3 className="text-xl font-bold text-slate-900">{jobs.filter(j => j.status === "open").length}</h3>
-              <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                {jobs.length === 0 ? "0.0" : ((jobs.filter(j => j.status === "open").length / jobs.length) * 100).toFixed(1)}% of total
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">Open Jobs</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{jobs.filter(j => j.status === "open").length}</p>
+          </div>
+        </div>
 
+<<<<<<< HEAD
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">On Hold</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{jobs.filter(j => j.status === "on_hold").length}</p>
+          </div>
+        </div>
+
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">Closed</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{jobs.filter(j => j.status === "cancelled" || j.status === "filled" || j.status === "closed").length}</p>
+          </div>
+        </div>
+=======
         <Card className="cursor-pointer border-slate-200 shadow-sm transition-shadow hover:shadow-md">
           <CardContent className="p-4 flex items-center gap-4">
             <div className="p-3 bg-blue-50 rounded-xl text-blue-500">
@@ -606,30 +635,33 @@ export default function JobsPage() {
             </div>
           </CardContent>
         </Card>
+>>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
       </div>
 
       {/* ── Job list ─────────────────────────────────────────────────── */}
-      <Card className="rounded-xl border-slate-200 shadow-sm">
-        <CardHeader>
-          <CardTitle>Job List</CardTitle>
-        </CardHeader>
-        <CardContent className="p-4">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <input
-              type="text"
-              placeholder="Search jobs..."
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-72"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
-            <div className="flex items-center gap-2">
+      <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white overflow-hidden border border-slate-100/50 mt-6">
+        <div className="p-6 flex flex-col md:flex-row items-center justify-between gap-4 border-b border-slate-100/80">
+          <h2 className="text-[20px] font-extrabold text-slate-900 shrink-0">Job List</h2>
+          <div className="flex flex-1 items-center justify-end gap-4 w-full">
+            <div className="relative w-full max-w-[320px] group">
+              <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#FF5A1F] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                className="w-full h-11 pl-11 pr-4 text-[14px] font-medium bg-white border border-slate-200/80 rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.02)] focus:outline-none focus:ring-2 focus:ring-[#FF5A1F]/15 focus:border-[#FF5A1F]/30 transition-all duration-200 placeholder:text-slate-400 text-slate-800"
+                placeholder="Search jobs..."
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-2xl border border-slate-200/80">
               {(["all", "open", "closed"] as const).map((filter) => (
                 <button
                   key={filter}
                   type="button"
                   onClick={() => setStatusFilter(filter)}
-                  className={`cursor-pointer rounded-full px-3 py-1 text-sm transition ${
-                    statusFilter === filter ? "bg-slate-300 text-slate-800" : "bg-slate-100 hover:bg-slate-200"
+                  className={`cursor-pointer rounded-xl px-4 py-1.5 text-[13px] font-bold transition-all duration-200 ${
+                    statusFilter === filter ? "bg-white text-slate-900 shadow-sm border border-slate-200/50" : "text-slate-500 hover:text-slate-700"
                   }`}
                 >
                   {filter === "all" ? "All" : filter === "closed" ? "Closed" : filter.charAt(0).toUpperCase() + filter.slice(1)}
@@ -637,33 +669,40 @@ export default function JobsPage() {
               ))}
             </div>
           </div>
+        </div>
+        <div className="p-6">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filteredJobs.map((job) => (
-            <div key={job.id} className="relative group transition-transform duration-300 hover:-translate-y-1.5 cursor-pointer">
-              <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 opacity-0 blur transition duration-300 group-hover:opacity-30"></div>
+            <div key={job.id} className="relative group transition-transform duration-300 hover:-translate-y-1 cursor-pointer">
               <Link
                 href={`/jobs/${job.id}`}
-                className="relative flex h-full flex-col rounded-xl bg-white p-5 border border-slate-200 shadow-sm transition-colors duration-300 group-hover:border-indigo-200/50"
+                className="relative flex h-full flex-col rounded-2xl bg-white p-5 border border-slate-100/80 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all duration-300 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-slate-200"
               >
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div className="min-w-0 space-y-2">
-                    <p className="truncate text-base font-semibold text-slate-900 group-hover:text-indigo-900 transition-colors duration-300">{job.title}</p>
-                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${getStatusBadgeClass(job.status)}`}>
+                    <p className="truncate text-base font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{job.title}</p>
+                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${getStatusBadgeClass(job.status)}`}>
                       {getStatusLabel(job.status)}
                     </span>
                   </div>
                 </div>
 
-                <div className="mb-4 flex items-center gap-3 text-sm text-slate-500">
-                  {job.location ? <span>📍 {job.location}</span> : <span>📍 Location TBD</span>}
-                  {(job.experience_min_years !== null || job.experience_max_years !== null) ? (
-                    <span>🎓 {job.experience_min_years ?? 0}-{job.experience_max_years ?? "+"} yrs</span>
-                  ) : (
-                    <span>🎓 Experience TBD</span>
-                  )}
+                <div className="mb-4 flex items-center gap-4 text-[13px] font-medium text-slate-500">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400">📍</span>
+                    <span className="truncate max-w-[120px]">{job.location || "TBD"}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400">🎓</span>
+                    <span>
+                      {(job.experience_min_years !== null || job.experience_max_years !== null) 
+                        ? `${job.experience_min_years ?? 0}-${job.experience_max_years ?? "+"} yrs` 
+                        : "TBD"}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="mt-auto pt-4 border-t border-slate-100 flex items-center justify-between text-sm font-medium text-indigo-600 opacity-0 transition-all duration-300 group-hover:opacity-100">
+                <div className="mt-auto pt-4 border-t border-slate-100/80 flex items-center justify-between text-[13px] font-bold text-slate-400 group-hover:text-[#FF5A1F] transition-colors duration-300">
                   <span>View Details</span>
                   <span className="transform transition-transform duration-300 group-hover:translate-x-1">→</span>
                 </div>
@@ -671,13 +710,13 @@ export default function JobsPage() {
             </div>
           ))}
           {!filteredJobs.length ? (
-            <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2 xl:col-span-3">
-              No jobs found for the current search/filter.
+            <div className="rounded-xl bg-slate-50 p-8 text-center text-sm font-medium text-slate-500 md:col-span-2 xl:col-span-3">
+              No jobs found for the current search or filters.
             </div>
           ) : null}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* ── Create Job Slide-In Panel ─────────────────────────────────── */}
       {showCreate ? (
@@ -726,7 +765,7 @@ export default function JobsPage() {
               {error && <p className="text-sm font-medium text-red-600 bg-red-50 p-3 rounded-md border border-red-100">{error}</p>}
             </div>
             <div className="p-6 border-t bg-slate-50 shrink-0">
-              <Button className="w-full py-6 text-lg bg-indigo-600 hover:bg-indigo-700" disabled={creating} onClick={async () => {
+              <Button className="w-full py-6 text-lg bg-[#FF5A1F] hover:bg-[#E54E1A] text-white" disabled={creating} onClick={async () => {
                 if (!title.trim() || !clientId.trim()) {
                   setError("Title and Client ID are required.");
                   return;
@@ -799,7 +838,7 @@ export default function JobsPage() {
               {error && <p className="text-sm font-medium text-red-600 bg-red-50 p-3 rounded-md border border-red-100">{error}</p>}
             </div>
             <div className="p-6 border-t bg-slate-50 shrink-0">
-              <Button className="w-full py-6 text-lg bg-indigo-600 hover:bg-indigo-700" disabled={creating} onClick={async () => {
+              <Button className="w-full py-6 text-lg bg-[#FF5A1F] hover:bg-[#E54E1A] text-white" disabled={creating} onClick={async () => {
                 if (!title.trim() || !editingJobId) return;
                 try {
                   setCreating(true);
@@ -822,38 +861,7 @@ export default function JobsPage() {
         </div>
       ) : null}
 
-      {/* ── Client ID prompt before JD import ───────────────────────── */}
-      {showClientPrompt ? (
-        <Modal onClose={() => setShowClientPrompt(false)}>
-          <div className="p-6 space-y-4">
-            <h2 className="text-lg font-semibold">Enter Client ID</h2>
-            <p className="text-sm text-slate-500">This is required to link the job to a client after parsing.</p>
-            <datalist id="mock-clients-prompt">
-              <option value="00000000-0000-0000-0000-000000000000">Default Client</option>
-              <option value="11111111-1111-1111-1111-111111111111">Acme Corp</option>
-              <option value="22222222-2222-2222-2222-222222222222">Globex</option>
-            </datalist>
-            <Input
-              placeholder="Client ID (UUID)"
-              list="mock-clients-prompt"
-              value={jdClientId}
-              onChange={(e) => setJdClientId(e.target.value)}
-            />
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setShowClientPrompt(false)}>Cancel</Button>
-              <Button
-                onClick={() => {
-                  if (!jdClientId.trim()) return;
-                  setShowClientPrompt(false);
-                  setShowJDInput(true);
-                }}
-              >
-                Continue →
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      ) : null}
+
 
       {/* ── JD Input modal ───────────────────────────────────────────── */}
       {showJDInput ? (

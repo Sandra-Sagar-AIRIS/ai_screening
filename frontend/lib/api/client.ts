@@ -119,7 +119,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       } catch {
         /* ignore */
       }
-      window.location.assign("/login");
+      window.location.replace("/login");
     }
     let detail: unknown = null;
     try {

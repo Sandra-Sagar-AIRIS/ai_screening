@@ -27,6 +27,8 @@ import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { CheckCircle2, ArrowLeft, Edit3, FileText, Layers, ArrowRight, Upload, AlertCircle } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type AddMode = "manual" | "resume" | "csv";
 
@@ -530,88 +532,204 @@ export default function CandidatesPage() {
   // Removed redundant monkey-patching of handlers
 
   const renderStepper = () => (
-    <div className="mb-6 flex items-center justify-between border-b pb-4">
-      {['Method', 'Upload', 'Review', 'Done'].map((step, idx) => (
-        <div key={step} className={`flex items-center ${activeStep === idx + 1 ? 'text-blue-600 font-medium' : 'text-slate-400'}`}>
-          <div className={`flex h-8 w-8 items-center justify-center rounded-full border-2 ${activeStep === idx + 1 ? 'border-blue-600 bg-blue-50' : 'border-slate-200'}`}>
-            {idx + 1}
+    <div className="mb-8 flex items-center justify-between border-b border-gray-100 pb-6">
+      {['Method', 'Upload', 'Review', 'Done'].map((step, idx) => {
+        const isCompleted = activeStep > idx + 1;
+        const isActive = activeStep === idx + 1;
+        return (
+          <div key={step} className="flex items-center">
+            <div className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-full border text-sm font-medium transition-colors",
+              isActive ? "border-[#FF5A1F] bg-orange-50 text-[#FF5A1F]" : 
+              isCompleted ? "border-green-600 bg-green-50 text-green-600" : "border-gray-200 text-gray-400"
+            )}>
+              {isCompleted ? <CheckCircle2 className="w-4 h-4" /> : idx + 1}
+            </div>
+            <span className={cn("ml-3 text-sm font-medium", isActive ? "text-gray-900" : "text-gray-500")}>
+              {step}
+            </span>
+            {idx < 3 && <div className="mx-4 md:mx-8 h-px w-8 md:w-16 bg-gray-200" />}
           </div>
-          <span className="ml-2 text-sm">{step}</span>
-          {idx < 3 && <div className="mx-4 h-px w-10 bg-slate-200" />}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 
   return (
     <section className="mx-auto max-w-4xl space-y-6 py-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Add Candidate</h1>
-        <Link href="/candidates" className="text-sm text-slate-500 hover:text-slate-700">
-          ← Back to List
+        <h1 className="text-2xl font-semibold text-gray-900">Add Candidate</h1>
+        <Link href="/candidates" className="text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors flex items-center gap-2">
+          <ArrowLeft className="w-4 h-4" /> Back to List
         </Link>
       </div>
 
-      {renderStepper()}
+      <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-200">
+        {renderStepper()}
 
-      {error && <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+        {error && (
+          <div className="mb-6 rounded-lg bg-red-50 p-4 text-sm text-red-700 flex items-center gap-2 border border-red-100">
+            <AlertCircle className="w-4 h-4" />
+            {error}
+          </div>
+        )}
 
-      {activeStep === 1 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Select Method</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-4">
-              <Button variant={addMode === "manual" ? "default" : "outline"} onClick={() => setAddMode("manual")} className="flex-1 min-w-[140px]">
-                Add Manually
-              </Button>
-              <Button variant={addMode === "resume" ? "default" : "outline"} onClick={() => setAddMode("resume")} className="flex-1 min-w-[140px]">
-                Upload Resume
-              </Button>
-              <Button variant={addMode === "csv" ? "default" : "outline"} onClick={() => setAddMode("csv")} className="flex-1 min-w-[140px]">
-                Bulk AI Parse
-              </Button>
-            </div>
-            <div className="flex justify-between pt-4">
-              <Button variant="outline" onClick={handleBack}>Back</Button>
-              <Button onClick={handleNext}>Next</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {activeStep === 2 && addMode === "manual" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Manual Entry</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <Input placeholder="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-              <Input placeholder="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
-              <Input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-              <Input placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-              <Input placeholder="Location" value={location} onChange={(e) => setLocation(e.target.value)} />
-              <Input placeholder="Role / Title" value={candidateRole} onChange={(e) => setCandidateRole(e.target.value)} />
-              <Input placeholder="Years of experience" type="number" min={0} value={yearsExperience} onChange={(e) => setYearsExperience(e.target.value)} />
-              <Input placeholder="Summary" value={summary} onChange={(e) => setSummary(e.target.value)} />
+        {activeStep === 1 && (
+          <div className="animate-in fade-in duration-300">
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">Select Method</h2>
+              <p className="text-sm text-gray-500 mt-1">Choose how you want to add the candidate.</p>
             </div>
             
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                { id: "manual", title: "Add Manually", desc: "Type details yourself", icon: Edit3 },
+                { id: "resume", title: "Upload Resume", desc: "AI extracts details", icon: FileText },
+                { id: "csv", title: "Bulk AI Parse", desc: "Upload multiple files", icon: Layers }
+              ].map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => setAddMode(m.id as AddMode)}
+                  className={cn(
+                    "flex flex-col p-5 rounded-xl border transition-all text-left group",
+                    addMode === m.id 
+                      ? "border-[#FF5A1F] bg-orange-50/30 ring-1 ring-[#FF5A1F]" 
+                      : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                  )}
+                >
+                  <m.icon className={cn("w-6 h-6 mb-3", addMode === m.id ? "text-[#FF5A1F]" : "text-gray-400 group-hover:text-gray-600")} />
+                  <p className={cn("text-sm font-semibold", addMode === m.id ? "text-gray-900" : "text-gray-700")}>{m.title}</p>
+                  <p className="text-xs text-gray-500 mt-1">{m.desc}</p>
+                </button>
+              ))}
+            </div>
 
-            <div className="flex justify-between pt-4">
-              <Button variant="outline" onClick={handleBack}>Back</Button>
-              <Button onClick={async () => {
-                const success = await handleCreateCandidate();
-                if (success) setActiveStep(4);
-              }} disabled={creating}>
+            <div className="flex justify-end pt-8 mt-4">
+              <Button onClick={handleNext} className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white">
+                Next <ArrowRight className="ml-2 w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {activeStep === 2 && addMode === "manual" && (
+          <div className="animate-in fade-in duration-300">
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">Manual Entry</h2>
+              <p className="text-sm text-gray-500 mt-1">Provide the essential candidate details.</p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              {[
+                { label: "First Name", value: firstName, setter: setFirstName, placeholder: "John" },
+                { label: "Last Name", value: lastName, setter: setLastName, placeholder: "Doe" },
+                { label: "Email Address", value: email, setter: setEmail, placeholder: "john@example.com" },
+                { label: "Phone Number", value: phone, setter: setPhone, placeholder: "(555) 000-0000" },
+                { label: "Location", value: location, setter: setLocation, placeholder: "New York, NY" },
+                { label: "Role / Title", value: candidateRole, setter: setCandidateRole, placeholder: "Frontend Engineer" },
+                { label: "Years Experience", value: yearsExperience, setter: setYearsExperience, placeholder: "5", type: "number" },
+                { label: "Summary", value: summary, setter: setSummary, placeholder: "Brief summary..." },
+              ].map((f) => (
+                <div key={f.label} className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">{f.label}</label>
+                  <Input 
+                    placeholder={f.placeholder} 
+                    value={f.value} 
+                    onChange={(e) => f.setter(e.target.value)} 
+                    type={f.type || "text"}
+                    className="h-10 border-gray-200 focus:border-[#FF5A1F] focus:ring-[#FF5A1F]/20"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between pt-8 mt-8 border-t border-gray-100">
+              <Button variant="outline" onClick={handleBack} className="border-gray-200 text-gray-600 hover:bg-gray-50">Back</Button>
+              <Button 
+                onClick={async () => {
+                  const success = await handleCreateCandidate();
+                  if (success) setActiveStep(4);
+                }} 
+                disabled={creating}
+                className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white min-w-[120px]"
+              >
                 {creating ? "Saving..." : "Submit Candidate"}
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
 
+<<<<<<< HEAD
+        {activeStep === 2 && addMode === "resume" && (
+          <div className="animate-in fade-in duration-300">
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">Upload Resume</h2>
+              <p className="text-sm text-gray-500 mt-1">We'll automatically extract the details for you to review.</p>
+            </div>
+
+            <div className="max-w-xl">
+              <label
+                htmlFor="resume-file-input"
+                className={cn(
+                  "flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-10 transition-colors cursor-pointer",
+                  resumeFile ? "border-[#FF5A1F]/30 bg-orange-50/20" : "border-gray-200 hover:border-[#FF5A1F]/40 hover:bg-gray-50/50"
+                )}
+              >
+                {resumeFile ? (
+                  <div className="flex flex-col items-center gap-3">
+                    <FileText className="w-8 h-8 text-[#FF5A1F]" />
+                    <div className="text-center">
+                      <p className="text-sm font-medium text-gray-900">{resumeFile.name}</p>
+                      <p className="text-xs text-gray-500 mt-1">{(resumeFile.size / 1024).toFixed(0)} KB</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => { 
+                        e.preventDefault(); 
+                        setResumeFile(null); 
+                        setDraftCandidate(null); 
+                      }}
+                      className="text-xs font-medium text-red-600 hover:text-red-700 mt-2 bg-red-50 px-3 py-1 rounded-md transition-colors"
+                    >
+                      Remove File
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    <Upload className="w-8 h-8 text-gray-400 mx-auto mb-4" />
+                    <p className="text-sm font-medium text-gray-700">Drag & Drop or <span className="text-[#FF5A1F]">Browse</span></p>
+                    <p className="text-xs text-gray-500 mt-2">Accepted formats: PDF, DOCX (Max 10MB)</p>
+                  </div>
+                )}
+              </label>
+              <input
+                id="resume-file-input"
+                type="file"
+                accept=".pdf,.docx"
+                className="hidden"
+                onChange={(e) => {
+                  setResumeFile(e.target.files?.[0] ?? null);
+                  setDraftCandidate(null);
+                }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-8 mt-8 border-t border-gray-100">
+              <Button variant="outline" onClick={handleBack} className="border-gray-200 text-gray-600 hover:bg-gray-50">Back</Button>
+              <Button 
+                onClick={async () => {
+                  if (draftCandidate) {
+                    setActiveStep(3);
+                  } else {
+                    const success = await handleUploadResume();
+                    if (success) setActiveStep(3);
+                  }
+                }} 
+                disabled={uploading || !resumeFile}
+                className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white min-w-[120px]"
+              >
+                {uploading ? "Parsing..." : draftCandidate ? "Review Parsed Data" : "Upload & Parse"}
+=======
       {activeStep === 2 && addMode === "resume" && (
         <Card>
           <CardHeader>
@@ -627,81 +745,108 @@ export default function CandidatesPage() {
                  if (success) setActiveStep(3);
               }} disabled={uploading || !resumeFile}>
                 {uploading ? "Parsing..." : "Upload & Parse"}
+>>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
 
-      {activeStep === 2 && addMode === "csv" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Bulk Upload</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-4">
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">Select Resume Files (PDF/DOCX)</label>
-                <Input 
-                  type="file" 
-                  multiple 
-                  accept=".pdf,.docx" 
-                  onChange={(e) => {
-                    if (e.target.files) {
-                      setBulkFiles(Array.from(e.target.files));
-                    }
-                  }} 
-                />
-              </div>
+        {activeStep === 2 && addMode === "csv" && (
+          <div className="animate-in fade-in duration-300">
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">Bulk AI Parse</h2>
+              <p className="text-sm text-gray-500 mt-1">Upload multiple resumes to process them as a batch.</p>
+            </div>
+
+            <div className="space-y-6 max-w-2xl">
+              <label
+                htmlFor="bulk-file-input"
+                className="flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl p-8 transition-colors cursor-pointer hover:border-[#FF5A1F]/40 hover:bg-gray-50/50"
+              >
+                <Layers className="w-8 h-8 text-gray-400 mb-3" />
+                <p className="text-sm font-medium text-gray-700">Select Multiple Resumes</p>
+                <p className="text-xs text-gray-500 mt-1">PDF or DOCX files</p>
+              </label>
+              <input 
+                id="bulk-file-input"
+                type="file" 
+                multiple 
+                accept=".pdf,.docx" 
+                onChange={(e) => {
+                  if (e.target.files) {
+                    setBulkFiles(Array.from(e.target.files));
+                  }
+                }} 
+                className="hidden"
+              />
 
               {bulkStatus.length > 0 && (
-                <div className="mt-4 space-y-2 max-h-60 overflow-y-auto rounded-md border p-3 bg-slate-50">
-                  {bulkStatus.map((item, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-xs">
-                      <span className="truncate max-w-[200px] font-medium">{item.name}</span>
-                      <div className="flex items-center gap-2">
-                        {item.status === "parsing" && <span className="text-blue-600 animate-pulse">Parsing...</span>}
-                        {item.status === "success" && <span className="text-green-600">✓ Success</span>}
-                        {item.status === "duplicate" && <span className="text-amber-600">↺ Already exists</span>}
-                        {item.status === "error" && <span className="text-red-600" title={item.error}>✕ Failed</span>}
-                        {item.status === "pending" && <span className="text-slate-400">Pending</span>}
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                    <h3 className="text-xs font-semibold text-gray-600 uppercase">Queue ({bulkFiles.length})</h3>
+                    <button onClick={() => { setBulkFiles([]); setBulkStatus([]); }} className="text-xs text-gray-500 hover:text-red-600">Clear</button>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto p-2">
+                    {bulkStatus.map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50">
+                        <span className="truncate text-sm text-gray-700 max-w-[250px]">{item.name}</span>
+                        <div className="flex items-center gap-2 ml-4">
+                          {item.status === "parsing" && <span className="text-xs text-blue-600">Parsing...</span>}
+                          {item.status === "success" && <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Done</span>}
+                          {item.status === "duplicate" && <span className="text-xs text-amber-600">Duplicate</span>}
+                          {item.status === "error" && <span className="text-xs text-red-600">Failed</span>}
+                          {item.status === "pending" && <span className="text-xs text-gray-400">Waiting</span>}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
 
+              {bulkJob && (
+                <div className="rounded-xl bg-orange-50 p-4 border border-[#FF5A1F]/20">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium text-gray-900">Job Status: {bulkStateLabel} ({bulkJob.processed_items}/{bulkJob.total_items})</p>
+                    <span className="text-sm text-[#FF5A1F] font-medium">{bulkProgress}%</span>
+                  </div>
+                  <div className="h-2 w-full bg-orange-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-[#FF5A1F] transition-all duration-300" style={{width: `${bulkProgress}%`}} />
+                  </div>
+                </div>
+              )}
             </div>
 
-            {bulkJob && (
-              <div className="mt-4 rounded bg-blue-50 p-4 text-sm border border-blue-100">
-                <p className="font-medium text-blue-800">Job Status: {bulkStateLabel} ({bulkJob.processed_items}/{bulkJob.total_items})</p>
-                <div className="mt-2 h-2 w-full bg-blue-200 rounded overflow-hidden">
-                  <div className="h-2 bg-blue-600 transition-all duration-500" style={{width: `${bulkProgress}%`}} />
-                </div>
-              </div>
-            )}
-            <div className="flex justify-between pt-4">
-              <Button variant="outline" onClick={handleBack}>Back</Button>
-              <div className="space-x-2">
-                {bulkFiles.length > 0 && (
+            <div className="flex items-center justify-between pt-8 mt-8 border-t border-gray-100">
+              <Button variant="outline" onClick={handleBack} className="border-gray-200 text-gray-600 hover:bg-gray-50">Back</Button>
+              <div className="flex items-center gap-3">
+                {bulkFiles.length > 0 && !bulkCreating && bulkStatus.filter(s => s.status === 'success').length === 0 && (
                   <Button 
                     onClick={handleBulkResumeUpload} 
-                    disabled={bulkCreating}
-                    className="bg-indigo-600 hover:bg-indigo-700"
+                    className="bg-slate-900 hover:bg-slate-800 text-white"
                   >
-                    {bulkCreating ? "Processing Batch..." : `Parse ${bulkFiles.length} Resumes`}
+                    Start AI Parsing
                   </Button>
                 )}
-                {((bulkJob && bulkJob.status === 'completed') || (bulkStatus.length > 0 && !bulkCreating)) && (
-                  <Button onClick={() => setActiveStep(4)}>Finish</Button>
+                {((bulkJob && bulkJob.status === 'completed') || (bulkStatus.length > 0 && !bulkCreating && bulkStatus.some(s => s.status === 'success'))) && (
+                  <Button 
+                    onClick={() => setActiveStep(4)}
+                    className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white"
+                  >
+                    Finish Batch
+                  </Button>
                 )}
               </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
 
+<<<<<<< HEAD
+        {activeStep === 3 && draftCandidate && (
+          <div className="animate-in fade-in duration-300">
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">Review Parsed Data</h2>
+              <p className="text-sm text-gray-500 mt-1">Verify the extracted details below.</p>
+=======
       {activeStep === 3 && draftCandidate && (
         <Card>
           <CardHeader>
@@ -744,50 +889,78 @@ export default function CandidatesPage() {
                   </div>
                 </div>
               </div>
+>>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
             </div>
-            
 
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              {[
+                { label: "First Name", value: draftCandidate.first_name, key: 'first_name' },
+                { label: "Last Name", value: draftCandidate.last_name, key: 'last_name' },
+                { label: "Email Address", value: draftCandidate.email, key: 'email' },
+                { label: "Phone Number", value: draftCandidate.phone, key: 'phone' },
+                { label: "Location", value: draftCandidate.location, key: 'location' },
+                { label: "Role / Title", value: draftCandidate.headline, key: 'headline' },
+              ].map((f) => (
+                <div key={f.label} className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">{f.label}</label>
+                  <Input 
+                    value={f.value} 
+                    onChange={(e) => setDraftCandidate(p => p ? {...p, [f.key]: e.target.value} : p)}
+                    className="h-10 border-gray-200 focus:border-[#FF5A1F] focus:ring-[#FF5A1F]/20"
+                  />
+                </div>
+              ))}
+            </div>
 
-            <div className="flex justify-between pt-4">
-              <Button variant="outline" onClick={handleBack}>Back</Button>
-              <Button onClick={async () => {
-                const success = await handleSaveReviewedCandidate();
-                if (success) setActiveStep(4);
-              }} disabled={savingReview}>
+            <div className="flex items-center justify-between pt-8 mt-8 border-t border-gray-100">
+              <Button variant="outline" onClick={handleBack} className="border-gray-200 text-gray-600 hover:bg-gray-50">Back</Button>
+              <Button 
+                onClick={async () => {
+                  const success = await handleSaveReviewedCandidate();
+                  if (success) setActiveStep(4);
+                }} 
+                disabled={savingReview}
+                className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white min-w-[120px]"
+              >
                 {savingReview ? "Saving..." : "Confirm & Save"}
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
 
-      {activeStep === 4 && (
-        <Card className="text-center py-12">
-          <CardContent className="space-y-4">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-green-600 text-3xl">
-              ✓
+        {activeStep === 4 && (
+          <div className="animate-in fade-in duration-300 py-10 text-center">
+            <div className="mx-auto h-16 w-16 rounded-full bg-green-100 flex items-center justify-center text-green-600 mb-5">
+              <CheckCircle2 className="w-8 h-8" />
             </div>
-            <h2 className="text-2xl font-semibold">Candidate Added!</h2>
-            <p className="text-slate-500">The candidate has been successfully added to the job.</p>
-            <div className="flex justify-center gap-4 pt-6">
-              <Button variant="outline" onClick={() => {
-                setActiveStep(1);
-                setDraftCandidate(null);
-                setFirstName("");
-                setLastName("");
-                setResumeFile(null);
-                setCsvFile(null);
-                setBulkJob(null);
-              }}>
+            <h2 className="text-2xl font-semibold text-gray-900">Candidate Added!</h2>
+            <p className="text-gray-500 mt-2 max-w-sm mx-auto">The candidate profile has been successfully created.</p>
+            
+            <div className="flex justify-center gap-4 pt-8">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setActiveStep(1);
+                  setDraftCandidate(null);
+                  setFirstName("");
+                  setLastName("");
+                  setResumeFile(null);
+                  setCsvFile(null);
+                  setBulkJob(null);
+                  setBulkFiles([]);
+                  setBulkStatus([]);
+                }}
+                className="border-gray-200 text-gray-700 hover:bg-gray-50"
+              >
                 Add Another
               </Button>
               <Link href="/candidates">
-                <Button>Go to Candidate List</Button>
+                <Button className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white">Go to Candidate List</Button>
               </Link>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

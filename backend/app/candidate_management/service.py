@@ -515,6 +515,36 @@ class CandidateManagementService:
         workspace_id: UUID,
         candidate_id: UUID,
     ) -> None:
+        import sqlalchemy as sa
+        from app.models.job_submission import JobSubmission
+        
+        def _safe_delete(model):
+            try:
+                with self.db.begin_nested():
+                    self.db.execute(sa.delete(model).where(model.candidate_id == candidate_id))
+            except sa.exc.ProgrammingError as e:
+                logger.warning(f"Table for {model.__name__} might be missing, ignoring: {e}")
+            except Exception as e:
+                logger.warning(f"Error deleting from {model.__name__}: {e}")
+
+        # Delete dependent records safely
+        _safe_delete(Pipeline)
+        _safe_delete(Application)
+        _safe_delete(JobSubmission)
+
+        # Nullify candidate_id in BulkUploadItem
+        try:
+            with self.db.begin_nested():
+                self.db.execute(
+                    sa.update(BulkUploadItem)
+                    .where(BulkUploadItem.candidate_id == candidate_id)
+                    .values(candidate_id=None)
+                )
+        except sa.exc.ProgrammingError as e:
+            logger.warning(f"Table for BulkUploadItem might be missing, ignoring: {e}")
+        except Exception as e:
+            logger.warning(f"Error updating BulkUploadItem: {e}")
+
         deleted_count = self.repository.hard_delete_candidate(
             org_id=org_id,
             workspace_id=workspace_id,
@@ -651,8 +681,40 @@ class CandidateManagementService:
         actor_role: str | None,
         payload: CandidateBulkDeleteRequest,
     ) -> int:
+        import sqlalchemy as sa
+        from app.models.job_submission import JobSubmission
+        
+        candidate_ids = payload.candidate_ids
+        if not candidate_ids:
+            return 0
+
+        def _safe_delete_bulk(model):
+            try:
+                with self.db.begin_nested():
+                    self.db.execute(sa.delete(model).where(model.candidate_id.in_(candidate_ids)))
+            except sa.exc.ProgrammingError as e:
+                logger.warning(f"Table for {model.__name__} might be missing, ignoring: {e}")
+            except Exception as e:
+                logger.warning(f"Error deleting from {model.__name__}: {e}")
+
+        _safe_delete_bulk(Pipeline)
+        _safe_delete_bulk(Application)
+        _safe_delete_bulk(JobSubmission)
+
+        try:
+            with self.db.begin_nested():
+                self.db.execute(
+                    sa.update(BulkUploadItem)
+                    .where(BulkUploadItem.candidate_id.in_(candidate_ids))
+                    .values(candidate_id=None)
+                )
+        except sa.exc.ProgrammingError as e:
+            logger.warning(f"Table for BulkUploadItem might be missing, ignoring: {e}")
+        except Exception as e:
+            logger.warning(f"Error updating BulkUploadItem: {e}")
+
         deleted_count = 0
-        for candidate_id in payload.candidate_ids:
+        for candidate_id in candidate_ids:
             count = self.repository.hard_delete_candidate(
                 org_id=org_id,
                 workspace_id=workspace_id,

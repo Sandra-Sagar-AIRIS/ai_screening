@@ -816,87 +816,73 @@ export default function CandidatesPage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="shadow-sm border-slate-200">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-indigo-50 rounded-xl text-indigo-500">
-              <Users className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-500">Total Candidates</p>
-              <h3 className="text-xl font-bold text-slate-900">{candidates.length}</h3>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm border-slate-200">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-emerald-50 rounded-xl text-emerald-500">
-              <UserPlus className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-500">New Applicants</p>
-              <h3 className="text-xl font-bold text-slate-900">{pipelines.filter((item) => item.stage === "applied").length}</h3>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm border-slate-200">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-blue-50 rounded-xl text-blue-500">
-              <Search className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-500">In Screening</p>
-              <h3 className="text-xl font-bold text-slate-900">{pipelines.filter((item) => item.stage === "screening").length}</h3>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm border-slate-200">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-orange-50 rounded-xl text-orange-500">
-              <Calendar className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-500">Interview Stage</p>
-              <h3 className="text-xl font-bold text-slate-900">{pipelines.filter((item) => item.stage === "interview").length}</h3>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">Total Candidates</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{candidates.length}</p>
+          </div>
+        </div>
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">New Applicants</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{pipelines.filter((item) => item.stage === "applied").length}</p>
+          </div>
+        </div>
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">In Screening</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{pipelines.filter((item) => item.stage === "screening").length}</p>
+          </div>
+        </div>
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">Interview Stage</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{pipelines.filter((item) => item.stage === "interview").length}</p>
+          </div>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader className="pb-0 pt-6">
-          <CardTitle className="text-xl">Candidate List</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4 pb-4 border-b">
-            <div className="flex flex-1 items-center gap-2 w-full">
-              <div className="relative flex-1">
-                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-                <Input
-                  className="pl-9"
-                  placeholder="Search by name, email, location, role..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-              <Button 
-                variant="outline" 
-                className={`gap-2 ${showFilters ? 'bg-slate-100 border-slate-300' : ''}`}
-                onClick={() => setShowFilters(!showFilters)}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 8.293A1 1 0 013 7.586V4z" />
-                </svg>
-                Filters
-              </Button>
+      <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white overflow-hidden border border-slate-100/50 mt-6">
+        <div className="p-6 pb-4 flex flex-col md:flex-row items-center justify-between gap-4 border-b border-slate-100/80">
+          <div className="flex flex-1 items-center gap-4 w-full">
+            <div className="relative flex-1 max-w-[500px] group">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#FF5A1F] transition-colors" />
+              <input
+                className="w-full h-11 pl-11 pr-4 text-[14px] font-medium bg-white border border-slate-200/80 rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.02)] focus:outline-none focus:ring-2 focus:ring-[#FF5A1F]/15 focus:border-[#FF5A1F]/30 transition-all duration-200 placeholder:text-slate-400 text-slate-800"
+                placeholder="Search candidates, location, role..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void handleSearchApply()}
+              />
             </div>
-            {canCreate && (
-              <Link href="/candidates/create">
-                <Button className="bg-indigo-600 hover:bg-indigo-700">+ Add Candidate</Button>
-              </Link>
-            )}
+            <button 
+              className={`flex items-center gap-2 px-4 h-11 rounded-2xl border transition-all text-[13px] font-semibold ${showFilters ? 'bg-slate-50 border-slate-300 text-slate-900 shadow-inner' : 'bg-white border-slate-200/80 text-slate-600 hover:text-slate-900 hover:bg-slate-50 shadow-[0_2px_8px_rgba(0,0,0,0.02)]'}`}
+              onClick={() => setShowFilters(!showFilters)}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 8.293A1 1 0 013 7.586V4z" />
+              </svg>
+              Filters
+            </button>
           </div>
+          {canCreate && (
+            <Link href="/candidates/create">
+              <button className="flex items-center gap-2 px-5 h-11 bg-[#FF5A1F] hover:bg-[#e04814] text-white rounded-2xl text-[13px] font-bold transition-colors shadow-sm">
+                + Add Candidate
+              </button>
+            </Link>
+          )}
+        </div>
+
+        <div className="p-0">
 
           {showFilters && (
             <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 animate-in slide-in-from-top-2 duration-200">
@@ -1018,7 +1004,7 @@ export default function CandidatesPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-slate-500 bg-slate-50/50 text-[10px] uppercase tracking-wider">
+                <tr className="border-b border-slate-100/80 bg-slate-50/50 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   <th className="px-3 py-2.5 font-bold">
                     <input
                       type="checkbox"
@@ -1048,7 +1034,7 @@ export default function CandidatesPage() {
                   </tr>
                 ) : (
                   sortedCandidates.map((candidate) => (
-                  <tr key={candidate.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors text-xs">
+                  <tr key={candidate.id} className="border-b border-slate-100/60 hover:bg-slate-50/80 transition-colors text-xs group cursor-pointer">
                     <td className="px-3 py-3">
                       <input
                         type="checkbox"
@@ -1066,7 +1052,7 @@ export default function CandidatesPage() {
                           {candidate.first_name.charAt(0)}{candidate.last_name.charAt(0)}
                         </div>
                         <div className="min-w-0">
-                          <p className="font-medium text-slate-900 truncate max-w-[140px]">{candidate.first_name} {candidate.last_name}</p>
+                          <p className="font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors truncate max-w-[140px]">{candidate.first_name} {candidate.last_name}</p>
                           <p className="text-[10px] text-slate-500 truncate max-w-[140px]">{candidate.email}</p>
                         </div>
                       </div>
@@ -1166,8 +1152,8 @@ export default function CandidatesPage() {
               </tbody>
             </table>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
       {submitModalCandidateId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl">

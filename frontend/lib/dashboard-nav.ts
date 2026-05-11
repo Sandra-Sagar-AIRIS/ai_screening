@@ -27,7 +27,7 @@ export type SidebarNavItem = {
 };
 
 export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
-  { name: "Dashboard", path: "/" },
+  { name: "Dashboard", path: "/dashboard" },
   {
     name: "Candidates",
     path: "/candidates",
@@ -123,10 +123,10 @@ export function matchesSidebarNavItem(
  * Resolve which nav rule applies to a pathname (longest prefix wins; "/" is exact only).
  */
 export function navAccessRuleForPathname(pathname: string): SidebarNavItem | null {
-  if (pathname === "/") {
-    return SIDEBAR_NAV_ITEMS.find((i) => i.path === "/") ?? null;
+  if (pathname === "/dashboard") {
+    return SIDEBAR_NAV_ITEMS.find((i) => i.path === "/dashboard") ?? null;
   }
-  const candidates = SIDEBAR_NAV_ITEMS.filter((i) => i.path !== "/").sort((a, b) => b.path.length - a.path.length);
+  const candidates = SIDEBAR_NAV_ITEMS.filter((i) => i.path !== "/dashboard").sort((a, b) => b.path.length - a.path.length);
   return (
     candidates.find((item) => pathname === item.path || pathname.startsWith(`${item.path}/`)) ?? null
   );
