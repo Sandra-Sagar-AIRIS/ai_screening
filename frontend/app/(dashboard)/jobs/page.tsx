@@ -197,12 +197,8 @@ function JDInputModal({
             className="flex h-40 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-400 hover:border-[#FF5A1F]/50 hover:bg-orange-50/30 hover:text-[#FF5A1F] transition-colors"
           >
             <span className="text-3xl">📂</span>
-<<<<<<< HEAD
-            <p className="mt-2 text-sm">{file ? file.name : "Select JD"}</p>
-=======
             <p className="mt-2 text-sm">{file ? file.name : "Click to select a JD file"}</p>
             <p className="text-xs mt-1">Accepted: .pdf, .doc, .docx</p>
->>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
             <input
               ref={fileRef}
               type="file"
@@ -454,21 +450,12 @@ export default function JobsPage() {
   const [parsedResult, setParsedResult] = useState<JobParseResult | null>(null);
 
   async function refreshJobs() {
-<<<<<<< HEAD
-    setIsRefreshing(true);
-    try {
-      const data = await getJobs(50, 0);
-      setJobs(data);
-    } finally {
-      setIsRefreshing(false);
-=======
     try {
       const data = await getJobs(50, 0);
       setJobs(data);
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load jobs.");
->>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
     }
   }
 
@@ -587,25 +574,6 @@ export default function JobsPage() {
           </div>
         </div>
 
-<<<<<<< HEAD
-        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">On Hold</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{jobs.filter(j => j.status === "on_hold").length}</p>
-          </div>
-        </div>
-
-        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">Closed</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{jobs.filter(j => j.status === "cancelled" || j.status === "filled" || j.status === "closed").length}</p>
-          </div>
-        </div>
-=======
         <Card className="cursor-pointer border-slate-200 shadow-sm transition-shadow hover:shadow-md">
           <CardContent className="p-4 flex items-center gap-4">
             <div className="p-3 bg-blue-50 rounded-xl text-blue-500">
@@ -635,7 +603,6 @@ export default function JobsPage() {
             </div>
           </CardContent>
         </Card>
->>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
       </div>
 
       {/* ── Job list ─────────────────────────────────────────────────── */}

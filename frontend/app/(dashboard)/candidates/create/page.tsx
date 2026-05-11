@@ -659,12 +659,11 @@ export default function CandidatesPage() {
           </div>
         )}
 
-<<<<<<< HEAD
         {activeStep === 2 && addMode === "resume" && (
           <div className="animate-in fade-in duration-300">
             <div className="mb-6">
               <h2 className="text-lg font-semibold text-gray-900">Upload Resume</h2>
-              <p className="text-sm text-gray-500 mt-1">We'll automatically extract the details for you to review.</p>
+              <p className="text-sm text-gray-500 mt-1">We&apos;ll automatically extract the details for you to review.</p>
             </div>
 
             <div className="max-w-xl">
@@ -714,7 +713,7 @@ export default function CandidatesPage() {
               />
             </div>
 
-            <div className="flex items-center justify-between pt-8 mt-8 border-t border-gray-100">
+            <div className="mt-8 flex items-center justify-between border-t border-gray-100 pt-8">
               <Button variant="outline" onClick={handleBack} className="border-gray-200 text-gray-600 hover:bg-gray-50">Back</Button>
               <Button 
                 onClick={async () => {
@@ -726,26 +725,9 @@ export default function CandidatesPage() {
                   }
                 }} 
                 disabled={uploading || !resumeFile}
-                className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white min-w-[120px]"
+                className="min-w-[120px] bg-[#FF5A1F] text-white hover:bg-[#E54E1A]"
               >
                 {uploading ? "Parsing..." : draftCandidate ? "Review Parsed Data" : "Upload & Parse"}
-=======
-      {activeStep === 2 && addMode === "resume" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Upload Resume</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Input type="file" accept=".pdf,.docx" onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)} />
-            <p className="text-xs text-slate-500">Accepted formats: PDF, DOCX. Max: 10MB.</p>
-            <div className="flex justify-between pt-4">
-              <Button variant="outline" onClick={handleBack}>Back</Button>
-              <Button onClick={async () => {
-                 const success = await handleUploadResume();
-                 if (success) setActiveStep(3);
-              }} disabled={uploading || !resumeFile}>
-                {uploading ? "Parsing..." : "Upload & Parse"}
->>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
               </Button>
             </div>
           </div>
@@ -840,56 +822,11 @@ export default function CandidatesPage() {
           </div>
         )}
 
-<<<<<<< HEAD
         {activeStep === 3 && draftCandidate && (
           <div className="animate-in fade-in duration-300">
             <div className="mb-6">
               <h2 className="text-lg font-semibold text-gray-900">Review Parsed Data</h2>
               <p className="text-sm text-gray-500 mt-1">Verify the extracted details below.</p>
-=======
-      {activeStep === 3 && draftCandidate && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Review Parsed Data</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-4">
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Basic Information</p>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600">First Name</label>
-                    <Input value={draftCandidate.first_name} onChange={(e) => setDraftCandidate(p => p ? {...p, first_name: e.target.value} : p)} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600">Last Name</label>
-                    <Input value={draftCandidate.last_name} onChange={(e) => setDraftCandidate(p => p ? {...p, last_name: e.target.value} : p)} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600">Email</label>
-                    <Input value={draftCandidate.email} onChange={(e) => setDraftCandidate(p => p ? {...p, email: e.target.value} : p)} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600">Phone</label>
-                    <Input value={draftCandidate.phone} onChange={(e) => setDraftCandidate(p => p ? {...p, phone: e.target.value} : p)} />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Professional Information</p>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600">Location</label>
-                    <Input value={draftCandidate.location} onChange={(e) => setDraftCandidate(p => p ? {...p, location: e.target.value} : p)} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600">Headline / Current Role</label>
-                    <Input value={draftCandidate.headline} onChange={(e) => setDraftCandidate(p => p ? {...p, headline: e.target.value} : p)} />
-                  </div>
-                </div>
-              </div>
->>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
             </div>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">

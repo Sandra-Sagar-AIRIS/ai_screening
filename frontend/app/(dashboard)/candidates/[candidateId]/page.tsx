@@ -29,19 +29,34 @@ import type { Candidate, CandidateMatchEntry, Job, OrganizationUser, Pipeline } 
 import { getUsers } from "@/lib/api/users";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-<<<<<<< HEAD
-import { Mail, Phone, MapPin, Briefcase, Calendar, FileText, Download, ExternalLink, MessageSquare, Clock, ArrowLeft, Edit3, Save, X, Plus, User, Star } from "lucide-react";
-import { cn } from "@/lib/utils";
-import Link from "next/link";
-=======
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
 import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
 import { ATSMatchBreakdownPanel } from "@/components/ats/ats-match-breakdown-panel";
+import {
+  Mail,
+  Phone,
+  MapPin,
+  Briefcase,
+  Calendar,
+  FileText,
+  Download,
+  ExternalLink,
+  MessageSquare,
+  Clock,
+  ArrowLeft,
+  Edit3,
+  Save,
+  X,
+  Plus,
+  User,
+  Star,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import Link from "next/link";
 
 function snapJobIdsFromMatches(matches: CandidateMatchEntry[]): string[] {
   return matches.map((m) => m.job_id).filter(Boolean);
 }
->>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
 
 export default function CandidateDetailPage() {
   const params = useParams<{ candidateId: string }>();
@@ -674,211 +689,28 @@ export default function CandidateDetailPage() {
                 )}
               </div>
             </div>
-<<<<<<< HEAD
           </div>
-          
-          <div className="flex flex-col gap-3 w-full md:w-[320px] shrink-0">
+
+          <div className="flex w-full shrink-0 flex-col gap-3 md:w-[320px]">
             <div className="flex flex-col space-y-2">
-              <label className="text-xs font-semibold text-gray-500 uppercase">Submit to Job</label>
+              <label className="text-xs font-semibold uppercase text-gray-500">Submit to Job</label>
               <div className="flex items-center gap-2">
                 <select
-                  className="flex-1 w-full min-w-0 truncate rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F] outline-none transition-all bg-white"
+                  className="min-w-0 flex-1 truncate rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none transition-all focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F]"
                   value={submitJobId}
                   onChange={(event) => setSubmitJobId(event.target.value)}
                 >
                   <option value="">Select job...</option>
                   {jobs.map((job) => (
-                    <option key={job.id} value={job.id}>{job.title}</option>
-=======
-          ) : (
-            <p className="text-sm text-slate-500">No resume uploaded for this candidate.</p>
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>ATS Match Breakdown</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <ATSScoreBadge
-                score={atsMatches[0]?.fit_score}
-                isLoading={atsLoading || atsRescoreBusy}
-                scorePending={!atsLoading && !atsRescoreBusy && atsMatches.length === 0 && pipelines.length > 0}
-              />
-              <ATSRecommendationBadge
-                recommendation={atsMatches[0]?.recommendation}
-                isLoading={atsLoading || atsRescoreBusy}
-                awaitingMatch={!atsLoading && !atsRescoreBusy && atsMatches.length === 0 && pipelines.length > 0}
-              />
-            </div>
-            <Button
-              variant="outline"
-              onClick={() => void handleRescoreAts()}
-              disabled={atsRescoreBusy || atsSemanticInFlight}
-            >
-              {atsRescoreBusy ? "Rescoring…" : atsSemanticInFlight ? "AI enrichment…" : "Rescore ATS"}
-            </Button>
-          </div>
-          {atsLoading ? (
-            <div className="space-y-2 text-slate-500">
-              <div className="h-3 w-48 animate-pulse rounded bg-slate-100" />
-              <div className="h-24 animate-pulse rounded-lg border border-slate-100 bg-slate-50/80" />
-            </div>
-          ) : atsRescoreBusy && atsMatches.length === 0 ? (
-            <p className="text-slate-500">Saving baseline scores…</p>
-          ) : atsMatches.length === 0 ? (
-            <div className="space-y-2 text-slate-500">
-              <p>
-                {pipelines.length > 0
-                  ? "No scored rows in candidate_job_matches yet — ATS runs after resume parse and job submit."
-                  : "No job applications yet — submit this candidate to a job to generate ATS scores."}
-              </p>
-              {atsHint === "NO_SCORE_ROWS_YET" && pipelines.length > 0 ? (
-                <p className="text-amber-800">
-                  ATS scores are still missing after waiting. Check backend logs for{" "}
-                  <code className="rounded bg-slate-100 px-1">ats.rescore</code> /{" "}
-                  <code className="rounded bg-slate-100 px-1">ats.task.failed</code>, confirm Celery or the in-process
-                  fallback ran, then use “Rescore ATS” or re-open this page.
-                </p>
-              ) : null}
-            </div>
-          ) : (
-            atsMatches.map((match) => (
-              <ATSMatchBreakdownPanel
-                key={match.job_id}
-                title={jobs.find((job) => job.id === match.job_id)?.title ?? match.job_id}
-                isLoading={false}
-                data={{
-                  fit_score: match.fit_score,
-                  deterministic_match_score: match.deterministic_match_score,
-                  semantic_match_score: match.semantic_match_score,
-                  ai_enrichment_status: match.ai_enrichment_status,
-                  ats_pipeline_status: match.ats_pipeline_status,
-                  enrichment_error: match.enrichment_error,
-                  deterministic_completed_at: match.deterministic_completed_at,
-                  semantic_completed_at: match.semantic_completed_at,
-                  recruiter_summary: match.recruiter_summary,
-                  confidence_reasoning: match.confidence_reasoning,
-                  semantic_skill_matches: match.semantic_skill_matches,
-                  transferable_skills: match.transferable_skills,
-                  inferred_strengths: match.inferred_strengths,
-                  inferred_gaps: match.inferred_gaps,
-                  recommendation: match.recommendation,
-                  category_scores: match.category_scores,
-                  confidence_score: match.confidence_score ?? undefined,
-                  matched_skills: match.matched_skills,
-                  missing_skills: match.missing_skills,
-                  evaluated_at: match.evaluated_at ?? undefined,
-                }}
-              />
-            ))
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>ATS Candidate Insights</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          {candidate.parse_status === "failed" ? (
-            <p className="text-amber-800">
-              Resume parsing failed
-              {candidate.parse_error ? `: ${candidate.parse_error}` : ""}. Re-upload the resume or contact support.
-            </p>
-          ) : candidate.parse_status && candidate.parse_status !== "completed" ? (
-            <p className="text-slate-500">Resume parsing in progress…</p>
-          ) : null}
-          {(() => {
-            const pr = candidate.parsed_resume_data;
-            const skillsLine = pr?.skills?.length ? pr.skills.join(", ") : null;
-            const inferredLine = pr?.inferred_skills?.length ? pr.inferred_skills.join(", ") : null;
-            const ecosystemLine = pr?.ecosystem_tags?.length ? pr.ecosystem_tags.join(", ") : null;
-            return (
-              <>
-                <p>
-                  <span className="font-medium">Extracted Skills:</span>{" "}
-                  {skillsLine ?? "Not extracted from resume yet — re-upload or wait for parse to finish."}
-                </p>
-                {inferredLine ? (
-                  <p>
-                    <span className="font-medium">Inferred skills (AI):</span> {inferredLine}
-                  </p>
-                ) : null}
-                {ecosystemLine ? (
-                  <p>
-                    <span className="font-medium">Ecosystem tags:</span> {ecosystemLine}
-                  </p>
-                ) : null}
-                {pr?.seniority_guess ? (
-                  <p>
-                    <span className="font-medium">Seniority (estimate):</span> {pr.seniority_guess}
-                  </p>
-                ) : null}
-                {(pr?.cloud_platforms?.length ?? 0) > 0 ? (
-                  <p>
-                    <span className="font-medium">Cloud / platforms:</span> {(pr?.cloud_platforms ?? []).join(", ")}
-                  </p>
-                ) : null}
-                {pr?.resume_recruiter_summary ? (
-                  <p className="rounded-md border border-slate-100 bg-slate-50/80 p-2 text-slate-700">
-                    <span className="font-medium">Resume summary:</span> {pr.resume_recruiter_summary}
-                  </p>
-                ) : null}
-              </>
-            );
-          })()}
-          <p><span className="font-medium">Extracted Experience:</span> {candidate.parsed_resume_data?.years_of_experience ?? candidate.years_experience ?? "-"}</p>
-          <p><span className="font-medium">Parsed Titles:</span> {candidate.parsed_resume_data?.previous_titles?.length ? candidate.parsed_resume_data.previous_titles.join(", ") : "-"}</p>
-          <p><span className="font-medium">Parsed Education:</span> {Array.isArray(candidate.parsed_resume_data?.education) ? candidate.parsed_resume_data?.education.join(", ") : (candidate.parsed_resume_data?.education ?? candidate.education ?? "-")}</p>
-          <p><span className="font-medium">Certifications:</span> {candidate.parsed_resume_data?.certifications?.length ? candidate.parsed_resume_data.certifications.join(", ") : "-"}</p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Applied Jobs</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {sortedPipelines.length === 0 ? (
-            <p className="text-sm text-slate-500">No jobs applied yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500">
-                    <th className="px-2 py-2">Job</th>
-                    <th className="px-2 py-2">Stage</th>
-                    <th className="px-2 py-2">Updated</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedPipelines.map((pipeline) => (
-                    <tr key={pipeline.id} className="border-b border-slate-100">
-                      <td className="px-2 py-2">{jobs.find((job) => job.id === pipeline.job_id)?.title ?? pipeline.job_id}</td>
-                      <td className="px-2 py-2">
-                        <select
-                          className="rounded-md border border-slate-200 px-2 py-1 text-xs"
-                          value={pipeline.stage}
-                          onChange={(event) => void handleQuickStageUpdate(pipeline.id, event.target.value as Pipeline["stage"])}
-                          disabled={updatingPipelineId === pipeline.id}
-                        >
-                          <option value="applied">Applied</option>
-                          <option value="screening">Screening</option>
-                          <option value="interview">Interview</option>
-                          <option value="offer">Offered</option>
-                          <option value="placed">Hired</option>
-                        </select>
-                      </td>
-                      <td className="px-2 py-2 text-xs text-slate-500">{new Date(pipeline.updated_at).toLocaleString()}</td>
-                    </tr>
->>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
+                    <option key={job.id} value={job.id}>
+                      {job.title}
+                    </option>
                   ))}
                 </select>
-                <Button 
-                  onClick={handleSubmitToJob} 
+                <Button
+                  onClick={handleSubmitToJob}
                   disabled={!submitJobId || submittingToJob}
-                  className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm shrink-0"
+                  className="shrink-0 bg-slate-900 text-white shadow-sm hover:bg-slate-800"
                 >
                   {submittingToJob ? "..." : "Submit"}
                 </Button>
@@ -899,15 +731,15 @@ export default function CandidateDetailPage() {
               </h2>
               {isEditing ? (
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={handleCancel} disabled={isSaving} className="h-8 text-xs">
+                  <Button variant="outline" onClick={handleCancel} disabled={isSaving} className="h-8 text-xs">
                     <X className="w-3 h-3 mr-1" /> Cancel
                   </Button>
-                  <Button size="sm" onClick={handleSave} disabled={isSaving} className="h-8 text-xs bg-[#FF5A1F] hover:bg-[#E54E1A] text-white">
+                  <Button onClick={handleSave} disabled={isSaving} className="h-8 text-xs bg-[#FF5A1F] hover:bg-[#E54E1A] text-white">
                     <Save className="w-3 h-3 mr-1" /> {isSaving ? "Saving..." : "Save"}
                   </Button>
                 </div>
               ) : (
-                <Button variant="outline" size="sm" onClick={() => setIsEditing(true)} className="h-8 text-xs bg-white border-gray-200 hover:bg-gray-50 text-gray-700">
+                <Button variant="outline" onClick={() => setIsEditing(true)} className="h-8 text-xs bg-white border-gray-200 hover:bg-gray-50 text-gray-700">
                   <Edit3 className="w-3 h-3 mr-1" /> Edit
                 </Button>
               )}
@@ -990,6 +822,168 @@ export default function CandidateDetailPage() {
                   <p className="text-xs text-gray-500 mt-1">This candidate was added manually or the file is missing.</p>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* ATS Match Breakdown */}
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+              <h2 className="text-base font-semibold text-gray-900">ATS Match Breakdown</h2>
+            </div>
+            <div className="space-y-3 p-6 text-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <ATSScoreBadge
+                    score={atsMatches[0]?.fit_score}
+                    isLoading={atsLoading || atsRescoreBusy}
+                    scorePending={!atsLoading && !atsRescoreBusy && atsMatches.length === 0 && pipelines.length > 0}
+                  />
+                  <ATSRecommendationBadge
+                    recommendation={atsMatches[0]?.recommendation}
+                    isLoading={atsLoading || atsRescoreBusy}
+                    awaitingMatch={!atsLoading && !atsRescoreBusy && atsMatches.length === 0 && pipelines.length > 0}
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => void handleRescoreAts()}
+                  disabled={atsRescoreBusy || atsSemanticInFlight}
+                >
+                  {atsRescoreBusy ? "Rescoring…" : atsSemanticInFlight ? "AI enrichment…" : "Rescore ATS"}
+                </Button>
+              </div>
+              {atsLoading ? (
+                <div className="space-y-2 text-slate-500">
+                  <div className="h-3 w-48 animate-pulse rounded bg-slate-100" />
+                  <div className="h-24 animate-pulse rounded-lg border border-slate-100 bg-slate-50/80" />
+                </div>
+              ) : atsRescoreBusy && atsMatches.length === 0 ? (
+                <p className="text-slate-500">Saving baseline scores…</p>
+              ) : atsMatches.length === 0 ? (
+                <div className="space-y-2 text-slate-500">
+                  <p>
+                    {pipelines.length > 0
+                      ? "No scored rows in candidate_job_matches yet — ATS runs after resume parse and job submit."
+                      : "No job applications yet — submit this candidate to a job to generate ATS scores."}
+                  </p>
+                  {atsHint === "NO_SCORE_ROWS_YET" && pipelines.length > 0 ? (
+                    <p className="text-amber-800">
+                      ATS scores are still missing after waiting. Check backend logs for{" "}
+                      <code className="rounded bg-slate-100 px-1">ats.rescore</code> /{" "}
+                      <code className="rounded bg-slate-100 px-1">ats.task.failed</code>, confirm Celery or the in-process
+                      fallback ran, then use “Rescore ATS” or re-open this page.
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                atsMatches.map((match) => (
+                  <ATSMatchBreakdownPanel
+                    key={match.job_id}
+                    title={jobs.find((job) => job.id === match.job_id)?.title ?? match.job_id}
+                    isLoading={false}
+                    data={{
+                      fit_score: match.fit_score,
+                      deterministic_match_score: match.deterministic_match_score,
+                      semantic_match_score: match.semantic_match_score,
+                      ai_enrichment_status: match.ai_enrichment_status,
+                      ats_pipeline_status: match.ats_pipeline_status,
+                      enrichment_error: match.enrichment_error,
+                      deterministic_completed_at: match.deterministic_completed_at,
+                      semantic_completed_at: match.semantic_completed_at,
+                      recruiter_summary: match.recruiter_summary,
+                      confidence_reasoning: match.confidence_reasoning,
+                      semantic_skill_matches: match.semantic_skill_matches,
+                      transferable_skills: match.transferable_skills,
+                      inferred_strengths: match.inferred_strengths,
+                      inferred_gaps: match.inferred_gaps,
+                      recommendation: match.recommendation,
+                      category_scores: match.category_scores,
+                      confidence_score: match.confidence_score ?? undefined,
+                      matched_skills: match.matched_skills,
+                      missing_skills: match.missing_skills,
+                      evaluated_at: match.evaluated_at ?? undefined,
+                    }}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* ATS Candidate Insights */}
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+              <h2 className="text-base font-semibold text-gray-900">ATS Candidate Insights</h2>
+            </div>
+            <div className="space-y-3 p-6 text-sm">
+              {candidate.parse_status === "failed" ? (
+                <p className="text-amber-800">
+                  Resume parsing failed
+                  {candidate.parse_error ? `: ${candidate.parse_error}` : ""}. Re-upload the resume or contact support.
+                </p>
+              ) : candidate.parse_status && candidate.parse_status !== "completed" ? (
+                <p className="text-slate-500">Resume parsing in progress…</p>
+              ) : null}
+              {(() => {
+                const pr = candidate.parsed_resume_data;
+                const skillsLine = pr?.skills?.length ? pr.skills.join(", ") : null;
+                const inferredLine = pr?.inferred_skills?.length ? pr.inferred_skills.join(", ") : null;
+                const ecosystemLine = pr?.ecosystem_tags?.length ? pr.ecosystem_tags.join(", ") : null;
+                return (
+                  <>
+                    <p>
+                      <span className="font-medium">Extracted Skills:</span>{" "}
+                      {skillsLine ?? "Not extracted from resume yet — re-upload or wait for parse to finish."}
+                    </p>
+                    {inferredLine ? (
+                      <p>
+                        <span className="font-medium">Inferred skills (AI):</span> {inferredLine}
+                      </p>
+                    ) : null}
+                    {ecosystemLine ? (
+                      <p>
+                        <span className="font-medium">Ecosystem tags:</span> {ecosystemLine}
+                      </p>
+                    ) : null}
+                    {pr?.seniority_guess ? (
+                      <p>
+                        <span className="font-medium">Seniority (estimate):</span> {pr.seniority_guess}
+                      </p>
+                    ) : null}
+                    {(pr?.cloud_platforms?.length ?? 0) > 0 ? (
+                      <p>
+                        <span className="font-medium">Cloud / platforms:</span> {(pr?.cloud_platforms ?? []).join(", ")}
+                      </p>
+                    ) : null}
+                    {pr?.resume_recruiter_summary ? (
+                      <p className="rounded-md border border-slate-100 bg-slate-50/80 p-2 text-slate-700">
+                        <span className="font-medium">Resume summary:</span> {pr.resume_recruiter_summary}
+                      </p>
+                    ) : null}
+                  </>
+                );
+              })()}
+              <p>
+                <span className="font-medium">Extracted Experience:</span>{" "}
+                {candidate.parsed_resume_data?.years_of_experience ?? candidate.years_experience ?? "-"}
+              </p>
+              <p>
+                <span className="font-medium">Parsed Titles:</span>{" "}
+                {candidate.parsed_resume_data?.previous_titles?.length
+                  ? candidate.parsed_resume_data.previous_titles.join(", ")
+                  : "-"}
+              </p>
+              <p>
+                <span className="font-medium">Parsed Education:</span>{" "}
+                {Array.isArray(candidate.parsed_resume_data?.education)
+                  ? candidate.parsed_resume_data?.education.join(", ")
+                  : (candidate.parsed_resume_data?.education ?? candidate.education ?? "-")}
+              </p>
+              <p>
+                <span className="font-medium">Certifications:</span>{" "}
+                {candidate.parsed_resume_data?.certifications?.length
+                  ? candidate.parsed_resume_data.certifications.join(", ")
+                  : "-"}
+              </p>
             </div>
           </div>
 
@@ -1081,13 +1075,12 @@ export default function CandidateDetailPage() {
                       <option value="HR">HR</option>
                       <option value="TECH">Technical</option>
                     </select>
-                    <Button onClick={handleScheduleInterview} size="sm" className="bg-slate-900 hover:bg-slate-800 text-white">
+                    <Button onClick={handleScheduleInterview} className="h-9 bg-slate-900 px-3 text-sm hover:bg-slate-800 text-white">
                       <Plus className="w-4 h-4 mr-1" /> Add
                     </Button>
                   </div>
                 </div>
               </div>
-<<<<<<< HEAD
 
               {/* List */}
               <div className="space-y-3">
@@ -1125,7 +1118,7 @@ export default function CandidateDetailPage() {
                               onChange={(e) => setRescheduleTimes((prev) => ({ ...prev, [interview.id]: e.target.value }))}
                             />
                             <Button
-                              variant="outline" size="sm" className="h-8 text-xs px-2"
+                              variant="outline" className="h-8 px-2 text-xs"
                               onClick={() => handleReschedule(interview.id)}
                               disabled={interviewUpdatingId === interview.id || !rescheduleTimes[interview.id]}
                             >
@@ -1149,7 +1142,7 @@ export default function CandidateDetailPage() {
                               {[1,2,3,4,5].map(n => <option key={n} value={n}>{n}</option>)}
                             </select>
                             <Button
-                              size="sm" className="h-8 text-xs px-2 bg-green-600 hover:bg-green-700 text-white"
+                              className="h-8 px-2 text-xs bg-green-600 hover:bg-green-700 text-white"
                               onClick={() => handleSaveFeedback(interview.id)}
                               disabled={interviewUpdatingId === interview.id}
                             >
@@ -1157,9 +1150,9 @@ export default function CandidateDetailPage() {
                             </Button>
                           </div>
                           <Button
-                            variant="ghost" size="sm" className="w-full h-8 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                            variant="ghost" className="h-8 w-full text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
                             onClick={() => handleCancelInterview(interview.id)}
-                            disabled={interviewUpdatingId === interview.id || interview.status === "cancelled"}
+                            disabled={interviewUpdatingId === interview.id}
                           >
                             Cancel Interview
                           </Button>
@@ -1168,39 +1161,6 @@ export default function CandidateDetailPage() {
                     </div>
                   ))
                 )}
-=======
-            ))
-          )}
-        </CardContent>
-      </Card>
-      <h2 className="text-lg font-semibold">Timeline</h2>
-      <Card>
-        <CardHeader>
-          <CardTitle>Timeline / Interactions</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <div className="flex gap-2">
-            <Input placeholder="Add note" value={newNote} onChange={(e) => setNewNote(e.target.value)} />
-            <Button variant="outline" onClick={handleAddNote} disabled={addingNote || !newNote.trim()}>
-              {addingNote ? "Adding..." : "Add Note"}
-            </Button>
-          </div>
-          {interactionsLoadFailed ? (
-            <p className="text-amber-700">Unable to load interactions. You can still view the profile and ATS data.</p>
-          ) : orderedTimeline.length === 0 ? (
-            <p className="text-slate-500">No interactions yet.</p>
-          ) : (
-            orderedTimeline.map((item) => (
-              <div key={item.id} className="rounded-md border border-slate-200 p-3">
-                <p className="font-medium">{item.title ?? item.interaction_type}</p>
-                <p className="text-xs text-slate-500">{new Date(item.created_at).toLocaleString()}</p>
-                {item.body ? <p className="mt-1">{item.body}</p> : null}
-                {item.metadata ? (
-                  <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-2 text-xs">
-                    {JSON.stringify(item.metadata, null, 2)}
-                  </pre>
-                ) : null}
->>>>>>> ec57e66426e13a76bd84e9ad6e9491d33ff0dee2
               </div>
             </div>
           </div>
@@ -1215,7 +1175,7 @@ export default function CandidateDetailPage() {
             <div className="p-5">
               <div className="flex gap-2 mb-6 relative">
                 <Input placeholder="Add a note..." className="pr-20" value={newNote} onChange={(e) => setNewNote(e.target.value)} />
-                <Button size="sm" className="absolute right-1 top-1 bottom-1 h-auto bg-[#FF5A1F] hover:bg-[#E54E1A] text-white" onClick={handleAddNote} disabled={addingNote || !newNote.trim()}>
+                <Button className="absolute right-1 top-1 bottom-1 h-auto bg-[#FF5A1F] hover:bg-[#E54E1A] text-white" onClick={handleAddNote} disabled={addingNote || !newNote.trim()}>
                   {addingNote ? "..." : "Post"}
                 </Button>
               </div>
