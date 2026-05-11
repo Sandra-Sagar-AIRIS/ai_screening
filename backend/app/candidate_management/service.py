@@ -913,12 +913,13 @@ class CandidateManagementService:
                 return [], 0
 
             hydrated: list[Candidate] = []
+            include_del = (params.status == CandidateStatus.DELETED.value) if params.status else False
             for candidate_id in ranked_ids:
                 candidate = self.repository.get_candidate_by_id(
                     org_id=org_id,
                     workspace_id=workspace_id,
                     candidate_id=candidate_id,
-                    include_deleted=False,
+                    include_deleted=include_del,
                     with_skills=True,
                 )
                 if candidate is None:
@@ -931,6 +932,10 @@ class CandidateManagementService:
                 location=params.location,
                 min_years_experience=params.min_years_experience,
                 max_years_experience=params.max_years_experience,
+                status=params.status,
+                stage=params.stage,
+                source=params.source,
+                job_id=params.job_id,
             )
             total = len(filtered)
             return filtered[params.offset : params.offset + params.limit], total
@@ -1224,11 +1229,23 @@ class CandidateManagementService:
         location: str | None,
         min_years_experience: int | None,
         max_years_experience: int | None,
+        status: str | None = None,
+        stage: str | None = None,
+        source: str | None = None,
+        job_id: UUID | None = None,
     ) -> list[Candidate]:
         normalized_skills = {value.strip().lower() for value in (skills or []) if value.strip()}
         location_query = location.strip().lower() if location else None
         filtered: list[Candidate] = []
         for candidate in candidates:
+            if status is not None and candidate.status != status:
+                continue
+            if stage is not None and candidate.stage != stage:
+                continue
+            if source is not None and candidate.source != source:
+                continue
+            if job_id is not None and candidate.job_id != job_id:
+                continue
             if normalized_skills:
                 candidate_skills = {skill.normalized_name for skill in candidate.skills}
                 if not normalized_skills.issubset(candidate_skills):

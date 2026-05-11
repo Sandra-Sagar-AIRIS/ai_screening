@@ -653,50 +653,10 @@ export default function JobDetailPage() {
                    </div>
                 </div>
 
-                {/* Job Details Card */}
-                <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                  <h3 className="text-base font-bold text-gray-900 mb-5 flex items-center gap-2">
-                    <Briefcase className="w-5 h-5 text-gray-400" /> Job Details
-                  </h3>
-                  
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-                      <span className="text-sm text-gray-500 flex items-center gap-2"><MapPin className="w-4 h-4" /> Location</span>
-                      <span className="text-sm font-semibold text-gray-900">{job.location || "Not specified"}</span>
-                    </div>
-                    <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-                      <span className="text-sm text-gray-500 flex items-center gap-2"><Briefcase className="w-4 h-4" /> Employment Type</span>
-                      <span className="text-sm font-semibold text-gray-900 capitalize">{job.employment_type?.replace('_', ' ') || "Not specified"}</span>
-                    </div>
-                    <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-                      <span className="text-sm text-gray-500 flex items-center gap-2"><Clock className="w-4 h-4" /> Experience</span>
-                      <span className="text-sm font-semibold text-gray-900">{job.experience_min_years !== null && job.experience_min_years !== undefined ? `${job.experience_min_years} - ${job.experience_max_years || '+'} years` : "Not specified"}</span>
-                    </div>
-                    <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-                      <span className="text-sm text-gray-500">Organization Unit</span>
-                      <span className="text-sm font-semibold text-gray-900 truncate max-w-[120px]">{job.organization_id ? job.organization_id.split("-")[0] : "Not set"}</span>
-                    </div>
-                    <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-                      <span className="text-sm text-gray-500">Client Account</span>
-                      <span className="text-sm font-semibold text-gray-900 truncate max-w-[120px]">
-                        {job.client_id ? job.client_id.split("-")[0] : "Internal"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-                      <span className="text-sm text-gray-500">Created By</span>
-                      <span className="text-sm font-semibold text-gray-900 truncate max-w-[120px]">{job.created_by || "System"}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-500">Created On</span>
-                      <span className="text-sm font-semibold text-gray-900">{formatDate(job.created_at)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+<div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
                   <div className="mb-4 flex items-center justify-between">
                     <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                      <Sparkles className="w-5 h-5 text-indigo-500" /> ATS Matches
+                      <Sparkles className="w-5 h-5 text-[#FF5A1F]" /> ATS Matches
                     </h3>
                     <div className="flex items-center gap-2">
                       <select

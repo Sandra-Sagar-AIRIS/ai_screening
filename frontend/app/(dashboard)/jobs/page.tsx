@@ -450,12 +450,15 @@ export default function JobsPage() {
   const [parsedResult, setParsedResult] = useState<JobParseResult | null>(null);
 
   async function refreshJobs() {
+    setIsRefreshing(true);
     try {
       const data = await getJobs(50, 0);
       setJobs(data);
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load jobs.");
+    } finally {
+      setIsRefreshing(false);
     }
   }
 
@@ -574,35 +577,23 @@ export default function JobsPage() {
           </div>
         </div>
 
-        <Card className="cursor-pointer border-slate-200 shadow-sm transition-shadow hover:shadow-md">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-blue-50 rounded-xl text-blue-500">
-              <Shield className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-500">Paused</p>
-              <h3 className="text-xl font-bold text-slate-900">{jobs.filter(j => j.status === "paused").length}</h3>
-              <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                {jobs.length === 0 ? "0.0" : ((jobs.filter(j => j.status === "paused").length / jobs.length) * 100).toFixed(1)}% of total
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">Paused</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{jobs.filter(j => j.status === "paused").length}</p>
+          </div>
+        </div>
 
-        <Card className="cursor-pointer border-slate-200 shadow-sm transition-shadow hover:shadow-md">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-purple-50 rounded-xl text-purple-500">
-              <CheckCircle2 className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-500">Closed</p>
-              <h3 className="text-xl font-bold text-slate-900">{jobs.filter(j => j.status === "filled" || j.status === "closed").length}</h3>
-              <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                {jobs.length === 0 ? "0.0" : ((jobs.filter(j => j.status === "filled" || j.status === "closed").length / jobs.length) * 100).toFixed(1)}% of total
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 group cursor-default">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">Closed</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{jobs.filter(j => j.status === "cancelled" || j.status === "filled" || j.status === "closed").length}</p>
+          </div>
+        </div>
       </div>
 
       {/* ── Job list ─────────────────────────────────────────────────── */}
@@ -654,7 +645,7 @@ export default function JobsPage() {
                   </div>
                 </div>
 
-                <div className="mb-4 flex items-center gap-4 text-[13px] font-medium text-slate-500">
+                <div className="mb-4 grid grid-cols-2 gap-y-2 gap-x-4 text-[13px] font-medium text-slate-500">
                   <div className="flex items-center gap-1.5">
                     <span className="text-slate-400">📍</span>
                     <span className="truncate max-w-[120px]">{job.location || "TBD"}</span>
@@ -667,6 +658,16 @@ export default function JobsPage() {
                         : "TBD"}
                     </span>
                   </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400">📅</span>
+                    <span>{job.created_at ? new Date(job.created_at).toLocaleDateString() : "Unknown"}</span>
+                  </div>
+                  {job.urgency && job.urgency !== "normal" && (
+                    <div className="flex items-center gap-1.5 text-orange-600">
+                      <span className="text-orange-400">⚡</span>
+                      <span className="capitalize">{job.urgency}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-auto pt-4 border-t border-slate-100/80 flex items-center justify-between text-[13px] font-bold text-slate-400 group-hover:text-[#FF5A1F] transition-colors duration-300">

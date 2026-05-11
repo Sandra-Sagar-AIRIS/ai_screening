@@ -55,6 +55,7 @@ type CandidateManagementCandidate = {
   resume_s3_key: string | null;
   resume_file_name: string | null;
   source: "manual" | "resume_upload" | "bulk_upload" | "referral" | "agency" | "import" | "merge";
+  status: "active" | "archived" | "deleted";
   created_at: string;
   updated_at: string;
   parse_status?: "pending" | "processing" | "completed" | "failed" | null;
@@ -102,6 +103,7 @@ function mapCandidateManagementCandidate(candidate: CandidateManagementCandidate
     resume_s3_key: candidate.resume_s3_key,
     resume_file_name: candidate.resume_file_name,
     source: candidate.source,
+    status: candidate.status,
     years_experience: candidate.years_experience,
     experience_summary: candidate.summary,
     education: educationFromParse,

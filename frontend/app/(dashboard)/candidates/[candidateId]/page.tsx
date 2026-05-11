@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError, API_BASE_URL } from "@/lib/api/client";
 import { getMyPermissions } from "@/lib/api/auth";
 import {
@@ -29,30 +30,13 @@ import type { Candidate, CandidateMatchEntry, Job, OrganizationUser, Pipeline } 
 import { getUsers } from "@/lib/api/users";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Mail, Phone, MapPin, Briefcase, Calendar, FileText, Download, ExternalLink, MessageSquare, Clock, ArrowLeft, Edit3, Save, X, Plus, User, Star, Sparkles, Layers , Activity, Brain} from "lucide-react";
+import { cn } from "@/lib/utils";
+import Link from "next/link";
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
 import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
 import { ATSMatchBreakdownPanel } from "@/components/ats/ats-match-breakdown-panel";
-import {
-  Mail,
-  Phone,
-  MapPin,
-  Briefcase,
-  Calendar,
-  FileText,
-  Download,
-  ExternalLink,
-  MessageSquare,
-  Clock,
-  ArrowLeft,
-  Edit3,
-  Save,
-  X,
-  Plus,
-  User,
-  Star,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import Link from "next/link";
+
 
 function snapJobIdsFromMatches(matches: CandidateMatchEntry[]): string[] {
   return matches.map((m) => m.job_id).filter(Boolean);
@@ -250,7 +234,7 @@ export default function CandidateDetailPage() {
 
   const handleResumeAction = async (action: "open" | "download") => {
     if (!resumeUrl) return;
-    
+
     // If it's a direct external link (e.g. S3), just open it
     if (/^https?:\/\//.test(resumeUrl) && !resumeUrl.includes("/candidate-management/")) {
       window.open(resumeUrl, "_blank", "noopener,noreferrer");
@@ -334,7 +318,7 @@ export default function CandidateDetailPage() {
       if (!response.ok) throw new Error("Failed to access resume");
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
-      
+
       if (action === "download") {
         const a = document.createElement("a");
         a.href = url;
@@ -345,7 +329,7 @@ export default function CandidateDetailPage() {
       } else {
         window.open(url, "_blank", "noopener,noreferrer");
       }
-      
+
       setTimeout(() => window.URL.revokeObjectURL(url), 1000);
     } catch (err) {
       console.error(err);
@@ -689,527 +673,541 @@ export default function CandidateDetailPage() {
                 )}
               </div>
             </div>
-          </div>
+          </div >
 
-          <div className="flex w-full shrink-0 flex-col gap-3 md:w-[320px]">
-            <div className="flex flex-col space-y-2">
-              <label className="text-xs font-semibold uppercase text-gray-500">Submit to Job</label>
-              <div className="flex items-center gap-2">
-                <select
-                  className="min-w-0 flex-1 truncate rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none transition-all focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F]"
-                  value={submitJobId}
-                  onChange={(event) => setSubmitJobId(event.target.value)}
-                >
-                  <option value="">Select job...</option>
-                  {jobs.map((job) => (
-                    <option key={job.id} value={job.id}>
-                      {job.title}
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  onClick={handleSubmitToJob}
-                  disabled={!submitJobId || submittingToJob}
-                  className="shrink-0 bg-slate-900 text-white shadow-sm hover:bg-slate-800"
-                >
-                  {submittingToJob ? "..." : "Submit"}
-                </Button>
-              </div>
-            </div>
-          </div>
+    <div className="flex flex-col gap-3 w-full md:w-[320px] shrink-0">
+      <div className="flex flex-col space-y-2">
+        <label className="text-xs font-semibold text-gray-500 uppercase">Submit to Job</label>
+        <div className="flex items-center gap-2">
+          <select
+            className="flex-1 w-full min-w-0 truncate rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F] outline-none transition-all bg-white"
+            value={submitJobId}
+            onChange={(event) => setSubmitJobId(event.target.value)}
+          >
+            <option value="">Select job...</option>
+            {jobs.map((job) => (
+              <option key={job.id} value={job.id}>{job.title}</option>
+            ))}
+          </select>
+          <Button
+            onClick={handleSubmitToJob}
+            disabled={!submitJobId || submittingToJob}
+            className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm shrink-0"
+          >
+            {submittingToJob ? "..." : "Submit"}
+          </Button>
         </div>
       </div>
+    </div>
+        </div >
+      </div >
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Details & Resume */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Detailed Profile */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="border-b border-gray-100 bg-gray-50/50 p-5 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-                <User className="w-4 h-4 text-[#FF5A1F]" /> Profile Details
-              </h2>
-              {isEditing ? (
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" onClick={handleCancel} disabled={isSaving} className="h-8 text-xs">
-                    <X className="w-3 h-3 mr-1" /> Cancel
-                  </Button>
-                  <Button onClick={handleSave} disabled={isSaving} className="h-8 text-xs bg-[#FF5A1F] hover:bg-[#E54E1A] text-white">
-                    <Save className="w-3 h-3 mr-1" /> {isSaving ? "Saving..." : "Save"}
-                  </Button>
-                </div>
-              ) : (
-                <Button variant="outline" onClick={() => setIsEditing(true)} className="h-8 text-xs bg-white border-gray-200 hover:bg-gray-50 text-gray-700">
-                  <Edit3 className="w-3 h-3 mr-1" /> Edit
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Left Column: Details & Resume */}
+      <div className="lg:col-span-2 space-y-6">
+        {/* Detailed Profile */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="border-b border-gray-100 bg-gray-50/50 p-5 flex items-center justify-between">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <User className="w-4 h-4 text-[#FF5A1F]" /> Profile Details
+            </h2>
+            {isEditing ? (
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handleCancel} disabled={isSaving} className="h-8 text-xs">
+                  <X className="w-3 h-3 mr-1" /> Cancel
                 </Button>
-              )}
-            </div>
-            
-            <div className="p-6">
-              {isEditing ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">First Name</label><Input value={firstName} onChange={(e) => setFirstName(e.target.value)} /></div>
-                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Last Name</label><Input value={lastName} onChange={(e) => setLastName(e.target.value)} /></div>
-                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Email</label><Input value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Phone</label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
-                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Location</label><Input value={location} onChange={(e) => setLocation(e.target.value)} /></div>
-                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Role</label><Input value={role} onChange={(e) => setRole(e.target.value)} /></div>
-                  <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Years Experience</label><Input type="number" min={0} value={yearsExperience} onChange={(e) => setYearsExperience(e.target.value)} /></div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-4">
-                  <div><p className="text-xs font-medium text-gray-500 mb-1">Email</p><p className="text-sm font-medium text-gray-900">{candidate.email}</p></div>
-                  <div><p className="text-xs font-medium text-gray-500 mb-1">Phone</p><p className="text-sm font-medium text-gray-900">{candidate.phone || "-"}</p></div>
-                  <div><p className="text-xs font-medium text-gray-500 mb-1">Location</p><p className="text-sm font-medium text-gray-900">{candidate.location || "-"}</p></div>
-                  <div><p className="text-xs font-medium text-gray-500 mb-1">Role</p><p className="text-sm font-medium text-gray-900">{candidate.role || "-"}</p></div>
-                  <div><p className="text-xs font-medium text-gray-500 mb-1">Experience</p><p className="text-sm font-medium text-gray-900">{candidate.years_experience != null ? `${candidate.years_experience} years` : "-"}</p></div>
-                  
-                  {candidate.experience_summary && (
-                    <div className="md:col-span-2">
-                      <p className="text-xs font-medium text-gray-500 mb-1">Experience Summary</p>
-                      <p className="text-sm text-gray-800 leading-relaxed bg-gray-50 p-4 rounded-lg">{candidate.experience_summary}</p>
-                    </div>
-                  )}
-                  {candidate.education && (
-                    <div className="md:col-span-2">
-                      <p className="text-xs font-medium text-gray-500 mb-1">Education</p>
-                      <p className="text-sm text-gray-800">{candidate.education}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Resume */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
-              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-[#FF5A1F]" /> Resume
-              </h2>
-            </div>
-            <div className="p-6">
-              {candidate.resume_file_name || candidate.resume_s3_key ? (
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="flex items-center gap-4 mb-4 sm:mb-0">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-50 text-[#FF5A1F]">
-                      <FileText className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">{candidate.resume_file_name ?? "Resume Document"}</p>
-                      <p className="text-xs text-gray-500">PDF Document</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 w-full sm:w-auto">
-                    {candidate.resume_s3_key ? (
-                      <>
-                        <Button variant="outline" className="flex-1 sm:flex-none border-gray-200 hover:bg-gray-50 hover:text-gray-900" onClick={() => handleResumeAction("open")}>
-                          <ExternalLink className="w-4 h-4 mr-2" /> Open
-                        </Button>
-                        <Button className="flex-1 sm:flex-none bg-slate-900 hover:bg-slate-800 text-white" onClick={() => handleResumeAction("download")}>
-                          <Download className="w-4 h-4 mr-2" /> Download
-                        </Button>
-                      </>
-                    ) : (
-                      <span className="text-xs font-medium text-gray-400 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-100">File unavailable</span>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-8 px-4 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50">
-                  <FileText className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                  <p className="text-sm font-medium text-gray-900">No resume available</p>
-                  <p className="text-xs text-gray-500 mt-1">This candidate was added manually or the file is missing.</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* ATS Match Breakdown */}
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
-              <h2 className="text-base font-semibold text-gray-900">ATS Match Breakdown</h2>
-            </div>
-            <div className="space-y-3 p-6 text-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <ATSScoreBadge
-                    score={atsMatches[0]?.fit_score}
-                    isLoading={atsLoading || atsRescoreBusy}
-                    scorePending={!atsLoading && !atsRescoreBusy && atsMatches.length === 0 && pipelines.length > 0}
-                  />
-                  <ATSRecommendationBadge
-                    recommendation={atsMatches[0]?.recommendation}
-                    isLoading={atsLoading || atsRescoreBusy}
-                    awaitingMatch={!atsLoading && !atsRescoreBusy && atsMatches.length === 0 && pipelines.length > 0}
-                  />
-                </div>
-                <Button
-                  variant="outline"
-                  onClick={() => void handleRescoreAts()}
-                  disabled={atsRescoreBusy || atsSemanticInFlight}
-                >
-                  {atsRescoreBusy ? "Rescoring…" : atsSemanticInFlight ? "AI enrichment…" : "Rescore ATS"}
+                <Button size="sm" onClick={handleSave} disabled={isSaving} className="h-8 text-xs bg-[#FF5A1F] hover:bg-[#E54E1A] text-white">
+                  <Save className="w-3 h-3 mr-1" /> {isSaving ? "Saving..." : "Save"}
                 </Button>
               </div>
-              {atsLoading ? (
-                <div className="space-y-2 text-slate-500">
-                  <div className="h-3 w-48 animate-pulse rounded bg-slate-100" />
-                  <div className="h-24 animate-pulse rounded-lg border border-slate-100 bg-slate-50/80" />
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => setIsEditing(true)} className="h-8 text-xs bg-white border-gray-200 hover:bg-gray-50 text-gray-700">
+                <Edit3 className="w-3 h-3 mr-1" /> Edit
+              </Button>
+            )}
+          </div>
+
+          <div className="p-6">
+            {isEditing ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">First Name</label><Input value={firstName} onChange={(e) => setFirstName(e.target.value)} /></div>
+                <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Last Name</label><Input value={lastName} onChange={(e) => setLastName(e.target.value)} /></div>
+                <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Email</label><Input value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+                <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Phone</label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
+                <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Location</label><Input value={location} onChange={(e) => setLocation(e.target.value)} /></div>
+                <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Role</label><Input value={role} onChange={(e) => setRole(e.target.value)} /></div>
+                <div className="space-y-1.5"><label className="text-xs font-medium text-gray-500">Years Experience</label><Input type="number" min={0} value={yearsExperience} onChange={(e) => setYearsExperience(e.target.value)} /></div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-4">
+                <div><p className="text-xs font-medium text-gray-500 mb-1">Email</p><p className="text-sm font-medium text-gray-900">{candidate.email}</p></div>
+                <div><p className="text-xs font-medium text-gray-500 mb-1">Phone</p><p className="text-sm font-medium text-gray-900">{candidate.phone || "-"}</p></div>
+                <div><p className="text-xs font-medium text-gray-500 mb-1">Location</p><p className="text-sm font-medium text-gray-900">{candidate.location || "-"}</p></div>
+                <div><p className="text-xs font-medium text-gray-500 mb-1">Role</p><p className="text-sm font-medium text-gray-900">{candidate.role || "-"}</p></div>
+                <div><p className="text-xs font-medium text-gray-500 mb-1">Experience</p><p className="text-sm font-medium text-gray-900">{candidate.years_experience != null ? `${candidate.years_experience} years` : "-"}</p></div>
+
+                {candidate.experience_summary && (
+                  <div className="md:col-span-2">
+                    <p className="text-xs font-medium text-gray-500 mb-1">Experience Summary</p>
+                    <p className="text-sm text-gray-800 leading-relaxed bg-gray-50 p-4 rounded-lg">{candidate.experience_summary}</p>
+                  </div>
+                )}
+                {candidate.education && (
+                  <div className="md:col-span-2">
+                    <p className="text-xs font-medium text-gray-500 mb-1">Education</p>
+                    <p className="text-sm text-gray-800">{candidate.education}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Resume */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <FileText className="w-4 h-4 text-[#FF5A1F]" /> Resume
+            </h2>
+          </div>
+          <div className="p-6">
+            {candidate.resume_file_name || candidate.resume_s3_key ? (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-center gap-4 mb-4 sm:mb-0">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-50 text-[#FF5A1F]">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">{candidate.resume_file_name ?? "Resume Document"}</p>
+                    <p className="text-xs text-gray-500">PDF Document</p>
+                  </div>
                 </div>
-              ) : atsRescoreBusy && atsMatches.length === 0 ? (
-                <p className="text-slate-500">Saving baseline scores…</p>
-              ) : atsMatches.length === 0 ? (
-                <div className="space-y-2 text-slate-500">
-                  <p>
-                    {pipelines.length > 0
-                      ? "No scored rows in candidate_job_matches yet — ATS runs after resume parse and job submit."
-                      : "No job applications yet — submit this candidate to a job to generate ATS scores."}
+                <div className="flex gap-2 w-full sm:w-auto">
+                  {candidate.resume_s3_key ? (
+                    <>
+                      <Button variant="outline" className="flex-1 sm:flex-none border-gray-200 hover:bg-gray-50 hover:text-gray-900" onClick={() => handleResumeAction("open")}>
+                        <ExternalLink className="w-4 h-4 mr-2" /> Open
+                      </Button>
+                      <Button className="flex-1 sm:flex-none bg-slate-900 hover:bg-slate-800 text-white" onClick={() => handleResumeAction("download")}>
+                        <Download className="w-4 h-4 mr-2" /> Download
+                      </Button>
+                    </>
+                  ) : (
+                    <span className="text-xs font-medium text-gray-400 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-100">File unavailable</span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8 px-4 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50">
+                <FileText className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                <p className="text-sm font-medium text-gray-900">No resume available</p>
+                <p className="text-xs text-gray-500 mt-1">This candidate was added manually or the file is missing.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Applied Jobs */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <Briefcase className="w-4 h-4 text-[#FF5A1F]" /> Applied Jobs
+            </h2>
+          </div>
+          <div className="p-0">
+            {sortedPipelines.length === 0 ? (
+              <div className="p-8 text-center">
+                <Briefcase className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                <p className="text-sm text-gray-500">No jobs applied yet.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-gray-50/50 border-b border-gray-100">
+                    <tr>
+                      <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider">Job Title</th>
+                      <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider">Current Stage</th>
+                      <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider text-right">Last Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {sortedPipelines.map((pipeline) => (
+                      <tr key={pipeline.id} className="hover:bg-gray-50/50 transition-colors">
+                        <td className="px-6 py-4 font-medium text-gray-900">
+                          {jobs.find((job) => job.id === pipeline.job_id)?.title ?? pipeline.job_id}
+                        </td>
+                        <td className="px-6 py-4">
+                          <select
+                            className={cn(
+                              "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider outline-none border transition-colors",
+                              pipeline.stage === "placed" ? "bg-green-50 border-green-200 text-green-700" :
+                                pipeline.stage === "offer" ? "bg-indigo-50 border-indigo-200 text-indigo-700" :
+                                  pipeline.stage === "interview" ? "bg-blue-50 border-blue-200 text-blue-700" :
+                                    "bg-gray-50 border-gray-200 text-gray-700 hover:border-gray-300 focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F]"
+                            )}
+                            value={pipeline.stage}
+                            onChange={(event) => void handleQuickStageUpdate(pipeline.id, event.target.value as Pipeline["stage"])}
+                            disabled={updatingPipelineId === pipeline.id}
+                          >
+                            <option value="applied">Applied</option>
+                            <option value="screening">Screening</option>
+                            <option value="interview">Interview</option>
+                            <option value="offer">Offered</option>
+                            <option value="placed">Hired</option>
+                          </select>
+                        </td>
+                        <td className="px-6 py-4 text-xs text-gray-500 text-right">
+                          {new Date(pipeline.updated_at).toLocaleDateString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* ATS Match Breakdown */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <Activity className="w-4 h-4 text-[#FF5A1F]" /> ATS Match Breakdown
+            </h2>
+          </div>
+          <div className="p-6 space-y-3 text-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <ATSScoreBadge
+                  score={atsMatches[0]?.fit_score}
+                  isLoading={atsLoading || atsRescoreBusy}
+                  scorePending={!atsLoading && !atsRescoreBusy && atsMatches.length === 0 && pipelines.length > 0}
+                />
+                <ATSRecommendationBadge
+                  recommendation={atsMatches[0]?.recommendation}
+                  isLoading={atsLoading || atsRescoreBusy}
+                  awaitingMatch={!atsLoading && !atsRescoreBusy && atsMatches.length === 0 && pipelines.length > 0}
+                />
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => void handleRescoreAts()}
+                disabled={atsRescoreBusy || atsSemanticInFlight}
+              >
+                {atsRescoreBusy ? "Rescoring…" : atsSemanticInFlight ? "AI enrichment…" : "Rescore ATS"}
+              </Button>
+            </div>
+            {atsLoading ? (
+              <div className="space-y-2 text-slate-500">
+                <div className="h-3 w-48 animate-pulse rounded bg-slate-100" />
+                <div className="h-24 animate-pulse rounded-lg border border-slate-100 bg-slate-50/80" />
+              </div>
+            ) : atsRescoreBusy && atsMatches.length === 0 ? (
+              <p className="text-slate-500">Saving baseline scores…</p>
+            ) : atsMatches.length === 0 ? (
+              <div className="space-y-2 text-slate-500">
+                <p>
+                  {pipelines.length > 0
+                    ? "No scored rows in candidate_job_matches yet — ATS runs after resume parse and job submit."
+                    : "No job applications yet — submit this candidate to a job to generate ATS scores."}
+                </p>
+                {atsHint === "NO_SCORE_ROWS_YET" && pipelines.length > 0 ? (
+                  <p className="text-amber-800">
+                    ATS scores are still missing after waiting. Check backend logs for{" "}
+                    <code className="rounded bg-slate-100 px-1">ats.rescore</code> /{" "}
+                    <code className="rounded bg-slate-100 px-1">ats.task.failed</code>, confirm Celery or the in-process
+                    fallback ran, then use “Rescore ATS” or re-open this page.
                   </p>
-                  {atsHint === "NO_SCORE_ROWS_YET" && pipelines.length > 0 ? (
-                    <p className="text-amber-800">
-                      ATS scores are still missing after waiting. Check backend logs for{" "}
-                      <code className="rounded bg-slate-100 px-1">ats.rescore</code> /{" "}
-                      <code className="rounded bg-slate-100 px-1">ats.task.failed</code>, confirm Celery or the in-process
-                      fallback ran, then use “Rescore ATS” or re-open this page.
+                ) : null}
+              </div>
+            ) : (
+              atsMatches.map((match) => (
+                <ATSMatchBreakdownPanel
+                  key={match.job_id}
+                  title={jobs.find((job) => job.id === match.job_id)?.title ?? match.job_id}
+                  isLoading={false}
+                  data={{
+                    fit_score: match.fit_score,
+                    deterministic_match_score: match.deterministic_match_score,
+                    semantic_match_score: match.semantic_match_score,
+                    ai_enrichment_status: match.ai_enrichment_status,
+                    ats_pipeline_status: match.ats_pipeline_status,
+                    enrichment_error: match.enrichment_error,
+                    deterministic_completed_at: match.deterministic_completed_at,
+                    semantic_completed_at: match.semantic_completed_at,
+                    recruiter_summary: match.recruiter_summary,
+                    confidence_reasoning: match.confidence_reasoning,
+                    semantic_skill_matches: match.semantic_skill_matches,
+                    transferable_skills: match.transferable_skills,
+                    inferred_strengths: match.inferred_strengths,
+                    inferred_gaps: match.inferred_gaps,
+                    recommendation: match.recommendation,
+                    category_scores: match.category_scores,
+                    confidence_score: match.confidence_score ?? undefined,
+                    matched_skills: match.matched_skills,
+                    missing_skills: match.missing_skills,
+                    evaluated_at: match.evaluated_at ?? undefined,
+                  }}
+                />
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* ATS Candidate Insights */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <Brain className="w-4 h-4 text-[#FF5A1F]" /> ATS Candidate Insights
+            </h2>
+          </div>
+          <div className="p-6 space-y-3 text-sm">
+            {candidate.parse_status === "failed" ? (
+              <p className="text-amber-800">
+                Resume parsing failed
+                {candidate.parse_error ? `: ${candidate.parse_error}` : ""}. Re-upload the resume or contact support.
+              </p>
+            ) : candidate.parse_status && candidate.parse_status !== "completed" ? (
+              <p className="text-slate-500">Resume parsing in progress…</p>
+            ) : null}
+            {(() => {
+              const pr = candidate.parsed_resume_data;
+              const skillsLine = pr?.skills?.length ? pr.skills.join(", ") : null;
+              const inferredLine = pr?.inferred_skills?.length ? pr.inferred_skills.join(", ") : null;
+              const ecosystemLine = pr?.ecosystem_tags?.length ? pr.ecosystem_tags.join(", ") : null;
+              return (
+                <>
+                  <p>
+                    <span className="font-medium">Extracted Skills:</span>{" "}
+                    {skillsLine ?? "Not extracted from resume yet — re-upload or wait for parse to finish."}
+                  </p>
+                  {inferredLine ? (
+                    <p>
+                      <span className="font-medium">Inferred skills (AI):</span> {inferredLine}
                     </p>
                   ) : null}
-                </div>
-              ) : (
-                atsMatches.map((match) => (
-                  <ATSMatchBreakdownPanel
-                    key={match.job_id}
-                    title={jobs.find((job) => job.id === match.job_id)?.title ?? match.job_id}
-                    isLoading={false}
-                    data={{
-                      fit_score: match.fit_score,
-                      deterministic_match_score: match.deterministic_match_score,
-                      semantic_match_score: match.semantic_match_score,
-                      ai_enrichment_status: match.ai_enrichment_status,
-                      ats_pipeline_status: match.ats_pipeline_status,
-                      enrichment_error: match.enrichment_error,
-                      deterministic_completed_at: match.deterministic_completed_at,
-                      semantic_completed_at: match.semantic_completed_at,
-                      recruiter_summary: match.recruiter_summary,
-                      confidence_reasoning: match.confidence_reasoning,
-                      semantic_skill_matches: match.semantic_skill_matches,
-                      transferable_skills: match.transferable_skills,
-                      inferred_strengths: match.inferred_strengths,
-                      inferred_gaps: match.inferred_gaps,
-                      recommendation: match.recommendation,
-                      category_scores: match.category_scores,
-                      confidence_score: match.confidence_score ?? undefined,
-                      matched_skills: match.matched_skills,
-                      missing_skills: match.missing_skills,
-                      evaluated_at: match.evaluated_at ?? undefined,
-                    }}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* ATS Candidate Insights */}
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
-              <h2 className="text-base font-semibold text-gray-900">ATS Candidate Insights</h2>
-            </div>
-            <div className="space-y-3 p-6 text-sm">
-              {candidate.parse_status === "failed" ? (
-                <p className="text-amber-800">
-                  Resume parsing failed
-                  {candidate.parse_error ? `: ${candidate.parse_error}` : ""}. Re-upload the resume or contact support.
-                </p>
-              ) : candidate.parse_status && candidate.parse_status !== "completed" ? (
-                <p className="text-slate-500">Resume parsing in progress…</p>
-              ) : null}
-              {(() => {
-                const pr = candidate.parsed_resume_data;
-                const skillsLine = pr?.skills?.length ? pr.skills.join(", ") : null;
-                const inferredLine = pr?.inferred_skills?.length ? pr.inferred_skills.join(", ") : null;
-                const ecosystemLine = pr?.ecosystem_tags?.length ? pr.ecosystem_tags.join(", ") : null;
-                return (
-                  <>
+                  {ecosystemLine ? (
                     <p>
-                      <span className="font-medium">Extracted Skills:</span>{" "}
-                      {skillsLine ?? "Not extracted from resume yet — re-upload or wait for parse to finish."}
+                      <span className="font-medium">Ecosystem tags:</span> {ecosystemLine}
                     </p>
-                    {inferredLine ? (
-                      <p>
-                        <span className="font-medium">Inferred skills (AI):</span> {inferredLine}
-                      </p>
-                    ) : null}
-                    {ecosystemLine ? (
-                      <p>
-                        <span className="font-medium">Ecosystem tags:</span> {ecosystemLine}
-                      </p>
-                    ) : null}
-                    {pr?.seniority_guess ? (
-                      <p>
-                        <span className="font-medium">Seniority (estimate):</span> {pr.seniority_guess}
-                      </p>
-                    ) : null}
-                    {(pr?.cloud_platforms?.length ?? 0) > 0 ? (
-                      <p>
-                        <span className="font-medium">Cloud / platforms:</span> {(pr?.cloud_platforms ?? []).join(", ")}
-                      </p>
-                    ) : null}
-                    {pr?.resume_recruiter_summary ? (
-                      <p className="rounded-md border border-slate-100 bg-slate-50/80 p-2 text-slate-700">
-                        <span className="font-medium">Resume summary:</span> {pr.resume_recruiter_summary}
-                      </p>
-                    ) : null}
-                  </>
-                );
-              })()}
-              <p>
-                <span className="font-medium">Extracted Experience:</span>{" "}
-                {candidate.parsed_resume_data?.years_of_experience ?? candidate.years_experience ?? "-"}
-              </p>
-              <p>
-                <span className="font-medium">Parsed Titles:</span>{" "}
-                {candidate.parsed_resume_data?.previous_titles?.length
-                  ? candidate.parsed_resume_data.previous_titles.join(", ")
-                  : "-"}
-              </p>
-              <p>
-                <span className="font-medium">Parsed Education:</span>{" "}
-                {Array.isArray(candidate.parsed_resume_data?.education)
-                  ? candidate.parsed_resume_data?.education.join(", ")
-                  : (candidate.parsed_resume_data?.education ?? candidate.education ?? "-")}
-              </p>
-              <p>
-                <span className="font-medium">Certifications:</span>{" "}
-                {candidate.parsed_resume_data?.certifications?.length
-                  ? candidate.parsed_resume_data.certifications.join(", ")
-                  : "-"}
-              </p>
-            </div>
-          </div>
-
-          {/* Applied Jobs */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
-              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-                <Briefcase className="w-4 h-4 text-[#FF5A1F]" /> Applied Jobs
-              </h2>
-            </div>
-            <div className="p-0">
-              {sortedPipelines.length === 0 ? (
-                <div className="p-8 text-center">
-                  <Briefcase className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                  <p className="text-sm text-gray-500">No jobs applied yet.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-gray-50/50 border-b border-gray-100">
-                      <tr>
-                        <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider">Job Title</th>
-                        <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider">Current Stage</th>
-                        <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider text-right">Last Updated</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {sortedPipelines.map((pipeline) => (
-                        <tr key={pipeline.id} className="hover:bg-gray-50/50 transition-colors">
-                          <td className="px-6 py-4 font-medium text-gray-900">
-                            {jobs.find((job) => job.id === pipeline.job_id)?.title ?? pipeline.job_id}
-                          </td>
-                          <td className="px-6 py-4">
-                            <select
-                              className={cn(
-                                "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider outline-none border transition-colors",
-                                pipeline.stage === "placed" ? "bg-green-50 border-green-200 text-green-700" :
-                                pipeline.stage === "offer" ? "bg-indigo-50 border-indigo-200 text-indigo-700" :
-                                pipeline.stage === "interview" ? "bg-blue-50 border-blue-200 text-blue-700" :
-                                "bg-gray-50 border-gray-200 text-gray-700 hover:border-gray-300 focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F]"
-                              )}
-                              value={pipeline.stage}
-                              onChange={(event) => void handleQuickStageUpdate(pipeline.id, event.target.value as Pipeline["stage"])}
-                              disabled={updatingPipelineId === pipeline.id}
-                            >
-                              <option value="applied">Applied</option>
-                              <option value="screening">Screening</option>
-                              <option value="interview">Interview</option>
-                              <option value="offer">Offered</option>
-                              <option value="placed">Hired</option>
-                            </select>
-                          </td>
-                          <td className="px-6 py-4 text-xs text-gray-500 text-right">
-                            {new Date(pipeline.updated_at).toLocaleDateString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+                  ) : null}
+                  {pr?.seniority_guess ? (
+                    <p>
+                      <span className="font-medium">Seniority (estimate):</span> {pr.seniority_guess}
+                    </p>
+                  ) : null}
+                  {(pr?.cloud_platforms?.length ?? 0) > 0 ? (
+                    <p>
+                      <span className="font-medium">Cloud / platforms:</span> {(pr?.cloud_platforms ?? []).join(", ")}
+                    </p>
+                  ) : null}
+                  {pr?.resume_recruiter_summary ? (
+                    <p className="rounded-md border border-slate-100 bg-slate-50/80 p-2 text-slate-700">
+                      <span className="font-medium">Resume summary:</span> {pr.resume_recruiter_summary}
+                    </p>
+                  ) : null}
+                </>
+              );
+            })()}
+            <p><span className="font-medium">Extracted Experience:</span> {candidate.parsed_resume_data?.years_of_experience ?? candidate.years_experience ?? "-"}</p>
+            <p><span className="font-medium">Parsed Titles:</span> {candidate.parsed_resume_data?.previous_titles?.length ? candidate.parsed_resume_data.previous_titles.join(", ") : "-"}</p>
+            <p><span className="font-medium">Parsed Education:</span> {Array.isArray(candidate.parsed_resume_data?.education) ? candidate.parsed_resume_data?.education.join(", ") : (candidate.parsed_resume_data?.education ?? candidate.education ?? "-")}</p>
+            <p><span className="font-medium">Certifications:</span> {candidate.parsed_resume_data?.certifications?.length ? candidate.parsed_resume_data.certifications.join(", ") : "-"}</p>
           </div>
         </div>
+      </div>
 
-        {/* Right Column: Timeline & Interviews */}
-        <div className="space-y-6">
-          
-          {/* Interviews */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
-              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-[#FF5A1F]" /> Interviews
-              </h2>
-            </div>
-            <div className="p-5 space-y-5">
-              {/* Schedule New */}
-              <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 space-y-3">
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Schedule New</h3>
-                <div className="space-y-2">
-                  <Input type="datetime-local" className="text-sm h-9" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
-                  <Input placeholder="Interviewer Name" className="text-sm h-9" value={interviewerName} onChange={(e) => setInterviewerName(e.target.value)} />
-                  <div className="flex gap-2">
-                    <select
-                      className="flex-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-[#FF5A1F]"
-                      value={interviewType}
-                      onChange={(e) => setInterviewType(e.target.value as "HR" | "TECH")}
-                    >
-                      <option value="HR">HR</option>
-                      <option value="TECH">Technical</option>
-                    </select>
-                    <Button onClick={handleScheduleInterview} className="h-9 bg-slate-900 px-3 text-sm hover:bg-slate-800 text-white">
-                      <Plus className="w-4 h-4 mr-1" /> Add
-                    </Button>
-                  </div>
+      {/* Right Column: Timeline & Interviews */}
+      <div className="space-y-6">
+
+        {/* Interviews */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-[#FF5A1F]" /> Interviews
+            </h2>
+          </div>
+          <div className="p-5 space-y-5">
+            {/* Schedule New */}
+            <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 space-y-3">
+              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Schedule New</h3>
+              <div className="space-y-2">
+                <Input type="datetime-local" className="text-sm h-9" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
+                <Input placeholder="Interviewer Name" className="text-sm h-9" value={interviewerName} onChange={(e) => setInterviewerName(e.target.value)} />
+                <div className="flex gap-2">
+                  <select
+                    className="flex-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-[#FF5A1F]"
+                    value={interviewType}
+                    onChange={(e) => setInterviewType(e.target.value as "HR" | "TECH")}
+                  >
+                    <option value="HR">HR</option>
+                    <option value="TECH">Technical</option>
+                  </select>
+                  <Button onClick={handleScheduleInterview} size="sm" className="bg-slate-900 hover:bg-slate-800 text-white">
+                    <Plus className="w-4 h-4 mr-1" /> Add
+                  </Button>
                 </div>
               </div>
-
-              {/* List */}
-              <div className="space-y-3">
-                {interviews.length === 0 ? (
-                  <p className="text-sm text-center text-gray-500 py-4">No upcoming interviews.</p>
-                ) : (
-                  interviews.map((interview) => (
-                    <div key={interview.id} className="relative rounded-xl border border-gray-200 p-4 hover:border-[#FF5A1F]/30 transition-colors">
-                      <div className="absolute top-4 right-4">
-                        <span className={cn(
-                          "px-2 py-1 text-[10px] font-bold uppercase rounded-md tracking-wider",
-                          interview.status === "scheduled" ? "bg-blue-100 text-blue-700" :
-                          interview.status === "completed" ? "bg-green-100 text-green-700" :
-                          interview.status === "cancelled" ? "bg-red-100 text-red-700" :
-                          "bg-gray-100 text-gray-700"
-                        )}>
-                          {interview.status}
-                        </span>
-                      </div>
-                      <p className="font-semibold text-gray-900 text-sm pr-16">{interview.interviewer_name ?? "Interviewer TBD"}</p>
-                      
-                      <div className="mt-2 space-y-1 text-xs text-gray-600">
-                        <p className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-gray-400" /> {new Date(interview.scheduled_at).toLocaleString()}</p>
-                        <p className="flex items-center gap-1.5"><Briefcase className="w-3.5 h-3.5 text-gray-400" /> Type: {interviewMetaById.get(interview.id)?.interview_type ?? "HR"}</p>
-                        <p className="flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-gray-400" /> Rating: {interviewMetaById.get(interview.id)?.rating ?? "-"}/5</p>
-                      </div>
-
-                      {interview.status !== "completed" && interview.status !== "cancelled" && (
-                        <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
-                          <div className="flex gap-2">
-                            <Input
-                              type="datetime-local"
-                              className="text-xs h-8"
-                              value={rescheduleTimes[interview.id] ?? ""}
-                              onChange={(e) => setRescheduleTimes((prev) => ({ ...prev, [interview.id]: e.target.value }))}
-                            />
-                            <Button
-                              variant="outline" className="h-8 px-2 text-xs"
-                              onClick={() => handleReschedule(interview.id)}
-                              disabled={interviewUpdatingId === interview.id || !rescheduleTimes[interview.id]}
-                            >
-                              Reschedule
-                            </Button>
-                          </div>
-                          
-                          <div className="flex gap-2">
-                            <Input
-                              placeholder="Feedback..."
-                              className="text-xs h-8 flex-1"
-                              value={feedbackNotes[interview.id] ?? ""}
-                              onChange={(e) => setFeedbackNotes((prev) => ({ ...prev, [interview.id]: e.target.value }))}
-                            />
-                            <select
-                              className="w-16 rounded-md border border-gray-200 px-1 py-1 text-xs outline-none"
-                              value={feedbackRatings[interview.id] ?? ""}
-                              onChange={(e) => setFeedbackRatings((prev) => ({ ...prev, [interview.id]: e.target.value }))}
-                            >
-                              <option value="">Rtg</option>
-                              {[1,2,3,4,5].map(n => <option key={n} value={n}>{n}</option>)}
-                            </select>
-                            <Button
-                              className="h-8 px-2 text-xs bg-green-600 hover:bg-green-700 text-white"
-                              onClick={() => handleSaveFeedback(interview.id)}
-                              disabled={interviewUpdatingId === interview.id}
-                            >
-                              Complete
-                            </Button>
-                          </div>
-                          <Button
-                            variant="ghost" className="h-8 w-full text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
-                            onClick={() => handleCancelInterview(interview.id)}
-                            disabled={interviewUpdatingId === interview.id}
-                          >
-                            Cancel Interview
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
             </div>
+  {/* List */}
+  <div className="space-y-3">
+    {interviews.length === 0 ? (
+      <p className="text-sm text-center text-gray-500 py-4">No upcoming interviews.</p>
+    ) : (
+      interviews.map((interview) => (
+        <div key={interview.id} className="relative rounded-xl border border-gray-200 p-4 hover:border-[#FF5A1F]/30 transition-colors">
+          <div className="absolute top-4 right-4">
+            <span className={cn(
+              "px-2 py-1 text-[10px] font-bold uppercase rounded-md tracking-wider",
+              interview.status === "scheduled" ? "bg-blue-100 text-blue-700" :
+                interview.status === "completed" ? "bg-green-100 text-green-700" :
+                  interview.status === "cancelled" ? "bg-red-100 text-red-700" :
+                    "bg-gray-100 text-gray-700"
+            )}>
+              {interview.status}
+            </span>
+          </div>
+          <p className="font-semibold text-gray-900 text-sm pr-16">{interview.interviewer_name ?? "Interviewer TBD"}</p>
+
+          <div className="mt-2 space-y-1 text-xs text-gray-600">
+            <p className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-gray-400" /> {new Date(interview.scheduled_at).toLocaleString()}</p>
+            <p className="flex items-center gap-1.5"><Briefcase className="w-3.5 h-3.5 text-gray-400" /> Type: {interviewMetaById.get(interview.id)?.interview_type ?? "HR"}</p>
+            <p className="flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-gray-400" /> Rating: {interviewMetaById.get(interview.id)?.rating ?? "-"}/5</p>
           </div>
 
-          {/* Timeline / Interactions */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
-              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-[#FF5A1F]" /> Activity Timeline
-              </h2>
-            </div>
-            <div className="p-5">
-              <div className="flex gap-2 mb-6 relative">
-                <Input placeholder="Add a note..." className="pr-20" value={newNote} onChange={(e) => setNewNote(e.target.value)} />
-                <Button className="absolute right-1 top-1 bottom-1 h-auto bg-[#FF5A1F] hover:bg-[#E54E1A] text-white" onClick={handleAddNote} disabled={addingNote || !newNote.trim()}>
-                  {addingNote ? "..." : "Post"}
+          {interview.status !== "completed" && interview.status !== "cancelled" && (
+            <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+              <div className="flex gap-2">
+                <Input
+                  type="datetime-local"
+                  className="text-xs h-8"
+                  value={rescheduleTimes[interview.id] ?? ""}
+                  onChange={(e) => setRescheduleTimes((prev) => ({ ...prev, [interview.id]: e.target.value }))}
+                />
+                <Button
+                  variant="outline" size="sm" className="h-8 text-xs px-2"
+                  onClick={() => handleReschedule(interview.id)}
+                  disabled={interviewUpdatingId === interview.id || !rescheduleTimes[interview.id]}
+                >
+                  Reschedule
                 </Button>
               </div>
 
-              <div className="space-y-4 relative before:absolute before:inset-0 before:ml-4 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-200 before:to-transparent">
-                {orderedTimeline.length === 0 ? (
-                  <p className="text-sm text-center text-gray-500 py-4 relative z-10 bg-white">No activity yet.</p>
-                ) : (
-                  orderedTimeline.map((item) => (
-                    <div key={item.id} className="relative z-10 pl-10 md:pl-0">
-                      {/* Timeline dot */}
-                      <div className="absolute left-0 md:left-1/2 md:-ml-2.5 top-1.5 h-5 w-5 rounded-full border-4 border-white bg-[#FF5A1F] shadow-sm"></div>
-                      
-                      <div className="bg-gray-50 md:w-[calc(50%-1.5rem)] rounded-xl p-4 border border-gray-100 shadow-sm ml-0 md:ml-auto md:even:mr-auto md:even:ml-0 transition-transform hover:-translate-y-0.5">
-                        <div className="flex items-start justify-between gap-2 mb-1">
-                          <p className="font-semibold text-gray-900 text-sm">{item.title ?? item.interaction_type}</p>
-                          <span className="text-[10px] font-medium text-gray-400 whitespace-nowrap">{new Date(item.created_at).toLocaleDateString()}</span>
-                        </div>
-                        {item.body && <p className="text-xs text-gray-600 leading-relaxed">{item.body}</p>}
-                        {item.metadata && (
-                          <pre className="mt-3 overflow-x-auto rounded-lg bg-gray-100 p-2.5 text-[10px] text-gray-700 font-mono border border-gray-200">
-                            {JSON.stringify(item.metadata, null, 2)}
-                          </pre>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Feedback..."
+                  className="text-xs h-8 flex-1"
+                  value={feedbackNotes[interview.id] ?? ""}
+                  onChange={(e) => setFeedbackNotes((prev) => ({ ...prev, [interview.id]: e.target.value }))}
+                />
+                <select
+                  className="w-16 rounded-md border border-gray-200 px-1 py-1 text-xs outline-none"
+                  value={feedbackRatings[interview.id] ?? ""}
+                  onChange={(e) => setFeedbackRatings((prev) => ({ ...prev, [interview.id]: e.target.value }))}
+                >
+                  <option value="">Rtg</option>
+                  {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <Button
+                  size="sm" className="h-8 text-xs px-2 bg-green-600 hover:bg-green-700 text-white"
+                  onClick={() => handleSaveFeedback(interview.id)}
+                  disabled={interviewUpdatingId === interview.id}
+                >
+                  Complete
+                </Button>
+              </div>
+              <Button
+                variant="ghost" size="sm" className="w-full h-8 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                onClick={() => handleCancelInterview(interview.id)}
+                disabled={interviewUpdatingId === interview.id || interview.status === "cancelled"}
+              >
+                Cancel Interview
+              </Button>
+            </div>
+          )}
+        </div>
+      ))
+    )}
               </div>
             </div>
           </div>
 
+        {/* Record Details */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-[#FF5A1F]" /> Record Details
+            </h2>
+          </div>
+          <div className="p-5 space-y-4">
+            <div className="flex flex-col gap-1 pb-3 border-b border-gray-100">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Created On</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {candidate.created_at ? new Date(candidate.created_at).toLocaleDateString() : "Unknown"}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1 pb-3 border-b border-gray-100">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Source</span>
+              <span className="text-sm font-semibold text-gray-900 capitalize">
+                {candidate.source ? candidate.source.replace('_', ' ') : "Direct"}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Last Updated</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {candidate.updated_at ? new Date(candidate.updated_at).toLocaleDateString() : "Unknown"}
+              </span>
+            </div>
+          </div>
         </div>
+
+  {/* Timeline / Interactions */ }
+  <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+      <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+        <MessageSquare className="w-4 h-4 text-[#FF5A1F]" /> Activity Timeline
+      </h2>
+    </div>
+    <div className="p-5">
+      <div className="flex gap-2 mb-6 relative">
+        <Input placeholder="Add a note..." className="pr-20" value={newNote} onChange={(e) => setNewNote(e.target.value)} />
+        <Button size="sm" className="absolute right-1 top-1 bottom-1 h-auto bg-[#FF5A1F] hover:bg-[#E54E1A] text-white" onClick={handleAddNote} disabled={addingNote || !newNote.trim()}>
+          {addingNote ? "..." : "Post"}
+        </Button>
       </div>
-    </section>
+
+      <div className="space-y-4 relative before:absolute before:inset-0 before:ml-4 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-200 before:to-transparent">
+        {interactionsLoadFailed ? (
+          <p className="text-amber-700 text-center py-4 relative z-10 bg-white">Unable to load interactions. You can still view the profile and ATS data.</p>
+        ) : orderedTimeline.length === 0 ? (
+          <p className="text-sm text-center text-gray-500 py-4 relative z-10 bg-white">No activity yet.</p>
+        ) : (
+          orderedTimeline.map((item) => (
+            <div key={item.id} className="relative z-10 pl-10">
+              {/* Timeline dot */}
+              <div className="absolute left-[6px] top-1.5 h-5 w-5 rounded-full border-4 border-white bg-[#FF5A1F] shadow-sm"></div>
+
+              <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 shadow-sm transition-transform hover:-translate-y-0.5">
+                <div className="flex items-start justify-between gap-2 mb-1">
+                  <p className="font-semibold text-gray-900 text-sm">{item.title ?? item.interaction_type}</p>
+                  <span className="text-[10px] font-medium text-gray-400 whitespace-nowrap">{new Date(item.created_at).toLocaleDateString()}</span>
+                </div>
+                {item.body && <p className="text-xs text-gray-600 leading-relaxed">{item.body}</p>}
+                {item.metadata && (
+                  <pre className="mt-3 overflow-x-auto rounded-lg bg-gray-100 p-2.5 text-[10px] text-gray-700 font-mono border border-gray-200">
+                    {JSON.stringify(item.metadata, null, 2)}
+                  </pre>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  </div>
+
+        </div >
+      </div >
+    </section >
   );
 }

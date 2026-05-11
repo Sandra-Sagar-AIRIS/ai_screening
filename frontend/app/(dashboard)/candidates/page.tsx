@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { ApiError } from "@/lib/api/client";
 import {
   addCandidateInteraction,
@@ -30,7 +30,7 @@ import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Users, UserPlus, Search, Calendar, Eye, FileText, ArchiveRestore } from "lucide-react";
+import { Users, UserPlus, Search, Calendar, Eye, FileText, ArchiveRestore, MoreVertical, Trash2 } from "lucide-react";
 
 type AddMode = "manual" | "resume" | "csv";
 
@@ -53,6 +53,7 @@ type SlotDraft = {
 };
 
 export default function CandidatesPage() {
+  const router = useRouter();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [users, setUsers] = useState<OrganizationUser[]>([]);
@@ -110,6 +111,9 @@ export default function CandidatesPage() {
   const [noteItems, setNoteItems] = useState<CandidateInteraction[]>([]);
   const [noteLoading, setNoteLoading] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+
+
 
   function trackModuleEvent(eventName: string, payload?: Record<string, unknown>) {
     // Lightweight client telemetry hook; can be wired to analytics backend later.
@@ -1001,19 +1005,10 @@ export default function CandidatesPage() {
               </Button>
             </div>
           )}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto min-h-[250px] pb-10">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-100/80 bg-slate-50/50 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th className="px-3 py-2.5 font-bold">
-                    <input
-                      type="checkbox"
-                      checked={sortedCandidates.length > 0 && selectedCandidateIds.length === sortedCandidates.length}
-                      onChange={(e) =>
-                        setSelectedCandidateIds(e.target.checked ? sortedCandidates.map((candidate) => candidate.id) : [])
-                      }
-                    />
-                  </th>
                   <th className="px-3 py-2.5 font-bold">Candidate</th>
                   <th className="px-3 py-2.5 font-bold">Job</th>
                   <th className="px-3 py-2.5 font-bold">Stage</th>
@@ -1021,31 +1016,25 @@ export default function CandidatesPage() {
                   <th className="px-3 py-2.5 font-bold">Location</th>
                   <th className="px-3 py-2.5 font-bold">Role</th>
                   <th className="px-3 py-2.5 font-bold">Exp</th>
+                  <th className="px-3 py-2.5 font-bold">Created</th>
                   <th className="px-3 py-2.5 font-bold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedCandidates.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="py-20 text-center text-slate-400">
+                    <td colSpan={8} className="py-20 text-center text-slate-400">
                       <p className="text-lg font-medium">No candidates found</p>
                       <p className="text-sm">Try adjusting your filters or search query</p>
                     </td>
                   </tr>
                 ) : (
                   sortedCandidates.map((candidate) => (
-                  <tr key={candidate.id} className="border-b border-slate-100/60 hover:bg-slate-50/80 transition-colors text-xs group cursor-pointer">
-                    <td className="px-3 py-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedCandidateIds.includes(candidate.id)}
-                        onChange={(e) =>
-                          setSelectedCandidateIds((prev) =>
-                            e.target.checked ? [...new Set([...prev, candidate.id])] : prev.filter((id) => id !== candidate.id)
-                          )
-                        }
-                      />
-                    </td>
+                    <tr 
+                      key={candidate.id} 
+                      className="border-b border-slate-100/60 hover:bg-slate-50/80 transition-colors text-xs group cursor-pointer"
+                      onClick={() => router.push(`/candidates/${candidate.id}`)}
+                    >
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
                         <div className="h-7 w-7 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold text-[10px] shrink-0 border border-indigo-100">
@@ -1099,45 +1088,17 @@ export default function CandidatesPage() {
                         ? `${candidate.years_experience}y`
                         : "-"}
                     </td>
+                    <td className="px-3 py-3 text-slate-500 whitespace-nowrap">
+                      {new Date(candidate.created_at).toLocaleDateString()}
+                    </td>
                     <td className="px-3 py-3 text-right">
-                      <div className="flex justify-end gap-2">
-                        {statusFilter === "deleted" ? (
-                          <Button 
-                            variant="ghost" 
-                            className="h-8 w-8 p-0 text-slate-400 hover:text-emerald-600"
-                            title="Unarchive Candidate"
-                            onClick={async () => {
-                              try {
-                                await updateCandidate(candidate.id, { status: "active" });
-                                setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
-                              } catch (err) {
-                                setError(err instanceof Error ? err.message : "Unable to unarchive candidate.");
-                              }
-                            }}
-                          >
-                            <ArchiveRestore className="h-4 w-4" />
-                          </Button>
-                        ) : null}
-                        <Link href={`/candidates/${candidate.id}`}>
-                          <Button variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:text-indigo-600" title="View Candidate">
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </Link>
-                        {canCreate ? (
-                          <Button 
-                            variant="ghost" 
-                            className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900"
-                            title="Add Note"
-                            onClick={() => void openNotesModal(candidate.id)}
-                          >
-                            <FileText className="h-4 w-4" />
-                          </Button>
-                        ) : null}
+                      <div className="flex items-center justify-end gap-2">
                         {canCreate ? (
                           <Button
                             variant="outline"
                             className="h-8 px-2 text-[11px]"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setSubmitModalCandidateId(candidate.id);
                               setSubmitModalJobId(selectedJobId);
                             }}
@@ -1145,6 +1106,100 @@ export default function CandidatesPage() {
                             Submit to Job
                           </Button>
                         ) : null}
+                        
+                        <div className="relative">
+                          <Button
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenDropdownId(openDropdownId === candidate.id ? null : candidate.id);
+                            }}
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+
+                          {openDropdownId === candidate.id && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-40"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenDropdownId(null);
+                                }}
+                              />
+                              <div className="absolute right-0 mt-1 w-36 bg-white rounded-lg shadow-lg border border-slate-100 z-50 py-1 overflow-hidden">
+                              {canCreate && (
+                                <button
+                                  className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-[#FF5A1F] transition-colors flex items-center gap-2"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenDropdownId(null);
+                                    void openNotesModal(candidate.id);
+                                  }}
+                                >
+                                  <FileText className="h-3.5 w-3.5" />
+                                  Notes
+                                </button>
+                              )}
+                              
+                              {statusFilter === "deleted" ? (
+                                <button
+                                  className="w-full text-left px-3 py-2 text-xs text-emerald-600 hover:bg-emerald-50 transition-colors flex items-center gap-2"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    setOpenDropdownId(null);
+                                    try {
+                                      await bulkUnarchiveCandidates({ candidate_ids: [candidate.id] });
+                                      setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
+                                    } catch (err) {
+                                      setError(err instanceof Error ? err.message : "Unable to unarchive candidate.");
+                                    }
+                                  }}
+                                >
+                                  <ArchiveRestore className="h-3.5 w-3.5" />
+                                  Unarchive
+                                </button>
+                              ) : (
+                                <button
+                                  className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-red-600 transition-colors flex items-center gap-2"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    setOpenDropdownId(null);
+                                    try {
+                                      setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
+                                      await bulkDeleteCandidates({ candidate_ids: [candidate.id] });
+                                    } catch (err) {
+                                      setError(err instanceof Error ? err.message : "Unable to archive candidate.");
+                                    }
+                                  }}
+                                >
+                                  <ArchiveRestore className="h-3.5 w-3.5" />
+                                  Archive
+                                </button>
+                              )}
+                              
+                              <button
+                                className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  setOpenDropdownId(null);
+                                  if (!window.confirm("Are you sure you want to permanently delete this candidate?")) return;
+                                  try {
+                                    setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
+                                    await bulkHardDeleteCandidates({ candidate_ids: [candidate.id] });
+                                  } catch (err) {
+                                    setError(err instanceof Error ? err.message : "Unable to delete candidate.");
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Delete
+                              </button>
+                            </div>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </td>
                   </tr>
