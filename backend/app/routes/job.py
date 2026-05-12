@@ -9,6 +9,8 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -368,7 +370,7 @@ def create_job(
     )
 
 
-@router.get("", response_model=list[JobResponse])
+@router.get("")
 def list_jobs(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[CurrentUser, Depends(require_permission(JOBS_READ))],
@@ -377,16 +379,21 @@ def list_jobs(
     offset: Annotated[int, Query(ge=0)] = 0,
     status_filter: Annotated[JobStatus | None, Query(alias="status")] = None,
     client_id: Annotated[UUID | None, Query()] = None,
-) -> list[JobResponse]:
+) -> JSONResponse:
     service = JobService(db)
-    return service.list_jobs(
-        UUID(current_user.organization_id),
-        current_user,
-        limit=limit,
-        offset=offset,
-        status=status_filter,
-        client_id=client_id,
-    )
+    try:
+        jobs = service.list_jobs(
+            UUID(current_user.organization_id),
+            current_user,
+            limit=limit,
+            offset=offset,
+            status=status_filter,
+            client_id=client_id,
+        )
+        return JSONResponse(content=jsonable_encoder(jobs))
+    except Exception as exc:
+        logger.exception("list_jobs.unhandled", extra={"org": current_user.organization_id})
+        raise HTTPException(status_code=500, detail=str(exc) or "Failed to list jobs") from exc
 
 
 # BUG FIX: Move /search ABOVE /{job_id} to avoid shadowing

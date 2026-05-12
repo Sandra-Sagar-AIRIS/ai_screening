@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 import {
-  Menu, Bell, Plus, Search,
+  Menu, Bell, Search,
   LayoutDashboard, Users, Briefcase, Filter, Mail, UserCheck,
-  Calendar, FileText, Settings, Shield,
+  CalendarDays, List, Settings, Shield,
   ChevronLeft, ChevronRight, LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,18 +22,20 @@ import {
 } from "@/lib/dashboard-nav";
 import { useAuthStore } from "@/store/auth-store";
 
-const ICON_MAP: Record<string, React.ElementType> = {
-  "Dashboard": LayoutDashboard,
-  "Candidates": Users,
-  "Jobs": Briefcase,
-  "Pipeline": Filter,
+const ICON_MAP: Record<string, LucideIcon> = {
+  Dashboard: LayoutDashboard,
+  Candidates: Users,
+  Jobs: Briefcase,
+  Pipeline: Filter,
   "My Jobs": Briefcase,
-  "Clients": UserCheck,
-  "Invites": Mail,
-  "Users": Users,
-  "Roles": Shield,
-  "Settings": Settings,
-  "Invite": Mail
+  Clients: UserCheck,
+  Invites: Mail,
+  Users: Users,
+  Roles: Shield,
+  Settings: Settings,
+  Invite: Mail,
+  "Interview Queue": List,
+  "My Interviews": CalendarDays,
 };
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
@@ -57,6 +60,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   );
 
   const recruitingMenu = filteredMenu.filter(i => ["Dashboard", "Candidates", "Jobs", "Pipeline", "My Jobs", "Clients", "Invites", "Invite"].includes(i.name));
+  const interviewMenu = filteredMenu.filter(i => ["Interview Queue", "My Interviews"].includes(i.name));
   const managementMenu = filteredMenu.filter(i => ["Users", "Roles", "Settings"].includes(i.name));
 
   useEffect(() => {
@@ -85,8 +89,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!hydrated || token === null) return;
     const rule = navAccessRuleForPathname(pathname);
-    const accessReady = permissions.length > 0 || isAdminRole(role) || !rule;
-    if (!accessReady) return;
+    const ready = permissions.length > 0 || isAdminRole(role) || !rule;
+    if (!ready) return;
     if (!canAccessPathname(pathname, role, permissions)) {
       router.replace("/dashboard");
     }
@@ -136,40 +140,47 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-[#FAFAFA]">
       {/* Mobile Sidebar Overlay */}
-      {mobileNavOpen && (
-        <div 
-          className="fixed inset-0 z-40 bg-slate-900/20 backdrop-blur-sm md:hidden transition-opacity" 
+      {mobileNavOpen ? (
+        <div
+          className="fixed inset-0 z-40 bg-slate-900/20 backdrop-blur-sm md:hidden transition-opacity"
           onClick={() => setMobileNavOpen(false)}
+          aria-hidden
         />
-      )}
+      ) : null}
 
-      {/* Sidebar */}
-      <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 bg-white border-r border-slate-200/60 flex flex-col transform transition-all duration-300 ease-out md:relative shadow-[4px_0_24px_rgba(0,0,0,0.01)]",
-        mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
-        isCollapsed ? "w-[68px]" : "w-[212px]"
-      )}>
-        <div className={cn("h-20 flex items-center relative", isCollapsed ? "justify-center px-0" : "px-5")}>
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex transform flex-col border-r border-slate-200/60 bg-white shadow-[4px_0_24px_rgba(0,0,0,0.01)] transition-all duration-300 ease-out md:relative",
+          mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
+          isCollapsed ? "w-[68px]" : "w-[212px]"
+        )}
+      >
+        <div className={cn("relative flex h-20 items-center", isCollapsed ? "justify-center px-0" : "px-5")}>
           <div className="flex items-center gap-3">
-            <div className="relative flex items-center justify-center w-8 h-8 flex-shrink-0">
-              <div className="absolute inset-0 bg-[#FF5A1F] rounded-[8px] transform rotate-45 shadow-[0_2px_4px_rgba(255,90,31,0.2)]"></div>
-              <span className="relative text-white font-extrabold text-[14px] tracking-tighter">A</span>
+            <div className="relative flex h-8 w-8 flex-shrink-0 items-center justify-center">
+              <div className="absolute inset-0 rotate-45 rounded-[8px] bg-[#FF5A1F] shadow-[0_2px_4px_rgba(255,90,31,0.2)]" />
+              <span className="relative text-[14px] font-extrabold tracking-tighter text-white">A</span>
             </div>
-            {!isCollapsed && <span className="font-extrabold text-[20px] tracking-tight text-slate-900 whitespace-nowrap">AIRIS</span>}
+            {!isCollapsed ? (
+              <span className="whitespace-nowrap text-[20px] font-extrabold tracking-tight text-slate-900">AIRIS</span>
+            ) : null}
           </div>
           <button
+            type="button"
             onClick={() => setIsCollapsed(!isCollapsed)}
             className={cn(
               "absolute top-7 w-6 h-6 bg-white hover:bg-slate-50 rounded-full flex items-center justify-center text-slate-400 transition-colors border border-slate-200 shadow-sm z-10",
               isCollapsed ? "right-[-12px]" : "right-3"
             )}
+            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide py-2">
+        <div className="scrollbar-hide flex-1 overflow-y-auto overflow-x-hidden py-2">
           {renderNavGroup("Recruiting", recruitingMenu)}
+          {renderNavGroup("Interviews", interviewMenu)}
           {renderNavGroup("Management", managementMenu)}
         </div>
 

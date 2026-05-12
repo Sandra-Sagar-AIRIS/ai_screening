@@ -663,7 +663,7 @@ export default function CandidatesPage() {
           <div className="animate-in fade-in duration-300">
             <div className="mb-6">
               <h2 className="text-lg font-semibold text-gray-900">Upload Resume</h2>
-              <p className="text-sm text-gray-500 mt-1">We'll automatically extract the details for you to review.</p>
+              <p className="text-sm text-gray-500 mt-1">We&apos;ll automatically extract the details for you to review.</p>
             </div>
 
             <div className="max-w-xl">
@@ -713,7 +713,7 @@ export default function CandidatesPage() {
               />
             </div>
 
-            <div className="flex items-center justify-between pt-8 mt-8 border-t border-gray-100">
+            <div className="mt-8 flex items-center justify-between border-t border-gray-100 pt-8">
               <Button variant="outline" onClick={handleBack} className="border-gray-200 text-gray-600 hover:bg-gray-50">Back</Button>
               <Button 
                 onClick={async () => {
@@ -725,7 +725,7 @@ export default function CandidatesPage() {
                   }
                 }} 
                 disabled={uploading || !resumeFile}
-                className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white min-w-[120px]"
+                className="min-w-[120px] bg-[#FF5A1F] text-white hover:bg-[#E54E1A]"
               >
                 {uploading ? "Parsing..." : draftCandidate ? "Review Parsed Data" : "Upload & Parse"}
               </Button>

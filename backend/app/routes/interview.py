@@ -7,14 +7,35 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_permission
-from app.core.permissions import INTERVIEWS_CREATE, INTERVIEWS_READ, INTERVIEWS_UPDATE
+from app.core.permissions import (
+    INTERVIEWS_CLAIM,
+    INTERVIEWS_CREATE,
+    INTERVIEWS_DELETE,
+    INTERVIEWS_FEEDBACK,
+    INTERVIEWS_PANEL,
+    INTERVIEWS_READ,
+    INTERVIEWS_UPDATE,
+)
 from app.db.session import get_db
 from app.schemas.auth import CurrentUser
-from app.schemas.interview import InterviewCreate, InterviewResponse, InterviewUpdate
+from app.schemas.interview import (
+    InterviewCreate,
+    InterviewFeedbackCreate,
+    InterviewFeedbackResponse,
+    InterviewParticipantCreate,
+    InterviewParticipantResponse,
+    InterviewResponse,
+    InterviewUpdate,
+    InterviewerProfileCreate,
+    InterviewerProfileResponse,
+    QueueInterviewResponse,
+)
 from app.services.interview_service import InterviewService
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
 
+
+# ── Create / List ────────────────────────────────────────────────────────
 
 @router.post("", response_model=InterviewResponse, status_code=status.HTTP_201_CREATED)
 def create_interview(
@@ -23,8 +44,8 @@ def create_interview(
     _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_CREATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> InterviewResponse:
-    service = InterviewService(db)
-    interview = service.create_interview(UUID(current_user.organization_id), current_user, payload)
+    svc = InterviewService(db)
+    interview = svc.create_interview(UUID(current_user.organization_id), current_user, payload)
     return InterviewResponse.model_validate(interview)
 
 
@@ -36,17 +57,68 @@ def list_interviews(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     pipeline_id: Annotated[UUID | None, Query()] = None,
+    candidate_id: Annotated[UUID | None, Query()] = None,
+    job_id: Annotated[UUID | None, Query()] = None,
+    status_filter: Annotated[str | None, Query(alias="status")] = None,
 ) -> list[InterviewResponse]:
-    service = InterviewService(db)
-    interviews = service.list_interviews(
+    svc = InterviewService(db)
+    interviews = svc.list_interviews(
         UUID(current_user.organization_id),
         current_user,
         limit=limit,
         offset=offset,
         pipeline_id=pipeline_id,
+        candidate_id=candidate_id,
+        job_id=job_id,
+        status_filter=status_filter,
     )
     return [InterviewResponse.model_validate(i) for i in interviews]
 
+
+# ── Queue (interviews needing panelists) ─────────────────────────────────
+
+@router.get("/queue", response_model=list[QueueInterviewResponse])
+def get_interview_queue(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    round_type: Annotated[str | None, Query()] = None,
+    job_id: Annotated[UUID | None, Query()] = None,
+) -> list[QueueInterviewResponse]:
+    svc = InterviewService(db)
+    return svc.get_queue(
+        UUID(current_user.organization_id),
+        current_user,
+        limit=limit,
+        offset=offset,
+        round_type=round_type,
+        job_id=job_id,
+    )
+
+
+# ── My Interviews ────────────────────────────────────────────────────────
+
+@router.get("/my", response_model=list[InterviewResponse])
+def get_my_interviews(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[InterviewResponse]:
+    svc = InterviewService(db)
+    interviews = svc.get_my_interviews(
+        UUID(current_user.organization_id),
+        current_user,
+        limit=limit,
+        offset=offset,
+    )
+    return [InterviewResponse.model_validate(i) for i in interviews]
+
+
+# ── Single interview ─────────────────────────────────────────────────────
 
 @router.get("/{interview_id}", response_model=InterviewResponse)
 def get_interview(
@@ -55,12 +127,12 @@ def get_interview(
     _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> InterviewResponse:
-    service = InterviewService(db)
-    interview = service.get_interview_by_id(interview_id, UUID(current_user.organization_id), current_user)
+    svc = InterviewService(db)
+    interview = svc.get_interview_by_id(interview_id, UUID(current_user.organization_id), current_user)
     return InterviewResponse.model_validate(interview)
 
 
-@router.put("/{interview_id}", response_model=InterviewResponse)
+@router.patch("/{interview_id}", response_model=InterviewResponse)
 def update_interview(
     interview_id: UUID,
     payload: InterviewUpdate,
@@ -68,11 +140,164 @@ def update_interview(
     _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_UPDATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> InterviewResponse:
-    service = InterviewService(db)
-    interview = service.update_interview(
+    svc = InterviewService(db)
+    interview = svc.update_interview(
         interview_id=interview_id,
         organization_id=UUID(current_user.organization_id),
         current_user=current_user,
         payload=payload,
     )
     return InterviewResponse.model_validate(interview)
+
+
+@router.put("/{interview_id}", response_model=InterviewResponse)
+def update_interview_put(
+    interview_id: UUID,
+    payload: InterviewUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> InterviewResponse:
+    svc = InterviewService(db)
+    interview = svc.update_interview(
+        interview_id=interview_id,
+        organization_id=UUID(current_user.organization_id),
+        current_user=current_user,
+        payload=payload,
+    )
+    return InterviewResponse.model_validate(interview)
+
+
+@router.delete("/{interview_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_interview(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_DELETE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> None:
+    svc = InterviewService(db)
+    svc.delete_interview(interview_id, UUID(current_user.organization_id), current_user)
+
+
+# ── Claim (self-assign as panelist) ─────────────────────────────────────
+
+@router.post("/{interview_id}/claim", response_model=InterviewParticipantResponse, status_code=status.HTTP_201_CREATED)
+def claim_interview(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_CLAIM))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> InterviewParticipantResponse:
+    svc = InterviewService(db)
+    participant = svc.claim_interview(interview_id, UUID(current_user.organization_id), current_user)
+    return InterviewParticipantResponse.model_validate(participant)
+
+
+# ── Participants ─────────────────────────────────────────────────────────
+
+@router.get("/{interview_id}/participants", response_model=list[InterviewParticipantResponse])
+def list_participants(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> list[InterviewParticipantResponse]:
+    svc = InterviewService(db)
+    participants = svc.list_participants(interview_id, UUID(current_user.organization_id), current_user)
+    return [InterviewParticipantResponse.model_validate(p) for p in participants]
+
+
+@router.post("/{interview_id}/participants", response_model=InterviewParticipantResponse, status_code=status.HTTP_201_CREATED)
+def add_participant(
+    interview_id: UUID,
+    payload: InterviewParticipantCreate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_PANEL))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> InterviewParticipantResponse:
+    svc = InterviewService(db)
+    participant = svc.add_participant(interview_id, UUID(current_user.organization_id), current_user, payload)
+    return InterviewParticipantResponse.model_validate(participant)
+
+
+@router.delete("/{interview_id}/participants/{participant_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_participant(
+    interview_id: UUID,
+    participant_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_PANEL))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> None:
+    svc = InterviewService(db)
+    svc.remove_participant(interview_id, participant_id, UUID(current_user.organization_id), current_user)
+
+
+# ── Feedback ─────────────────────────────────────────────────────────────
+
+@router.post(
+    "/{interview_id}/feedback",
+    response_model=InterviewFeedbackResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def submit_feedback(
+    interview_id: UUID,
+    payload: InterviewFeedbackCreate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_FEEDBACK))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> InterviewFeedbackResponse:
+    svc = InterviewService(db)
+    feedback = svc.create_feedback(
+        interview_id=interview_id,
+        organization_id=UUID(current_user.organization_id),
+        current_user=current_user,
+        payload=payload,
+    )
+    return InterviewFeedbackResponse.model_validate(feedback)
+
+
+@router.get("/{interview_id}/feedback", response_model=list[InterviewFeedbackResponse])
+def get_feedback(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> list[InterviewFeedbackResponse]:
+    svc = InterviewService(db)
+    feedback_list = svc.get_feedback(
+        interview_id=interview_id,
+        organization_id=UUID(current_user.organization_id),
+        current_user=current_user,
+    )
+    return [InterviewFeedbackResponse.model_validate(f) for f in feedback_list]
+
+
+# ── Interviewer Profile ───────────────────────────────────────────────────
+
+@router.get("/profile/me", response_model=InterviewerProfileResponse | None)
+def get_my_profile(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> InterviewerProfileResponse | None:
+    svc = InterviewService(db)
+    profile = svc.get_my_profile(UUID(current_user.organization_id), current_user)
+    if profile is None:
+        return None
+    resp = InterviewerProfileResponse.model_validate(profile)
+    resp.skills = svc.get_profile_skills(profile.id)
+    return resp
+
+
+@router.put("/profile/me", response_model=InterviewerProfileResponse)
+def upsert_my_profile(
+    payload: InterviewerProfileCreate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> InterviewerProfileResponse:
+    svc = InterviewService(db)
+    profile = svc.upsert_my_profile(UUID(current_user.organization_id), current_user, payload)
+    resp = InterviewerProfileResponse.model_validate(profile)
+    resp.skills = svc.get_profile_skills(profile.id)
+    return resp

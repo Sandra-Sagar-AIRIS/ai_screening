@@ -23,17 +23,11 @@ def _run_fallback_safely(*, fallback: Callable[..., Any], kwargs: dict[str, Any]
         )
 
 
-def dispatch_task(
-    *,
-    task: Any | None,
-    fallback: Callable[..., Any],
-    kwargs: dict[str, Any],
-) -> None:
-    """Best-effort async dispatch.
+def _dispatch_in_worker(task: Any | None, fallback: Callable[..., Any], kwargs: dict[str, Any]) -> None:
+    """Runs Celery enqueue (or fallback) off the HTTP thread.
 
-    1) If a Celery task is provided and has `.delay`, enqueue it.
-    2) If enqueue fails (broker down, serialization errors, etc.), run fallback
-       in a detached background worker so request latency stays low.
+    Celery's ``.delay()`` can block for a long time when the broker is slow or
+    unreachable; never call it on the request thread.
     """
     if task is not None and hasattr(task, "delay"):
         try:
@@ -48,5 +42,19 @@ def dispatch_task(
                     "kwargs_keys": sorted(kwargs.keys()),
                 },
             )
-    _FALLBACK_EXECUTOR.submit(_run_fallback_safely, fallback=fallback, kwargs=kwargs)
+    _run_fallback_safely(fallback=fallback, kwargs=kwargs)
+
+
+def dispatch_task(
+    *,
+    task: Any | None,
+    fallback: Callable[..., Any],
+    kwargs: dict[str, Any],
+) -> None:
+    """Best-effort async dispatch (never blocks the caller on broker I/O).
+
+    Celery enqueue and in-process fallback both run on a small thread pool so
+    FastAPI can return immediately after the DB commit.
+    """
+    _FALLBACK_EXECUTOR.submit(_dispatch_in_worker, task, fallback, kwargs)
 

@@ -215,6 +215,8 @@ export type Job = {
   raw_jd_text?: string | null;
   parsing_source?: string | null;
   parsing_status?: string | null;
+  /** Async ATS / match pipeline: created | enriching | ready | failed */
+  enrichment_status?: string | null;
   created_by?: string | null;
   filled_at?: string | null;
   created_at: string;
@@ -292,6 +294,7 @@ export type JobMatchesResponse = {
 
 export type CandidateMatchEntry = {
   job_id: string;
+  job_title?: string | null;
   fit_score: number;
   deterministic_match_score?: number | null;
   semantic_match_score?: number | null;
@@ -365,4 +368,133 @@ export type Pipeline = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+};
+
+// ── Interview domain ──────────────────────────────────────────────────
+
+export type InterviewStatus =
+  | "scheduled"
+  | "pending_panel"
+  | "panel_confirmed"
+  | "in_progress"
+  | "confirmed"
+  | "completed"
+  | "cancelled"
+  | "no_show"
+  | "rescheduled"
+  | "feedback_pending"
+  | "feedback_submitted";
+
+export type InterviewType =
+  | "hr"
+  | "technical"
+  | "managerial"
+  | "final"
+  | "ai_screening";
+
+export type MeetingType = "virtual" | "in_person" | "phone" | "hybrid";
+
+export type ParticipantRole = "lead" | "panel" | "observer" | "hiring_manager";
+export type ParticipantStatus = "invited" | "accepted" | "declined";
+
+export type FeedbackRecommendation =
+  | "strong_yes"
+  | "yes"
+  | "neutral"
+  | "no"
+  | "strong_no";
+
+export type Interview = {
+  id: string;
+  organization_id: string;
+  pipeline_id: string;
+  candidate_id: string | null;
+  job_id: string | null;
+  interview_type: InterviewType | null;
+  meeting_type: MeetingType | null;
+  scheduled_at: string;
+  duration_minutes: number | null;
+  meeting_link: string | null;
+  location: string | null;
+  status: InterviewStatus;
+  interviewer_name: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type QueueInterview = Interview & {
+  candidate_first_name: string | null;
+  candidate_last_name: string | null;
+  job_title: string | null;
+  participant_count: number;
+};
+
+export type InterviewParticipant = {
+  id: string;
+  interview_id: string;
+  user_id: string;
+  participant_role: ParticipantRole;
+  status: ParticipantStatus;
+  joined_at: string | null;
+  created_at: string;
+};
+
+export type InterviewCreatePayload = {
+  pipeline_id: string;
+  interview_type?: InterviewType | null;
+  meeting_type?: MeetingType | null;
+  scheduled_at: string;
+  duration_minutes?: number | null;
+  meeting_link?: string | null;
+  location?: string | null;
+  status?: InterviewStatus;
+  interviewer_name?: string | null;
+  notes?: string | null;
+};
+
+export type InterviewUpdatePayload = Partial<Omit<InterviewCreatePayload, "pipeline_id">>;
+
+export type InterviewFeedback = {
+  id: string;
+  interview_id: string;
+  reviewer_id: string;
+  technical_score: number | null;
+  communication_score: number | null;
+  problem_solving_score: number | null;
+  culture_fit_score: number | null;
+  rating: number | null;
+  recommendation: FeedbackRecommendation | null;
+  strengths: string | null;
+  weaknesses: string | null;
+  notes: string | null;
+  submitted_at: string | null;
+  created_at: string;
+};
+
+export type InterviewFeedbackPayload = {
+  technical_score?: number | null;
+  communication_score?: number | null;
+  problem_solving_score?: number | null;
+  culture_fit_score?: number | null;
+  rating?: number | null;
+  recommendation?: FeedbackRecommendation | null;
+  strengths?: string | null;
+  weaknesses?: string | null;
+  notes?: string | null;
+};
+
+export type InterviewerProfile = {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  title: string | null;
+  department: string | null;
+  is_active: boolean;
+  max_interviews_per_day: number | null;
+  timezone: string | null;
+  bio: string | null;
+  skills: string[];
+  created_at: string;
 };

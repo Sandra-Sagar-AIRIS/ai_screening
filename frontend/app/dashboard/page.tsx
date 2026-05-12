@@ -53,6 +53,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const permissions = useAuthStore((state) => state.permissions);
+  const hydrated = useAuthStore((state) => state.hydrated);
 
   const canReadCandidates = permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
   const canReadJobs = permissions.includes("jobs:read") || permissions.includes("jobs:read_limited");
@@ -63,9 +64,9 @@ export default function DashboardPage() {
     if (!isBackground) setError(null);
     try {
       const [candidatesRes, jobsRes, pipelinesRes] = await Promise.allSettled([
-        canReadCandidates ? getCandidates(200, 0) : Promise.resolve([]),
-        canReadJobs ? getJobs(200, 0) : Promise.resolve([]),
-        canReadPipelines ? getPipelines(200, 0) : Promise.resolve([]),
+        canReadCandidates ? getCandidates(50, 0) : Promise.resolve([]),
+        canReadJobs ? getJobs(20, 0) : Promise.resolve([]),
+        canReadPipelines ? getPipelines(100, 0) : Promise.resolve([]),
       ]);
 
       if (cancelledRef?.cancelled) return;
@@ -95,6 +96,7 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
+    if (!hydrated) return;
     const cancelledRef = { cancelled: false };
     void loadData(cancelledRef, false);
     const interval = window.setInterval(() => {
@@ -104,7 +106,7 @@ export default function DashboardPage() {
       cancelledRef.cancelled = true;
       window.clearInterval(interval);
     };
-  }, [canReadCandidates, canReadJobs, canReadPipelines]);
+  }, [hydrated, canReadCandidates, canReadJobs, canReadPipelines]);
 
   const stats = useMemo(() => {
     if (!data) return null;

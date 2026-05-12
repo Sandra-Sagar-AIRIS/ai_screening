@@ -1,5 +1,23 @@
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
+// ---------------------------------------------------------------------------
+// Lightweight GET-request cache (prevents duplicate in-flight + re-render fetches)
+// ---------------------------------------------------------------------------
+type CacheEntry = { data: unknown; expiresAt: number; inflight?: Promise<unknown> };
+const _getCache = new Map<string, CacheEntry>();
+const _GET_CACHE_TTL_MS = 30_000; // 30 s — safe for list endpoints that poll anyway
+
+/** Expose for manual invalidation (e.g. after mutations). */
+export function invalidateApiCache(pathPrefix?: string) {
+  if (!pathPrefix) {
+    _getCache.clear();
+    return;
+  }
+  for (const key of _getCache.keys()) {
+    if (key.startsWith(pathPrefix)) _getCache.delete(key);
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   detail?: unknown;
@@ -55,6 +73,8 @@ export function formatApiErrorForUser(err: unknown): string {
 
 type RequestOptions = RequestInit & {
   auth?: boolean;
+  /** Abort the request after this many milliseconds (non-blocking server work should not require long waits). */
+  timeoutMs?: number;
 };
 
 function getAuthToken() {
@@ -88,32 +108,101 @@ function shouldSuppressApiErrorLog(path: string, status: number): boolean {
   if (status === 409 && /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path)) {
     return true;
   }
-  // Some pages optionally fetch org users for dropdowns; 403 is non-blocking there.
-  if (status === 403 && /^\/users(?:\?|$|\/)/.test(path)) {
+  // Some pages optionally fetch org users for dropdowns; 403/500 are non-blocking there.
+  if ((status === 403 || status === 500) && /^\/users(?:\?|$|\/)/.test(path)) {
+    return true;
+  }
+  // Interviews feature may not be set up for all candidates/orgs.
+  if (status === 500 && /^\/candidate-management\/candidates\/[^/]+\/interviews(?:\?|$)/.test(path)) {
     return true;
   }
   return false;
 }
 
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { auth = true, headers, ...rest } = options;
+export async function apiRequest<T>(
+  path: string,
+  options: RequestOptions = {},
+  /** Override the default 30 s GET-cache TTL. Pass 0 to skip caching entirely. */
+  cacheTtlMs: number = _GET_CACHE_TTL_MS,
+): Promise<T> {
+  const { auth = true, timeoutMs, headers, signal: userSignal, ...rest } = options;
+  const method = (rest.method ?? "GET").toUpperCase();
+
+  // Only cache GET requests executed in a browser context.
+  if (method === "GET" && cacheTtlMs > 0 && typeof window !== "undefined") {
+    const now = Date.now();
+    const hit = _getCache.get(path);
+    if (hit) {
+      // Return live or in-flight data without an extra network round-trip.
+      if (hit.expiresAt > now) return hit.data as T;
+      if (hit.inflight) return hit.inflight as Promise<T>;
+    }
+    // Prime the inflight dedup slot before the fetch starts.
+    const entry: CacheEntry = { data: undefined, expiresAt: 0 };
+    _getCache.set(path, entry);
+    entry.inflight = _fetchRaw<T>(path, options).then((result) => {
+      entry.data = result;
+      entry.expiresAt = Date.now() + cacheTtlMs;
+      entry.inflight = undefined;
+      return result;
+    }).catch((err) => {
+      _getCache.delete(path);
+      throw err;
+    });
+    return entry.inflight as Promise<T>;
+  }
+
+  // Non-GET or cache disabled — go straight to the network.
+  return _fetchRaw<T>(path, options);
+}
+
+async function _fetchRaw<T>(path: string, options: RequestOptions): Promise<T> {
+  const { auth = true, timeoutMs, headers, signal: userSignal, ...rest } = options;
   const token = auth ? getAuthToken() : null;
+
+  const abortController = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  if (timeoutMs != null && timeoutMs > 0) {
+    timeoutId = globalThis.setTimeout(() => abortController.abort(), timeoutMs);
+  }
+  if (userSignal) {
+    if (userSignal.aborted) {
+      abortController.abort();
+    } else {
+      userSignal.addEventListener("abort", () => abortController.abort(), { once: true });
+    }
+  }
+  const signal = abortController.signal;
 
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...rest,
+      signal,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...headers,
       },
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const aborted =
+      error instanceof Error && error.name === "AbortError";
+    if (aborted) {
+      const message =
+        timeoutMs != null && timeoutMs > 0
+          ? `Request timed out after ${timeoutMs / 1000}s. The server may still be processing — try refreshing.`
+          : "Request was cancelled.";
+      throw new ApiError(message, 0, error);
+    }
     const message =
       "Cannot reach the API server. Verify backend is running and CORS/API base URL are correct.";
     console.error(`[API Network Error] ${path}:`, error);
     throw new ApiError(message, 0, error);
+  } finally {
+    if (timeoutId !== undefined) {
+      globalThis.clearTimeout(timeoutId);
+    }
   }
 
   if (!response.ok) {
