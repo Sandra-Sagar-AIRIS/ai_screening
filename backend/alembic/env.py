@@ -17,6 +17,7 @@ from app.models.client_job_access import ClientJobAccess  # noqa: F401
 from app.models.interview import (  # noqa: F401
     Interview,
     InterviewFeedback,
+    InterviewNote,
     InterviewParticipant,
     InterviewerProfile,
     InterviewerSkill,

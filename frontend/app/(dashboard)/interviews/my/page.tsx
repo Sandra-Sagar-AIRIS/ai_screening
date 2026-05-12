@@ -26,7 +26,7 @@ function MyInterviewCard({
   const [showFeedback, setShowFeedback] = useState(false);
   const scheduledDate = new Date(interview.scheduled_at);
   const isPast = scheduledDate < new Date();
-  const canSubmitFeedback = !["cancelled", "no_show", "feedback_submitted"].includes(interview.status) && isPast;
+  const canSubmitFeedback = ["completed", "feedback_pending"].includes(interview.status);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3 hover:border-[#FF5A1F]/30 transition-colors">
@@ -81,6 +81,12 @@ function MyInterviewCard({
       )}
 
       <div className="flex items-center gap-2 pt-1 border-t border-gray-100">
+        <Link
+          href={`/interviews/${interview.id}`}
+          className="flex-1 h-7 inline-flex items-center justify-center rounded-md border border-[#FF5A1F] bg-[#FF5A1F] text-white text-xs font-medium hover:bg-[#e04e18] transition-colors gap-1"
+        >
+          Open Workspace →
+        </Link>
         {canSubmitFeedback && (
           <Button
             variant="outline"
@@ -89,13 +95,13 @@ function MyInterviewCard({
             onClick={() => setShowFeedback((p) => !p)}
           >
             <MessageSquare className="w-3.5 h-3.5 mr-1" />
-            {showFeedback ? "Hide Feedback" : "Submit Feedback"}
+            {showFeedback ? "Hide Feedback" : "Feedback"}
           </Button>
         )}
         {interview.candidate_id && (
           <Link href={`/candidates/${interview.candidate_id}`}
-            className="text-[11px] text-blue-600 hover:underline">
-            View candidate →
+            className="text-[11px] text-blue-600 hover:underline shrink-0">
+            Profile →
           </Link>
         )}
       </div>

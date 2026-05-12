@@ -13,11 +13,13 @@ const RECOMMENDATIONS: { value: FeedbackRecommendation; label: string }[] = [
   { value: "strong_no",  label: "Strong No" },
 ];
 
-const SCORE_CATEGORIES: { key: "technical_score" | "communication_score" | "problem_solving_score" | "culture_fit_score"; label: string }[] = [
+const SCORE_CATEGORIES: { key: keyof ScoreState; label: string }[] = [
   { key: "technical_score",        label: "Technical" },
   { key: "communication_score",    label: "Communication" },
   { key: "problem_solving_score",  label: "Problem Solving" },
   { key: "culture_fit_score",      label: "Culture Fit" },
+  { key: "system_design_score",    label: "System Design" },
+  { key: "leadership_score",       label: "Leadership" },
 ];
 
 interface ScoreState {
@@ -25,6 +27,8 @@ interface ScoreState {
   communication_score: number | null;
   problem_solving_score: number | null;
   culture_fit_score: number | null;
+  system_design_score: number | null;
+  leadership_score: number | null;
 }
 
 interface Props {
@@ -75,6 +79,8 @@ export function InterviewFeedbackForm({ interviewId, onSubmit }: Props) {
     communication_score: null,
     problem_solving_score: null,
     culture_fit_score: null,
+    system_design_score: null,
+    leadership_score: null,
   });
   const [rating, setRating] = useState<number | null>(null);
   const [recommendation, setRecommendation] = useState<FeedbackRecommendation | "">("");

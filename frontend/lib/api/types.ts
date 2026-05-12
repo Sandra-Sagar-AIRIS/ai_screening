@@ -415,11 +415,14 @@ export type Interview = {
   scheduled_at: string;
   duration_minutes: number | null;
   meeting_link: string | null;
+  meeting_provider: string | null;
   location: string | null;
   status: InterviewStatus;
   interviewer_name: string | null;
   notes: string | null;
   created_by: string | null;
+  started_at: string | null;
+  ended_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -464,6 +467,8 @@ export type InterviewFeedback = {
   communication_score: number | null;
   problem_solving_score: number | null;
   culture_fit_score: number | null;
+  system_design_score: number | null;
+  leadership_score: number | null;
   rating: number | null;
   recommendation: FeedbackRecommendation | null;
   strengths: string | null;
@@ -478,11 +483,58 @@ export type InterviewFeedbackPayload = {
   communication_score?: number | null;
   problem_solving_score?: number | null;
   culture_fit_score?: number | null;
+  system_design_score?: number | null;
+  leadership_score?: number | null;
   rating?: number | null;
   recommendation?: FeedbackRecommendation | null;
   strengths?: string | null;
   weaknesses?: string | null;
   notes?: string | null;
+};
+
+export type InterviewNote = {
+  id: string;
+  interview_id: string;
+  interviewer_id: string;
+  section: string | null;
+  content: string;
+  autosaved_at: string | null;
+  finalized: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CandidateWorkspaceInfo = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string | null;
+  location: string | null;
+  experience_summary: string | null;
+  education: string | null;
+  notes: string | null;
+};
+
+export type FeedbackSummary = {
+  count: number;
+  avg_technical: number | null;
+  avg_communication: number | null;
+  avg_problem_solving: number | null;
+  avg_culture_fit: number | null;
+  avg_system_design: number | null;
+  avg_leadership: number | null;
+  avg_overall: number | null;
+  recommendations: Record<string, number>;
+};
+
+export type WorkspaceData = {
+  interview: Interview;
+  candidate: CandidateWorkspaceInfo | null;
+  job_title: string | null;
+  participants: InterviewParticipant[];
+  notes: InterviewNote[];
+  feedback_summary: FeedbackSummary | null;
 };
 
 export type InterviewerProfile = {

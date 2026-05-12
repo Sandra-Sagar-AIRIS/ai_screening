@@ -10,6 +10,16 @@ const USER_TYPE_KEY = "airis_user_type";
 const ORG_ID_KEY = "airis_organization_id";
 const PERMISSIONS_KEY = "airis_permissions";
 
+function decodeJwtUserId(token: string | null): string | null {
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return (payload.sub as string) ?? (payload.user_id as string) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 type AuthState = {
   hydrated: boolean;
   token: string | null;
@@ -17,6 +27,7 @@ type AuthState = {
   userType: UserType | null;
   permissions: Permission[];
   organizationId: string | null;
+  userId: string | null;
   setAuth: (
     token: string,
     role: UserRole,
@@ -37,6 +48,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   userType: null,
   permissions: [],
   organizationId: null,
+  userId: null,
   setAuth: (token, role, userType, organizationId, permissions) => {
     if (typeof window !== "undefined") {
       window.localStorage.setItem(TOKEN_KEY, token);
@@ -45,7 +57,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       window.localStorage.setItem(ORG_ID_KEY, organizationId);
       window.localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(permissions));
     }
-    set({ token, role, userType, organizationId, permissions });
+    set({ token, role, userType, organizationId, permissions, userId: decodeJwtUserId(token) });
   },
   clearToken: () => {
     if (typeof window !== "undefined") {
@@ -55,7 +67,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       window.localStorage.removeItem(ORG_ID_KEY);
       window.localStorage.removeItem(PERMISSIONS_KEY);
     }
-    set({ token: null, role: null, userType: null, permissions: [], organizationId: null });
+    set({ token: null, role: null, userType: null, permissions: [], organizationId: null, userId: null });
   },
   hydrate: () => {
     if (typeof window === "undefined") {
@@ -67,7 +79,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     const organizationId = window.localStorage.getItem(ORG_ID_KEY);
     const rawPermissions = window.localStorage.getItem(PERMISSIONS_KEY);
     const permissions = rawPermissions ? (JSON.parse(rawPermissions) as Permission[]) : [];
-    set({ token, role, userType, organizationId, permissions, hydrated: true });
+    set({ token, role, userType, organizationId, permissions, userId: decodeJwtUserId(token), hydrated: true });
   },
   refreshPermissions: async () => {
     if (typeof window === "undefined") {

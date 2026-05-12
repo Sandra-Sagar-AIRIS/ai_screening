@@ -117,14 +117,12 @@ function QueueCard({
             <Play className="w-3.5 h-3.5 mr-1.5" />
             {claiming === item.id ? "Claiming…" : "Take Interview"}
           </Button>
-          {item.candidate_id && (
-            <Link
-              href={`/candidates/${item.candidate_id}`}
-              className="text-[11px] text-blue-600 hover:underline shrink-0"
-            >
-              View candidate →
-            </Link>
-          )}
+          <Link
+            href={`/interviews/${item.id}`}
+            className="text-[11px] text-[#FF5A1F] hover:underline shrink-0 font-medium"
+          >
+            Workspace →
+          </Link>
         </div>
       </div>
     </div>

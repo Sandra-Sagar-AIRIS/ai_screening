@@ -28,7 +28,10 @@ from app.schemas.interview import (
     InterviewUpdate,
     InterviewerProfileCreate,
     InterviewerProfileResponse,
+    NoteResponse,
+    NoteUpsert,
     QueueInterviewResponse,
+    WorkspaceResponse,
 )
 from app.services.interview_service import InterviewService
 
@@ -301,3 +304,81 @@ def upsert_my_profile(
     resp = InterviewerProfileResponse.model_validate(profile)
     resp.skills = svc.get_profile_skills(profile.id)
     return resp
+
+
+# ── Workspace ─────────────────────────────────────────────────────────────
+
+@router.get("/{interview_id}/workspace", response_model=WorkspaceResponse)
+def get_workspace(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> WorkspaceResponse:
+    svc = InterviewService(db)
+    return svc.get_workspace(interview_id, UUID(current_user.organization_id), current_user)
+
+
+# ── Notes ─────────────────────────────────────────────────────────────────
+
+@router.get("/{interview_id}/notes", response_model=list[NoteResponse])
+def get_notes(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> list[NoteResponse]:
+    svc = InterviewService(db)
+    notes = svc.get_notes(interview_id, UUID(current_user.organization_id), current_user)
+    return [NoteResponse.model_validate(n) for n in notes]
+
+
+@router.patch("/{interview_id}/notes", response_model=NoteResponse)
+def upsert_note(
+    interview_id: UUID,
+    payload: NoteUpsert,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> NoteResponse:
+    svc = InterviewService(db)
+    note = svc.upsert_note(interview_id, UUID(current_user.organization_id), current_user, payload)
+    return NoteResponse.model_validate(note)
+
+
+# ── Status controls ───────────────────────────────────────────────────────
+
+@router.post("/{interview_id}/start", response_model=InterviewResponse)
+def start_interview(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> InterviewResponse:
+    svc = InterviewService(db)
+    interview = svc.start_interview(interview_id, UUID(current_user.organization_id), current_user)
+    return InterviewResponse.model_validate(interview)
+
+
+@router.post("/{interview_id}/complete", response_model=InterviewResponse)
+def complete_interview(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> InterviewResponse:
+    svc = InterviewService(db)
+    interview = svc.complete_interview(interview_id, UUID(current_user.organization_id), current_user)
+    return InterviewResponse.model_validate(interview)
+
+
+@router.post("/{interview_id}/no-show", response_model=InterviewResponse)
+def mark_no_show(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> InterviewResponse:
+    svc = InterviewService(db)
+    interview = svc.mark_no_show(interview_id, UUID(current_user.organization_id), current_user)
+    return InterviewResponse.model_validate(interview)

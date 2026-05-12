@@ -109,6 +109,7 @@ class InterviewResponse(BaseModel):
     job_id: UUID | None
     interview_type: str | None
     meeting_type: str | None
+    meeting_provider: str | None
     scheduled_at: datetime
     duration_minutes: int | None
     meeting_link: str | None
@@ -117,6 +118,8 @@ class InterviewResponse(BaseModel):
     interviewer_name: str | None
     notes: str | None
     created_by: UUID | None
+    started_at: datetime | None
+    ended_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -157,6 +160,8 @@ class InterviewFeedbackCreate(BaseModel):
     communication_score: int | None = Field(default=None, ge=1, le=5)
     problem_solving_score: int | None = Field(default=None, ge=1, le=5)
     culture_fit_score: int | None = Field(default=None, ge=1, le=5)
+    system_design_score: int | None = Field(default=None, ge=1, le=5)
+    leadership_score: int | None = Field(default=None, ge=1, le=5)
     rating: int | None = Field(default=None, ge=1, le=5)
     recommendation: FeedbackRecommendation | None = None
     strengths: str | None = None
@@ -172,6 +177,8 @@ class InterviewFeedbackResponse(BaseModel):
     communication_score: int | None
     problem_solving_score: int | None
     culture_fit_score: int | None
+    system_design_score: int | None
+    leadership_score: int | None
     rating: int | None
     recommendation: str | None
     strengths: str | None
@@ -181,6 +188,65 @@ class InterviewFeedbackResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ── Notes ──────────────────────────────────────────────────────────────────
+
+class NoteUpsert(BaseModel):
+    section: str | None = Field(default=None, max_length=64)
+    content: str
+    finalized: bool = False
+
+
+class NoteResponse(BaseModel):
+    id: UUID
+    interview_id: UUID
+    interviewer_id: UUID
+    section: str | None
+    content: str
+    autosaved_at: datetime | None
+    finalized: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ── Workspace ──────────────────────────────────────────────────────────────
+
+class CandidateWorkspaceInfo(BaseModel):
+    id: UUID
+    first_name: str
+    last_name: str
+    email: str
+    phone: str | None
+    location: str | None
+    experience_summary: str | None
+    education: str | None
+    notes: str | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FeedbackSummary(BaseModel):
+    count: int
+    avg_technical: float | None
+    avg_communication: float | None
+    avg_problem_solving: float | None
+    avg_culture_fit: float | None
+    avg_system_design: float | None
+    avg_leadership: float | None
+    avg_overall: float | None
+    recommendations: dict[str, int]
+
+
+class WorkspaceResponse(BaseModel):
+    interview: InterviewResponse
+    candidate: CandidateWorkspaceInfo | None
+    job_title: str | None
+    participants: list[InterviewParticipantResponse]
+    notes: list[NoteResponse]
+    feedback_summary: FeedbackSummary | None
 
 
 # ── Interviewer profiles ───────────────────────────────────────────────────
