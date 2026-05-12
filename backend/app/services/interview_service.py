@@ -11,6 +11,7 @@ from app.models.candidate import Candidate
 from app.models.interview import (
     Interview,
     InterviewFeedback,
+    InterviewNote,
     InterviewParticipant,
     InterviewerProfile,
     InterviewerSkill,
@@ -20,13 +21,20 @@ from app.models.job import Job
 from app.models.pipeline import Pipeline
 from app.schemas.auth import CurrentUser
 from app.schemas.interview import (
+    CandidateWorkspaceInfo,
+    FeedbackSummary,
     InterviewCreate,
     InterviewFeedbackCreate,
     InterviewParticipantCreate,
+    InterviewParticipantResponse,
+    InterviewResponse,
     InterviewStatus,
     InterviewUpdate,
     InterviewerProfileCreate,
+    NoteResponse,
+    NoteUpsert,
     QueueInterviewResponse,
+    WorkspaceResponse,
 )
 from app.services.access_scope_service import AccessScopeService
 from app.services.interview_notification_service import InterviewNotificationService
@@ -40,6 +48,20 @@ QUEUE_STATUSES: frozenset[str] = frozenset({
     InterviewStatus.PENDING_PANEL.value,
     InterviewStatus.SCHEDULED.value,
 })
+
+
+def _detect_meeting_provider(url: str | None) -> str | None:
+    """Derive a canonical provider slug from the meeting link."""
+    if not url:
+        return None
+    import re
+    if re.search(r"meet\.google\.com", url):
+        return "google_meet"
+    if re.search(r"teams\.microsoft\.com|teams\.live\.com", url):
+        return "teams"
+    if re.search(r"zoom\.us", url):
+        return "zoom"
+    return "other"
 
 
 def _assert_scheduled_not_in_past(scheduled_at: datetime) -> None:
@@ -114,6 +136,7 @@ _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
     # Terminal + near-terminal
     InterviewStatus.COMPLETED.value: frozenset({
         InterviewStatus.FEEDBACK_PENDING.value,
+        InterviewStatus.FEEDBACK_SUBMITTED.value,  # direct path when single reviewer
     }),
     InterviewStatus.FEEDBACK_SUBMITTED.value: frozenset(),
     InterviewStatus.CANCELLED.value: frozenset(),
@@ -185,6 +208,7 @@ class InterviewService:
             job_id=pipeline.job_id,
             interview_type=payload.interview_type.value if payload.interview_type else None,
             meeting_type=payload.meeting_type.value if payload.meeting_type else None,
+            meeting_provider=_detect_meeting_provider(payload.meeting_link),
             scheduled_at=payload.scheduled_at,
             duration_minutes=payload.duration_minutes,
             meeting_link=payload.meeting_link,
@@ -276,6 +300,9 @@ class InterviewService:
 
         if "meeting_type" in update_data and update_data["meeting_type"] is not None:
             update_data["meeting_type"] = update_data["meeting_type"].value
+
+        if "meeting_link" in update_data:
+            update_data["meeting_provider"] = _detect_meeting_provider(update_data.get("meeting_link"))
 
         if "interviewer_name" in update_data and update_data["interviewer_name"] is not None:
             update_data["interviewer_name"] = str(update_data["interviewer_name"]).strip() or None
@@ -535,11 +562,15 @@ class InterviewService:
     ) -> InterviewFeedback:
         interview = self.get_interview_by_id(interview_id, organization_id, current_user)
 
-        non_feedback_statuses = {InterviewStatus.CANCELLED.value, InterviewStatus.NO_SHOW.value}
-        if interview.status in non_feedback_statuses:
+        # Feedback is only unlocked once the interview session has ended.
+        feedback_allowed_statuses = {InterviewStatus.COMPLETED.value, InterviewStatus.FEEDBACK_PENDING.value}
+        if interview.status not in feedback_allowed_statuses:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot submit feedback for an interview with status '{interview.status}'.",
+                detail=(
+                    "Interview must be completed before feedback can be submitted. "
+                    f"Current status is '{interview.status}'."
+                ),
             )
 
         reviewer_id = UUID(current_user.user_id)
@@ -564,6 +595,8 @@ class InterviewService:
             communication_score=payload.communication_score,
             problem_solving_score=payload.problem_solving_score,
             culture_fit_score=payload.culture_fit_score,
+            system_design_score=payload.system_design_score,
+            leadership_score=payload.leadership_score,
             rating=payload.rating,
             recommendation=payload.recommendation.value if payload.recommendation else None,
             strengths=payload.strengths,
@@ -573,12 +606,10 @@ class InterviewService:
         )
         self.db.add(feedback)
 
-        if interview.status == InterviewStatus.COMPLETED.value:
-            pass
-        else:
-            _validate_status_transition(interview.status, InterviewStatus.FEEDBACK_PENDING.value)
-            interview.status = InterviewStatus.FEEDBACK_PENDING.value
-            self.db.add(interview)
+        # Advance status to feedback_submitted after scorecard is recorded.
+        _validate_status_transition(interview.status, InterviewStatus.FEEDBACK_SUBMITTED.value)
+        interview.status = InterviewStatus.FEEDBACK_SUBMITTED.value
+        self.db.add(interview)
 
         self.db.commit()
         self.db.refresh(feedback)
@@ -664,3 +695,206 @@ class InterviewService:
             )
         )
         return list(rows)
+
+    # ── Workspace ────────────────────────────────────────────────────────
+
+    def get_workspace(
+        self,
+        interview_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> WorkspaceResponse:
+        interview = self.get_interview_by_id(interview_id, organization_id, current_user)
+
+        candidate: Candidate | None = None
+        if interview.candidate_id:
+            candidate = self.db.scalar(
+                select(Candidate).where(Candidate.id == interview.candidate_id)
+            )
+
+        job_title: str | None = None
+        if interview.job_id:
+            job = self.db.scalar(select(Job).where(Job.id == interview.job_id))
+            job_title = job.title if job else None
+
+        participants = list(
+            self.db.scalars(
+                select(InterviewParticipant)
+                .where(InterviewParticipant.interview_id == interview_id)
+                .order_by(InterviewParticipant.created_at.asc())
+            )
+        )
+
+        notes = self._get_notes(interview_id, organization_id, current_user)
+        feedback_summary = self._build_feedback_summary(interview_id)
+
+        return WorkspaceResponse(
+            interview=InterviewResponse.model_validate(interview),
+            candidate=CandidateWorkspaceInfo.model_validate(candidate) if candidate else None,
+            job_title=job_title,
+            participants=[InterviewParticipantResponse.model_validate(p) for p in participants],
+            notes=[NoteResponse.model_validate(n) for n in notes],
+            feedback_summary=feedback_summary,
+        )
+
+    # ── Notes ────────────────────────────────────────────────────────────
+
+    def _get_notes(
+        self,
+        interview_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> list[InterviewNote]:
+        user_uuid = UUID(current_user.user_id)
+        return list(
+            self.db.scalars(
+                select(InterviewNote)
+                .where(
+                    InterviewNote.interview_id == interview_id,
+                    InterviewNote.interviewer_id == user_uuid,
+                )
+                .order_by(InterviewNote.created_at.asc())
+            )
+        )
+
+    def get_notes(
+        self,
+        interview_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> list[InterviewNote]:
+        self.get_interview_by_id(interview_id, organization_id, current_user)
+        return self._get_notes(interview_id, organization_id, current_user)
+
+    def upsert_note(
+        self,
+        interview_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        payload: NoteUpsert,
+    ) -> InterviewNote:
+        self.get_interview_by_id(interview_id, organization_id, current_user)
+        user_uuid = UUID(current_user.user_id)
+        now = datetime.now(UTC)
+
+        # One note per (interview, interviewer, section); upsert by section
+        existing = self.db.scalar(
+            select(InterviewNote).where(
+                InterviewNote.interview_id == interview_id,
+                InterviewNote.interviewer_id == user_uuid,
+                InterviewNote.section == payload.section,
+            )
+        )
+
+        if existing is not None:
+            existing.content = payload.content
+            existing.finalized = payload.finalized
+            existing.autosaved_at = now if not payload.finalized else existing.autosaved_at
+            existing.updated_at = now
+            self.db.add(existing)
+            self.db.commit()
+            self.db.refresh(existing)
+            return existing
+
+        note = InterviewNote(
+            interview_id=interview_id,
+            interviewer_id=user_uuid,
+            organization_id=organization_id,
+            section=payload.section,
+            content=payload.content,
+            finalized=payload.finalized,
+            autosaved_at=now if not payload.finalized else None,
+        )
+        self.db.add(note)
+        self.db.commit()
+        self.db.refresh(note)
+        return note
+
+    # ── Status controls ──────────────────────────────────────────────────
+
+    def start_interview(
+        self,
+        interview_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> Interview:
+        interview = self.get_interview_by_id(interview_id, organization_id, current_user)
+        _validate_status_transition(interview.status, InterviewStatus.IN_PROGRESS.value)
+        interview.status = InterviewStatus.IN_PROGRESS.value
+        if interview.started_at is None:
+            interview.started_at = datetime.now(UTC)
+        self.db.add(interview)
+        self.db.commit()
+        self.db.refresh(interview)
+        return interview
+
+    def complete_interview(
+        self,
+        interview_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> Interview:
+        interview = self.get_interview_by_id(interview_id, organization_id, current_user)
+        _validate_status_transition(interview.status, InterviewStatus.COMPLETED.value)
+        interview.status = InterviewStatus.COMPLETED.value
+        interview.ended_at = datetime.now(UTC)
+        self.db.add(interview)
+        self.db.commit()
+        self.db.refresh(interview)
+        return interview
+
+    def mark_no_show(
+        self,
+        interview_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> Interview:
+        interview = self.get_interview_by_id(interview_id, organization_id, current_user)
+        _validate_status_transition(interview.status, InterviewStatus.NO_SHOW.value)
+        interview.status = InterviewStatus.NO_SHOW.value
+        self.db.add(interview)
+        self.db.commit()
+        self.db.refresh(interview)
+        return interview
+
+    # ── Feedback summary ─────────────────────────────────────────────────
+
+    def _build_feedback_summary(self, interview_id: UUID) -> FeedbackSummary | None:
+        feedback_rows = list(
+            self.db.scalars(
+                select(InterviewFeedback).where(InterviewFeedback.interview_id == interview_id)
+            )
+        )
+        if not feedback_rows:
+            return None
+
+        def _avg(values: list[int | None]) -> float | None:
+            real = [v for v in values if v is not None]
+            return round(sum(real) / len(real), 2) if real else None
+
+        score_dims = [
+            "technical_score",
+            "communication_score",
+            "problem_solving_score",
+            "culture_fit_score",
+            "system_design_score",
+            "leadership_score",
+            "rating",
+        ]
+
+        recommendations: dict[str, int] = {}
+        for fb in feedback_rows:
+            if fb.recommendation:
+                recommendations[fb.recommendation] = recommendations.get(fb.recommendation, 0) + 1
+
+        return FeedbackSummary(
+            count=len(feedback_rows),
+            avg_technical=_avg([fb.technical_score for fb in feedback_rows]),
+            avg_communication=_avg([fb.communication_score for fb in feedback_rows]),
+            avg_problem_solving=_avg([fb.problem_solving_score for fb in feedback_rows]),
+            avg_culture_fit=_avg([fb.culture_fit_score for fb in feedback_rows]),
+            avg_system_design=_avg([getattr(fb, "system_design_score", None) for fb in feedback_rows]),
+            avg_leadership=_avg([getattr(fb, "leadership_score", None) for fb in feedback_rows]),
+            avg_overall=_avg([fb.rating for fb in feedback_rows]),
+            recommendations=recommendations,
+        )

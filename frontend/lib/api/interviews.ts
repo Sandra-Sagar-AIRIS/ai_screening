@@ -4,10 +4,12 @@ import type {
   InterviewCreatePayload,
   InterviewFeedback,
   InterviewFeedbackPayload,
+  InterviewNote,
   InterviewParticipant,
   InterviewUpdatePayload,
   InterviewerProfile,
   QueueInterview,
+  WorkspaceData,
 } from "@/lib/api/types";
 
 const BASE = "/interviews";
@@ -139,4 +141,53 @@ export async function upsertMyProfile(payload: Partial<InterviewerProfile> & { s
     method: "PUT",
     body: JSON.stringify(payload),
   });
+}
+
+// ── Workspace ────────────────────────────────────────────────────────────
+
+export async function getWorkspace(interviewId: string): Promise<WorkspaceData> {
+  return apiRequest<WorkspaceData>(`${BASE}/${interviewId}/workspace`);
+}
+
+export async function getNotes(interviewId: string): Promise<InterviewNote[]> {
+  return apiRequest<InterviewNote[]>(`${BASE}/${interviewId}/notes`);
+}
+
+export async function upsertNote(
+  interviewId: string,
+  payload: { section?: string | null; content: string; finalized?: boolean },
+): Promise<InterviewNote> {
+  const result = await apiRequest<InterviewNote>(`${BASE}/${interviewId}/notes`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  invalidateApiCache(`${BASE}/${interviewId}`);
+  return result;
+}
+
+export async function startInterview(interviewId: string): Promise<Interview> {
+  const result = await apiRequest<Interview>(`${BASE}/${interviewId}/start`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  invalidateApiCache(`${BASE}/${interviewId}`);
+  return result;
+}
+
+export async function completeInterview(interviewId: string): Promise<Interview> {
+  const result = await apiRequest<Interview>(`${BASE}/${interviewId}/complete`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  invalidateApiCache(`${BASE}/${interviewId}`);
+  return result;
+}
+
+export async function markNoShow(interviewId: string): Promise<Interview> {
+  const result = await apiRequest<Interview>(`${BASE}/${interviewId}/no-show`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  invalidateApiCache(`${BASE}/${interviewId}`);
+  return result;
 }

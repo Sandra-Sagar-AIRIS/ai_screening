@@ -81,6 +81,14 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     anyOfPermissions: [NAV_PERMISSION_CODES.INTERVIEWS_READ],
     adminMayAccess: true,
   },
+  // Workspace: dynamic route /interviews/[id] — access requires interviews:read
+  {
+    name: "Interview Workspace",
+    path: "/interviews",
+    anyOfPermissions: [NAV_PERMISSION_CODES.INTERVIEWS_READ],
+    adminMayAccess: true,
+    showInSidebar: false,
+  },
   // Same RBAC as above, for alternate URLs that still use DashboardShell.
   { name: "Jobs (dashboard path)", path: "/dashboard/jobs", anyOfPermissions: [NAV_PERMISSION_CODES.JOBS_READ], showInSidebar: false },
   {

@@ -108,6 +108,10 @@ function shouldSuppressApiErrorLog(path: string, status: number): boolean {
   if (status === 409 && /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path)) {
     return true;
   }
+  // Duplicate feedback or claim submission — expected domain conflict, not a bug.
+  if (status === 409 && /^\/interviews\/[^/]+\/(feedback|claim)(?:\?|$)/.test(path)) {
+    return true;
+  }
   // Some pages optionally fetch org users for dropdowns; 403/500 are non-blocking there.
   if ((status === 403 || status === 500) && /^\/users(?:\?|$|\/)/.test(path)) {
     return true;
