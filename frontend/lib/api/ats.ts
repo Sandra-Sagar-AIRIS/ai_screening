@@ -7,8 +7,15 @@ import type {
   JobMatchesResponse,
 } from "@/lib/api/types";
 
-const ENRICHMENT_POLL_MS = 4000;
+const ENRICHMENT_POLL_INITIAL_MS = 2000;   // first interval: 2 s (fast initial check)
+const ENRICHMENT_POLL_MAX_INTERVAL_MS = 8000; // cap each interval at 8 s
+const ENRICHMENT_POLL_BACKOFF = 1.4;          // multiply each interval by 1.4×
 const ENRICHMENT_POLL_MAX_MS = 120000;
+
+/** Returns the next poll delay using exponential backoff, capped at max. */
+function nextPollMs(current: number): number {
+  return Math.min(Math.round(current * ENRICHMENT_POLL_BACKOFF), ENRICHMENT_POLL_MAX_INTERVAL_MS);
+}
 
 export type AtsCandidateRescoreResponse = {
   status: string;
@@ -46,13 +53,15 @@ export async function pollCandidateMatchesUntilEnriched(
   opts?: { onTick?: (matches: CandidateMatchEntry[]) => void }
 ): Promise<CandidateMatchEntry[]> {
   const deadline = Date.now() + ENRICHMENT_POLL_MAX_MS;
+  let interval = ENRICHMENT_POLL_INITIAL_MS;
   let last: CandidateMatchEntry[] = [];
   while (Date.now() < deadline) {
     const result = await getCandidateMatchesAts(candidateId, { limit: 50, offset: 0 });
     last = result.matches ?? [];
     opts?.onTick?.(last);
     if (!atsAwaitingSemanticEnrichment(last)) break;
-    await new Promise((r) => setTimeout(r, ENRICHMENT_POLL_MS));
+    await new Promise((r) => setTimeout(r, interval));
+    interval = nextPollMs(interval);
   }
   return last;
 }
@@ -62,6 +71,7 @@ export async function pollAtsPairStatusesUntilSettled(
   opts?: { onTick?: (states: AtsPairStatusResponse[]) => void }
 ): Promise<AtsPairStatusResponse[]> {
   const deadline = Date.now() + ENRICHMENT_POLL_MAX_MS;
+  let interval = ENRICHMENT_POLL_INITIAL_MS;
   let last: AtsPairStatusResponse[] = [];
   while (Date.now() < deadline) {
     last = await Promise.all(pairs.map((p) => getAtsPairStatus(p.candidate_id, p.job_id)));
@@ -70,7 +80,8 @@ export async function pollAtsPairStatusesUntilSettled(
       ["queued", "pending", "parsing", "deterministic_complete", "ai_enriching"].includes(s.processing_state)
     );
     if (!inflight) break;
-    await new Promise((r) => setTimeout(r, ENRICHMENT_POLL_MS));
+    await new Promise((r) => setTimeout(r, interval));
+    interval = nextPollMs(interval);
   }
   return last;
 }
@@ -81,13 +92,15 @@ export async function pollJobMatchesUntilEnriched(
   opts?: { onTick?: (matches: JobMatchEntry[]) => void }
 ): Promise<JobMatchEntry[]> {
   const deadline = Date.now() + ENRICHMENT_POLL_MAX_MS;
+  let interval = ENRICHMENT_POLL_INITIAL_MS;
   let last: JobMatchEntry[] = [];
   while (Date.now() < deadline) {
     const page = await getJobMatchesAts(jobId, params);
     last = page.matches ?? [];
     opts?.onTick?.(last);
     if (!atsAwaitingSemanticEnrichment(last)) break;
-    await new Promise((r) => setTimeout(r, ENRICHMENT_POLL_MS));
+    await new Promise((r) => setTimeout(r, interval));
+    interval = nextPollMs(interval);
   }
   return last;
 }

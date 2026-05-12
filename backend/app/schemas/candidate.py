@@ -38,5 +38,9 @@ class CandidateResponse(CandidateBase):
     created_at: datetime
     updated_at: datetime
 
+    # Override: response model must not reject legacy rows with malformed emails.
+    # Validation (EmailStr) applies on input (CandidateCreate/Update), not output.
+    email: str  # type: ignore[assignment]
+
     model_config = ConfigDict(from_attributes=True)
 

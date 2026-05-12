@@ -123,29 +123,27 @@ export default function CandidatesPage() {
   const loadCandidates = useCallback(async (opts?: { query?: string; location?: string }) => {
     setLoading(true);
     try {
-      const data = await getCandidates(50, 0, {
-        query: opts?.query || undefined,
-        location: opts?.location || undefined,
-        status: statusFilter === "all" ? undefined : statusFilter,
-        source: sourceFilter === "all" ? undefined : sourceFilter,
-        min_years_experience: experienceFilter.trim() ? Number(experienceFilter) : undefined,
-        job_id: selectedJobId || undefined,
-      });
-      setCandidates(data);
-      try {
-        const pipelineData = await getPipelines(200, 0);
-        setPipelines(pipelineData);
-      } catch {
-        // Candidate list remains usable even if pipeline summary cannot be loaded.
-        setPipelines([]);
-      }
-      setError(null);
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.message);
+      // Run candidates + pipelines in parallel — neither depends on the other.
+      const [candidatesResult, pipelinesResult] = await Promise.allSettled([
+        getCandidates(50, 0, {
+          query: opts?.query || undefined,
+          location: opts?.location || undefined,
+          status: statusFilter === "all" ? undefined : statusFilter,
+          source: sourceFilter === "all" ? undefined : sourceFilter,
+          min_years_experience: experienceFilter.trim() ? Number(experienceFilter) : undefined,
+          job_id: selectedJobId || undefined,
+        }),
+        getPipelines(200, 0),
+      ]);
+
+      if (candidatesResult.status === "fulfilled") {
+        setCandidates(candidatesResult.value);
+        setError(null);
       } else {
-        setError("Unable to load candidates");
+        const err = candidatesResult.reason;
+        setError(err instanceof ApiError ? err.message : "Unable to load candidates");
       }
+      setPipelines(pipelinesResult.status === "fulfilled" ? pipelinesResult.value : []);
     } finally {
       setLoading(false);
     }

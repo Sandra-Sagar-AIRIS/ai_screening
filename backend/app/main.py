@@ -1,3 +1,5 @@
+import time
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -97,13 +99,17 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(ResponseValidationError)
 async def response_validation_exception_handler(request: Request, exc: ResponseValidationError):
+    # Safely extract errors — exc.errors() can itself throw on some Pydantic builds.
+    try:
+        errors = exc.errors()
+    except Exception:
+        errors = repr(exc)
     logger.error(
         "response_validation_failed",
         extra={
             "path": str(request.url.path),
             "method": request.method,
             "exception_type": type(exc).__name__,
-            "errors": exc.errors(),
         },
         exc_info=exc,
     )
@@ -112,8 +118,8 @@ async def response_validation_exception_handler(request: Request, exc: ResponseV
         headers=CORS_HEADERS,
         content={
             "success": False,
-            "detail": "Response validation error. Data format mismatch.",
-            "error": exc.errors(),
+            "detail": "Response serialization error.",
+            "error": str(errors)[:500],
             "exception_type": "ResponseValidationError",
         },
     )
@@ -147,6 +153,25 @@ async def global_exception_handler(request: Request, exc: Exception):
             "exception_type": type(exc).__name__,
         },
     )
+
+@app.middleware("http")
+async def request_timing_middleware(request: Request, call_next):
+    t0 = time.monotonic()
+    response = await call_next(request)
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    response.headers["X-Response-Time"] = f"{duration_ms}ms"
+    if duration_ms > 500:
+        logger.warning(
+            "slow_request",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "duration_ms": duration_ms,
+                "status_code": response.status_code,
+            },
+        )
+    return response
+
 
 # Reflect once at startup so ORM classes are available for repositories/services.
 @app.on_event("startup")

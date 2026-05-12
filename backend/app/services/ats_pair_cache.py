@@ -6,8 +6,8 @@ import time
 from collections.abc import Callable
 from uuid import UUID
 
-_JOB_SKILLS_TTL_SEC = 60.0
-_RESUME_EXTRA_TTL_SEC = 45.0
+_JOB_SKILLS_TTL_SEC = 300.0   # job skills change only on explicit job edits
+_RESUME_EXTRA_TTL_SEC = 180.0  # parsed resume fields are stable within a session
 
 _job_skills_cache: dict[UUID, tuple[float, list[str], list[str]]] = {}
 _resume_extra_cache: dict[UUID, tuple[float, dict[str, object]]] = {}

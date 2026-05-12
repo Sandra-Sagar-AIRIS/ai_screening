@@ -5,9 +5,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
-  Menu, Bell, Plus, Search,
+  Menu, Bell, Search,
   LayoutDashboard, Users, Briefcase, Filter, Mail, UserCheck,
-  Calendar, FileText, Settings, Shield,
+  CalendarDays, List, Settings, Shield,
   ChevronLeft, ChevronRight, LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Roles: Shield,
   Settings: Settings,
   Invite: Mail,
+  "Interview Queue": List,
+  "My Interviews": CalendarDays,
 };
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
@@ -58,6 +60,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   );
 
   const recruitingMenu = filteredMenu.filter(i => ["Dashboard", "Candidates", "Jobs", "Pipeline", "My Jobs", "Clients", "Invites", "Invite"].includes(i.name));
+  const interviewMenu = filteredMenu.filter(i => ["Interview Queue", "My Interviews"].includes(i.name));
   const managementMenu = filteredMenu.filter(i => ["Users", "Roles", "Settings"].includes(i.name));
 
   useEffect(() => {
@@ -137,9 +140,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-[#FAFAFA]">
       {/* Mobile Sidebar Overlay */}
-      {mobileNavOpen && (
-        <div 
-          className="fixed inset-0 z-40 bg-slate-900/20 backdrop-blur-sm md:hidden transition-opacity" 
+      {mobileNavOpen ? (
+        <div
+          className="fixed inset-0 z-40 bg-slate-900/20 backdrop-blur-sm md:hidden transition-opacity"
           onClick={() => setMobileNavOpen(false)}
           aria-hidden
         />
@@ -177,6 +180,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
         <div className="scrollbar-hide flex-1 overflow-y-auto overflow-x-hidden py-2">
           {renderNavGroup("Recruiting", recruitingMenu)}
+          {renderNavGroup("Interviews", interviewMenu)}
           {renderNavGroup("Management", managementMenu)}
         </div>
 

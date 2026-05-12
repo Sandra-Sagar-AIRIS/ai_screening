@@ -4,19 +4,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError, API_BASE_URL } from "@/lib/api/client";
-import { getMyPermissions } from "@/lib/api/auth";
 import {
   addCandidateInteraction,
   assignCandidateRecruiter,
-  createCandidateInterview,
   getCandidateById,
   getCandidateInteractions,
-  getCandidateInterviews,
   updateCandidate,
-  updateCandidateInterview,
   type CandidateInteraction,
-  type InterviewRecord,
 } from "@/lib/api/candidates";
+import { getInterviews } from "@/lib/api/interviews";
+import { InterviewList } from "@/components/interviews/InterviewList";
+import { InterviewTimeline } from "@/components/interviews/InterviewTimeline";
+import { ScheduleInterviewModal } from "@/components/interviews/ScheduleInterviewModal";
 import { getJobs, submitCandidateToJob } from "@/lib/api/jobs";
 import { getPipelines, updatePipeline } from "@/lib/api/pipeline";
 import {
@@ -26,7 +25,7 @@ import {
   pollCandidateMatchesUntilEnriched,
   rescoreCandidateAts,
 } from "@/lib/api/ats";
-import type { Candidate, CandidateMatchEntry, Job, OrganizationUser, Pipeline } from "@/lib/api/types";
+import type { Candidate, CandidateMatchEntry, Interview, Job, OrganizationUser, Pipeline } from "@/lib/api/types";
 import { getUsers } from "@/lib/api/users";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,27 +35,6 @@ import Link from "next/link";
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
 import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
 import { ATSMatchBreakdownPanel } from "@/components/ats/ats-match-breakdown-panel";
-import {
-  Mail,
-  Phone,
-  MapPin,
-  Briefcase,
-  Calendar,
-  FileText,
-  Download,
-  ExternalLink,
-  MessageSquare,
-  Clock,
-  ArrowLeft,
-  Edit3,
-  Save,
-  X,
-  Plus,
-  User,
-  Star,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import Link from "next/link";
 
 
 function snapJobIdsFromMatches(matches: CandidateMatchEntry[]): string[] {
@@ -69,7 +47,8 @@ export default function CandidateDetailPage() {
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [interactions, setInteractions] = useState<CandidateInteraction[]>([]);
   const [interactionsLoadFailed, setInteractionsLoadFailed] = useState(false);
-  const [interviews, setInterviews] = useState<InterviewRecord[]>([]);
+  const [interviews, setInterviews] = useState<Interview[]>([]);
+  const [schedulingModalOpen, setSchedulingModalOpen] = useState(false);
   const [users, setUsers] = useState<OrganizationUser[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -83,13 +62,6 @@ export default function CandidateDetailPage() {
   const [role, setRole] = useState("");
   const [yearsExperience, setYearsExperience] = useState("");
   const [newNote, setNewNote] = useState("");
-  const [scheduledAt, setScheduledAt] = useState("");
-  const [interviewerName, setInterviewerName] = useState("");
-  const [interviewType, setInterviewType] = useState<"HR" | "TECH">("HR");
-  const [feedbackNotes, setFeedbackNotes] = useState<Record<string, string>>({});
-  const [feedbackRatings, setFeedbackRatings] = useState<Record<string, string>>({});
-  const [rescheduleTimes, setRescheduleTimes] = useState<Record<string, string>>({});
-  const [interviewUpdatingId, setInterviewUpdatingId] = useState<string | null>(null);
   const [selectedRecruiterId, setSelectedRecruiterId] = useState("");
   const [addingNote, setAddingNote] = useState(false);
   const [submitJobId, setSubmitJobId] = useState("");
@@ -135,12 +107,16 @@ export default function CandidateDetailPage() {
     async function loadData() {
       try {
         setInteractionsLoadFailed(false);
-        const data = await getCandidateById(params.candidateId);
-        const [timelineResult, pipelinesResult, interviewResult] = await Promise.allSettled([
-          getCandidateInteractions(params.candidateId, 100, 0),
-          getPipelines(200, 0, undefined, params.candidateId),
-          getCandidateInterviews(params.candidateId),
-        ]);
+        // Fire candidate + all supporting data concurrently; none depends on another.
+        const [data, timelineResult, pipelinesResult, interviewResult, jobsResult, usersResult] =
+          await Promise.all([
+            getCandidateById(params.candidateId),
+            getCandidateInteractions(params.candidateId, 100, 0).catch(() => null),
+            getPipelines(200, 0, undefined, params.candidateId).catch(() => []),
+            getInterviews({ candidate_id: params.candidateId, limit: 100 }).catch(() => []),
+            getJobs(50, 0).catch(() => []),
+            getUsers().catch(() => []),
+          ]);
         setAtsLoading(true);
         setAtsHint(null);
         let initialMatches: CandidateMatchEntry[] = [];
@@ -156,11 +132,13 @@ export default function CandidateDetailPage() {
           return;
         }
         setCandidate(data);
-        setInteractionsLoadFailed(timelineResult.status === "rejected");
-        setInteractions(timelineResult.status === "fulfilled" ? timelineResult.value : []);
-        const loadedPipelines = pipelinesResult.status === "fulfilled" ? pipelinesResult.value : [];
+        setInteractionsLoadFailed(timelineResult === null);
+        setInteractions(timelineResult ?? []);
+        const loadedPipelines = pipelinesResult as Pipeline[];
         setPipelines(loadedPipelines);
-        setInterviews(interviewResult.status === "fulfilled" ? interviewResult.value : []);
+        setInterviews(interviewResult as Interview[]);
+        setJobs((jobsResult as Job[]).filter(Boolean));
+        setUsers((usersResult as OrganizationUser[]).filter((u) => u.role === "recruiter" || u.role === "admin"));
         setAtsMatches(initialMatches);
         if (initialMatches.length === 0 && loadedPipelines.length > 0) {
           // ATS scoring is async; trigger once and poll briefly before showing unavailable.
@@ -198,46 +176,7 @@ export default function CandidateDetailPage() {
     void loadData();
   }, [params.candidateId]);
 
-  useEffect(() => {
-    async function loadUsers() {
-      try {
-        const me = await getMyPermissions();
-        if (!me.permissions.includes("users:invite")) {
-          setUsers([]);
-          return;
-        }
-        const data = await getUsers();
-        setUsers(data.filter((user) => user.role === "recruiter" || user.role === "admin"));
-      } catch {
-        setUsers([]);
-      }
-    }
-    async function loadJobs() {
-      try {
-        const data = await getJobs(50, 0);
-        setJobs(data);
-      } catch {
-        setJobs([]);
-      }
-    }
-    loadUsers();
-    loadJobs();
-  }, []);
 
-  const interviewMetaById = useMemo(() => {
-    const meta = new Map<string, { interview_type?: string; rating?: number; notes?: string }>();
-    for (const item of interactions) {
-      if (item.interaction_type !== "interview" || !item.metadata) continue;
-      const interviewId = typeof item.metadata.interview_id === "string" ? item.metadata.interview_id : null;
-      if (!interviewId) continue;
-      meta.set(interviewId, {
-        interview_type: typeof item.metadata.interview_type === "string" ? item.metadata.interview_type : undefined,
-        rating: typeof item.metadata.rating === "number" ? item.metadata.rating : undefined,
-        notes: item.body ?? undefined,
-      });
-    }
-    return meta;
-  }, [interactions]);
 
   const orderedTimeline = useMemo(
     () =>
@@ -374,6 +313,10 @@ export default function CandidateDetailPage() {
 
   const currentPipeline = sortedPipelines[0];
   const stageLabel = currentPipeline ? formatPipelineStage(currentPipeline.stage).toUpperCase() : "NOT SUBMITTED";
+  const eligiblePipelines = useMemo(
+    () => pipelines.filter((p) => ["screening", "interview", "offer", "placed"].includes(p.stage)),
+    [pipelines]
+  );
   const recruiterName = users.find((user) => user.id === candidate?.recruiter_id)?.email ?? candidate?.recruiter_id ?? "-";
   const candidateJobId = currentPipeline?.job_id ?? null;
   const jobTitle = jobs.find((job) => job.id === candidateJobId)?.title ?? (candidateJobId || "-");
@@ -452,81 +395,14 @@ export default function CandidateDetailPage() {
     }
   }
 
-  async function handleScheduleInterview() {
-    if (!params.candidateId || !scheduledAt || !candidate) return;
-    await createCandidateInterview({
-      candidate_id: params.candidateId,
-      job_id: candidate.job_id ?? undefined,
-      scheduled_at: new Date(scheduledAt).toISOString(),
-      interviewer_name: interviewerName || undefined,
-      interview_type: interviewType,
-      status: "scheduled",
-    });
-    const [timeline, interviewList] = await Promise.all([
-      getCandidateInteractions(params.candidateId, 100, 0),
-      getCandidateInterviews(params.candidateId),
-    ]);
-    setInteractions(timeline);
-    setInterviews(interviewList);
-    setScheduledAt("");
-    setInterviewerName("");
-  }
-
   async function refreshInterviewData() {
     if (!params.candidateId) return;
     const [timeline, interviewList] = await Promise.all([
       getCandidateInteractions(params.candidateId, 100, 0),
-      getCandidateInterviews(params.candidateId),
+      getInterviews({ candidate_id: params.candidateId, limit: 100 }).catch(() => [] as Interview[]),
     ]);
     setInteractions(timeline);
     setInterviews(interviewList);
-  }
-
-  async function handleReschedule(interviewId: string) {
-    const scheduledAt = rescheduleTimes[interviewId];
-    if (!scheduledAt) return;
-    setInterviewUpdatingId(interviewId);
-    try {
-      await updateCandidateInterview(interviewId, {
-        scheduled_at: new Date(scheduledAt).toISOString(),
-        status: "rescheduled",
-      });
-      await updateCandidateInterview(interviewId, { status: "scheduled" });
-      await refreshInterviewData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to reschedule interview.");
-    } finally {
-      setInterviewUpdatingId(null);
-    }
-  }
-
-  async function handleCancelInterview(interviewId: string) {
-    setInterviewUpdatingId(interviewId);
-    try {
-      await updateCandidateInterview(interviewId, { status: "cancelled" });
-      await refreshInterviewData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to cancel interview.");
-    } finally {
-      setInterviewUpdatingId(null);
-    }
-  }
-
-  async function handleSaveFeedback(interviewId: string) {
-    setInterviewUpdatingId(interviewId);
-    try {
-      const ratingValue = Number.parseInt(feedbackRatings[interviewId] ?? "", 10);
-      await updateCandidateInterview(interviewId, {
-        notes: feedbackNotes[interviewId] || undefined,
-        rating: Number.isNaN(ratingValue) ? undefined : ratingValue,
-        status: "completed",
-      });
-      await refreshInterviewData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save interview feedback.");
-    } finally {
-      setInterviewUpdatingId(null);
-    }
   }
 
   async function handleAssignRecruiter() {
@@ -945,7 +821,7 @@ export default function CandidateDetailPage() {
               atsMatches.map((match) => (
                 <ATSMatchBreakdownPanel
                   key={match.job_id}
-                  title={jobs.find((job) => job.id === match.job_id)?.title ?? match.job_id}
+                  title={match.job_title ?? jobs.find((job) => job.id === match.job_id)?.title ?? match.job_id}
                   isLoading={false}
                   data={{
                     fit_score: match.fit_score,
@@ -1043,115 +919,63 @@ export default function CandidateDetailPage() {
 
         {/* Interviews */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+          <div className="border-b border-gray-100 bg-gray-50/50 p-5 flex items-center justify-between">
             <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
               <Calendar className="w-4 h-4 text-[#FF5A1F]" /> Interviews
+              {interviews.length > 0 && (
+                <span className="text-xs font-normal text-gray-500">({interviews.length})</span>
+              )}
             </h2>
-          </div>
-          <div className="p-5 space-y-5">
-            {/* Schedule New */}
-            <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 space-y-3">
-              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Schedule New</h3>
-              <div className="space-y-2">
-                <Input type="datetime-local" className="text-sm h-9" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
-                <Input placeholder="Interviewer Name" className="text-sm h-9" value={interviewerName} onChange={(e) => setInterviewerName(e.target.value)} />
-                <div className="flex gap-2">
-                  <select
-                    className="flex-1 rounded-md border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-[#FF5A1F]"
-                    value={interviewType}
-                    onChange={(e) => setInterviewType(e.target.value as "HR" | "TECH")}
-                  >
-                    <option value="HR">HR</option>
-                    <option value="TECH">Technical</option>
-                  </select>
-                  <Button onClick={handleScheduleInterview} size="sm" className="bg-slate-900 hover:bg-slate-800 text-white">
-                    <Plus className="w-4 h-4 mr-1" /> Add
-                  </Button>
-                </div>
-              </div>
-            </div>
-  {/* List */}
-  <div className="space-y-3">
-    {interviews.length === 0 ? (
-      <p className="text-sm text-center text-gray-500 py-4">No upcoming interviews.</p>
-    ) : (
-      interviews.map((interview) => (
-        <div key={interview.id} className="relative rounded-xl border border-gray-200 p-4 hover:border-[#FF5A1F]/30 transition-colors">
-          <div className="absolute top-4 right-4">
-            <span className={cn(
-              "px-2 py-1 text-[10px] font-bold uppercase rounded-md tracking-wider",
-              interview.status === "scheduled" ? "bg-blue-100 text-blue-700" :
-                interview.status === "completed" ? "bg-green-100 text-green-700" :
-                  interview.status === "cancelled" ? "bg-red-100 text-red-700" :
-                    "bg-gray-100 text-gray-700"
-            )}>
-              {interview.status}
-            </span>
-          </div>
-          <p className="font-semibold text-gray-900 text-sm pr-16">{interview.interviewer_name ?? "Interviewer TBD"}</p>
-
-          <div className="mt-2 space-y-1 text-xs text-gray-600">
-            <p className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-gray-400" /> {new Date(interview.scheduled_at).toLocaleString()}</p>
-            <p className="flex items-center gap-1.5"><Briefcase className="w-3.5 h-3.5 text-gray-400" /> Type: {interviewMetaById.get(interview.id)?.interview_type ?? "HR"}</p>
-            <p className="flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-gray-400" /> Rating: {interviewMetaById.get(interview.id)?.rating ?? "-"}/5</p>
-          </div>
-
-          {interview.status !== "completed" && interview.status !== "cancelled" && (
-            <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
-              <div className="flex gap-2">
-                <Input
-                  type="datetime-local"
-                  className="text-xs h-8"
-                  value={rescheduleTimes[interview.id] ?? ""}
-                  onChange={(e) => setRescheduleTimes((prev) => ({ ...prev, [interview.id]: e.target.value }))}
-                />
+            {pipelines.length > 0 && (
+              <div className="relative group/sched">
                 <Button
-                  variant="outline" size="sm" className="h-8 text-xs px-2"
-                  onClick={() => handleReschedule(interview.id)}
-                  disabled={interviewUpdatingId === interview.id || !rescheduleTimes[interview.id]}
+                  size="sm"
+                  className="h-7 text-xs bg-[#FF5A1F] hover:bg-[#E54E1A] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => setSchedulingModalOpen(true)}
+                  disabled={eligiblePipelines.length === 0}
                 >
-                  Reschedule
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Schedule
                 </Button>
+                {eligiblePipelines.length === 0 && (
+                  <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/sched:block z-10 w-52 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
+                    Move the candidate to Screening before scheduling interviews.
+                  </div>
+                )}
               </div>
-
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Feedback..."
-                  className="text-xs h-8 flex-1"
-                  value={feedbackNotes[interview.id] ?? ""}
-                  onChange={(e) => setFeedbackNotes((prev) => ({ ...prev, [interview.id]: e.target.value }))}
-                />
-                <select
-                  className="w-16 rounded-md border border-gray-200 px-1 py-1 text-xs outline-none"
-                  value={feedbackRatings[interview.id] ?? ""}
-                  onChange={(e) => setFeedbackRatings((prev) => ({ ...prev, [interview.id]: e.target.value }))}
-                >
-                  <option value="">Rtg</option>
-                  {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-                <Button
-                  size="sm" className="h-8 text-xs px-2 bg-green-600 hover:bg-green-700 text-white"
-                  onClick={() => handleSaveFeedback(interview.id)}
-                  disabled={interviewUpdatingId === interview.id}
-                >
-                  Complete
-                </Button>
-              </div>
-              <Button
-                variant="ghost" size="sm" className="w-full h-8 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
-                onClick={() => handleCancelInterview(interview.id)}
-                disabled={interviewUpdatingId === interview.id || interview.status === "cancelled"}
-              >
-                Cancel Interview
-              </Button>
-            </div>
-          )}
+            )}
+          </div>
+          <div className="p-4">
+            <InterviewList
+              interviews={interviews}
+              onInterviewsChange={setInterviews}
+              onRefresh={refreshInterviewData}
+              canUpdate
+              canDelete
+              canFeedback
+              emptyMessage={
+                eligiblePipelines.length > 0
+                  ? "No interviews yet. Click Schedule to add one."
+                  : pipelines.length > 0
+                  ? "Move candidate to Screening or later to schedule interviews."
+                  : "Submit candidate to a job first to schedule interviews."
+              }
+            />
+          </div>
         </div>
-      ))
-    )}
-              </div>
+
+        {/* Interview Timeline */}
+        {interviews.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-[#FF5A1F]" /> Interview Timeline
+              </h2>
+            </div>
+            <div className="p-5">
+              <InterviewTimeline interviews={interviews} />
             </div>
           </div>
+        )}
 
         {/* Record Details */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -1229,6 +1053,19 @@ export default function CandidateDetailPage() {
 
         </div >
       </div >
+
+      {eligiblePipelines.length > 0 && (
+        <ScheduleInterviewModal
+          pipelines={eligiblePipelines}
+          jobs={jobs}
+          open={schedulingModalOpen}
+          onClose={() => setSchedulingModalOpen(false)}
+          onCreated={(interview) => {
+            setInterviews((prev) => [interview, ...prev]);
+            void refreshInterviewData();
+          }}
+        />
+      )}
     </section >
   );
 }

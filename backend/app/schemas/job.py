@@ -221,6 +221,7 @@ class JobMatchesResponse(BaseModel):
 
 class CandidateMatchEntry(BaseModel):
     job_id: UUID
+    job_title: str | None = None
     fit_score: int
     deterministic_match_score: int | None = None
     semantic_match_score: int | None = None
@@ -265,7 +266,7 @@ class JobResponse(BaseModel):
     client_id: UUID | None = None
     title: str
     description: str | None
-    status: JobStatus
+    status: JobStatus | str  # permissive on output; strict validation is on input schemas
     paused_reason: str | None = None
 
     # Rich spec fields (Task 1 – previously missing from API response).

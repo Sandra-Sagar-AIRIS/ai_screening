@@ -11,6 +11,7 @@ export const NAV_PERMISSION_CODES = {
   JOBS_READ_LIMITED: "jobs:read_limited",
   PIPELINE_READ: "pipeline:read",
   USERS_INVITE: "users:invite",
+  INTERVIEWS_READ: "interviews:read",
 } as const;
 
 export type SidebarNavItem = {
@@ -67,6 +68,19 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     adminMayAccess: true,
   },
   { name: "Roles", path: "/roles", adminOnly: true },
+  // ── Interview section ──────────────────────────────────────────────────
+  {
+    name: "Interview Queue",
+    path: "/interviews/queue",
+    anyOfPermissions: [NAV_PERMISSION_CODES.INTERVIEWS_READ],
+    adminMayAccess: true,
+  },
+  {
+    name: "My Interviews",
+    path: "/interviews/my",
+    anyOfPermissions: [NAV_PERMISSION_CODES.INTERVIEWS_READ],
+    adminMayAccess: true,
+  },
   // Same RBAC as above, for alternate URLs that still use DashboardShell.
   { name: "Jobs (dashboard path)", path: "/dashboard/jobs", anyOfPermissions: [NAV_PERMISSION_CODES.JOBS_READ], showInSidebar: false },
   {

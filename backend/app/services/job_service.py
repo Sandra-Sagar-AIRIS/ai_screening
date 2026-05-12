@@ -162,32 +162,67 @@ class JobService:
         except (TypeError, ValueError):
             return 0
 
-    def _get_job_response(self, job: Job) -> JobResponse:
-        """Helper to construct JobResponse including skills (Task 4/1)."""
-        required_skills = []
-        preferred_skills = []
+    @staticmethod
+    def _safe_float(val: object) -> float | None:
+        """Convert Decimal/int/str to float; return None on failure."""
+        if val is None:
+            return None
         try:
-            skills = self.db.scalars(
-                select(JobSkill).where(JobSkill.job_id == job.id)
-            ).all()
-            required_skills = [s.skill for s in skills if s.is_required]
-            preferred_skills = [s.skill for s in skills if not s.is_required]
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Could not fetch job skills (migration missing?): {e}")
-            self.db.rollback()
-        
+            return float(val)  # type: ignore[arg-type]
+        except (TypeError, ValueError, ArithmeticError):
+            return None
+
+    def _get_job_response(
+        self,
+        job: Job,
+        *,
+        _skills_map: "dict[UUID, tuple[list[str], list[str]]] | None" = None,
+    ) -> JobResponse:
+        """Helper to construct JobResponse including skills.
+
+        Pass _skills_map when building responses in bulk (avoids N+1 queries).
+        Without it, a single per-job query is issued (acceptable for single lookups).
+        """
+        required_skills: list[str] = []
+        preferred_skills: list[str] = []
+        if _skills_map is not None:
+            required_skills, preferred_skills = _skills_map.get(job.id, ([], []))
+        else:
+            try:
+                skills = self.db.scalars(
+                    select(JobSkill).where(JobSkill.job_id == job.id)
+                ).all()
+                required_skills = [s.skill for s in skills if s.is_required]
+                preferred_skills = [s.skill for s in skills if not s.is_required]
+            except Exception as e:
+                logger.warning(f"Could not fetch job skills (migration missing?): {e}")
+                self.db.rollback()
+
+        # Coerce key_responsibilities: ARRAY(String) may yield None or non-str items.
+        raw_kr = job.key_responsibilities
+        key_responsibilities: list[str] = []
+        if raw_kr:
+            key_responsibilities = [str(x) for x in raw_kr if x is not None]
+
+        safe_status: JobStatus | str
+        raw_status = job.status or "open"
+        if raw_status in JobStatus._value2member_map_:
+            safe_status = JobStatus(raw_status)
+        else:
+            safe_status = raw_status  # pass through unknown values; schema is permissive
+
+        _now = datetime.now(timezone.utc)
         return JobResponse(
             id=job.id,
             organization_id=job.organization_id,
             client_id=job.client_id,
-            title=job.title,
+            title=job.title or "",
             description=job.description,
-            status=JobStatus(job.status),
+            status=safe_status,
             paused_reason=job.paused_reason,
             location=job.location,
-            salary_min=job.salary_min,
-            salary_max=job.salary_max,
+            salary_min=self._safe_float(job.salary_min),
+            salary_max=self._safe_float(job.salary_max),
             salary_currency=job.salary_currency,
             experience_min_years=job.experience_min_years,
             experience_max_years=job.experience_max_years,
@@ -197,13 +232,13 @@ class JobService:
             filled_at=job.filled_at,
             required_skills=required_skills or [],
             preferred_skills=preferred_skills or [],
-            key_responsibilities=job.key_responsibilities or [],
+            key_responsibilities=key_responsibilities,
             raw_jd_text=job.raw_jd_text,
             parsing_source=job.parsing_source,
             parsing_status=job.parsing_status,
             enrichment_status=getattr(job, "enrichment_status", None),
-            created_at=job.created_at,
-            updated_at=job.updated_at
+            created_at=job.created_at or _now,
+            updated_at=job.updated_at or _now,
         )
 
     def get_or_create_default_client(self, organization_id: UUID):
@@ -368,7 +403,25 @@ class JobService:
             stmt = stmt.where(Job.id.in_(self._scope.allowed_job_ids_subquery(current_user)))
         stmt = stmt.order_by(Job.created_at.desc()).offset(offset).limit(limit)
         jobs = list(self.db.scalars(stmt))
-        return [self._get_job_response(job) for job in jobs]
+        if not jobs:
+            return []
+        # Batch-load all skills in one query to avoid N+1 (one SELECT per job).
+        job_ids = [j.id for j in jobs]
+        skills_map: dict[UUID, tuple[list[str], list[str]]] = {}
+        try:
+            for s in self.db.scalars(select(JobSkill).where(JobSkill.job_id.in_(job_ids))):
+                if s.job_id not in skills_map:
+                    skills_map[s.job_id] = ([], [])
+                (skills_map[s.job_id][0] if s.is_required else skills_map[s.job_id][1]).append(s.skill)
+        except Exception:
+            logger.warning("list_jobs.skills_batch_failed — falling back to per-job loads")
+        results: list[JobResponse] = []
+        for job in jobs:
+            try:
+                results.append(self._get_job_response(job, _skills_map=skills_map))
+            except Exception as e:
+                logger.warning("list_jobs.skip_bad_job", extra={"job_id": str(job.id), "error": str(e)})
+        return results
 
     def get_job_by_id(self, job_id: UUID, organization_id: UUID, current_user: CurrentUser | None = None) -> Job:
         stmt: Select[tuple[Job]] = select(Job).where(
@@ -1048,12 +1101,22 @@ class JobService:
                 pipeline_job_count=pipeline_job_count,
                 ats_hint="NO_SCORE_ROWS_YET" if pipeline_job_count > 0 else "NO_PIPELINE_JOBS",
             )
+        # Batch-load job titles so the frontend never has to do a separate lookup.
+        match_job_ids = [row.job_id for row in rows]
+        job_titles: dict[UUID, str] = {}
+        if match_job_ids:
+            for job in self.db.scalars(
+                select(Job).where(Job.id.in_(match_job_ids))
+            ):
+                job_titles[job.id] = job.title
+
         matches: list[CandidateMatchEntry] = []
         for row in rows:
             cs = self._coerce_match_category_scores(row.category_scores)
             matches.append(
                 CandidateMatchEntry(
                     job_id=row.job_id,
+                    job_title=job_titles.get(row.job_id),
                     fit_score=row.match_score,
                     deterministic_match_score=getattr(row, "deterministic_match_score", None),
                     semantic_match_score=getattr(row, "semantic_match_score", None),

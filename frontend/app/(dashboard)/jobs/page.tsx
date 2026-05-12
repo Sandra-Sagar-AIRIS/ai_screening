@@ -463,7 +463,7 @@ export default function JobsPage() {
   const [jdClientId, setJdClientId] = useState("");
   const [parsedResult, setParsedResult] = useState<JobParseResult | null>(null);
 
-  async function refreshJobs() {
+  const refreshJobs = useCallback(async () => {
     setIsRefreshing(true);
     try {
       const data = await getJobs(50, 0);
