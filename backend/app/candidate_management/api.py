@@ -49,6 +49,23 @@ from app.candidate_management.schemas import (
     ResumeUploadRequest,
     ResumeUploadResponse,
 )
+from app.candidate_management.communication_schemas import (
+    CommunicationConnectRequest,
+    CommunicationConnectResponse,
+    CommunicationConnectionStatus,
+    CommunicationDisconnectRequest,
+    CommunicationMessageResponse,
+    CommunicationReminderCreate,
+    CommunicationReminderResponse,
+    CommunicationSendRequest,
+    CommunicationTemplateCreate,
+    CommunicationTemplateRenderRequest,
+    CommunicationTemplateRenderResponse,
+    CommunicationTemplateResponse,
+    CommunicationTemplateUpdate,
+    CommunicationWhatsAppSendRequest,
+)
+from app.candidate_management.communication_service import CommunicationService
 from app.candidate_management.service import CandidateManagementService, SearchParams, TaskEnqueuerPort
 from app.candidate_management.tasks import CeleryTaskEnqueuer
 from app.core.dependencies import get_current_user, require_permission
@@ -65,6 +82,7 @@ from app.services.candidate_service import CandidateService as LegacyCandidateSe
 router = APIRouter(tags=["candidate-management"])
 logger = logging.getLogger(__name__)
 _DEBUG_LOG_PATH = Path(__file__).resolve().parents[2] / "debug-f65d2f.log"
+_DEBUG_LOG_PATH_7B7C67 = Path(__file__).resolve().parents[4] / "debug-7b7c67.log"
 _SIGNED_DOWNLOAD_TTL_SECONDS = 3600
 
 
@@ -81,6 +99,23 @@ def _debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> N
     try:
         with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
+
+
+def _debug_log_7b7c67(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    payload = {
+        "sessionId": "7b7c67",
+        "runId": "pre-fix",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with _DEBUG_LOG_PATH_7B7C67.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=True, default=str) + "\n")
     except Exception:
         pass
 
@@ -170,6 +205,10 @@ def _service(db: Session) -> CandidateManagementService:
 
 def _success(data: Any) -> ApiResponse[Any]:
     return ApiResponse(success=True, data=data, error=None, details=None)
+
+
+def _communication_service(db: Session) -> CommunicationService:
+    return CommunicationService(db)
 
 
 def _signed_resume_download_url(storage: SupabaseStorageClient, *, object_key: str) -> str | None:
@@ -908,6 +947,444 @@ def list_interactions(
             degraded=True,
         )
         return _success([])
+
+
+@router.post("/communication/oauth/connect", response_model=ApiResponse[CommunicationConnectResponse])
+def communication_oauth_connect(
+    payload: CommunicationConnectRequest,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[CommunicationConnectResponse]:
+    service = _communication_service(db)
+    state = service.build_oauth_state(
+        org_id=UUID(current_user.organization_id),
+        workspace_id=workspace_id,
+        user_id=UUID(current_user.user_id),
+        provider=payload.provider,
+    )
+    auth_url = service.build_authorization_url(provider=payload.provider, state=state)
+    return _success(
+        CommunicationConnectResponse(
+            provider=payload.provider,
+            authorization_url=auth_url,
+            state=state,
+        )
+    )
+
+
+@router.get("/communication/oauth/callback", response_model=ApiResponse[CommunicationConnectionStatus])
+def communication_oauth_callback(
+    code: str,
+    state: str,
+    db: Annotated[Session, Depends(get_db)],
+    provider: str | None = None,
+) -> ApiResponse[CommunicationConnectionStatus]:
+    service = _communication_service(db)
+    conn = service.upsert_oauth_connection(code=code, state=state, provider_override=provider)
+    return _success(CommunicationConnectionStatus.model_validate(conn))
+
+
+@router.get("/communication/connections", response_model=ApiResponse[list[CommunicationConnectionStatus]])
+def communication_connections(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[list[CommunicationConnectionStatus]]:
+    try:
+        service = _communication_service(db)
+        rows = service.list_connections(
+            org_id=UUID(current_user.organization_id),
+            workspace_id=workspace_id,
+            user_id=UUID(current_user.user_id),
+        )
+        return _success([CommunicationConnectionStatus.model_validate(item) for item in rows])
+    except (ProgrammingError, OperationalError):
+        logger.warning("communication.connections_unavailable", exc_info=True)
+        return _success([])
+
+
+@router.post("/communication/disconnect", response_model=ApiResponse[dict[str, bool]])
+def communication_disconnect(
+    payload: CommunicationDisconnectRequest,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[dict[str, bool]]:
+    service = _communication_service(db)
+    service.disconnect(
+        org_id=UUID(current_user.organization_id),
+        workspace_id=workspace_id,
+        user_id=UUID(current_user.user_id),
+        provider=payload.provider,
+    )
+    return _success({"disconnected": True})
+
+
+@router.get("/communication/templates", response_model=ApiResponse[list[CommunicationTemplateResponse]])
+def communication_list_templates(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+    channel: str = "email",
+    search: str | None = None,
+    category: str | None = None,
+) -> ApiResponse[list[CommunicationTemplateResponse]]:
+    # region agent log
+    _debug_log_7b7c67(
+        "H1,H2,H3,H4",
+        "backend/app/candidate_management/api.py:communication_list_templates:entry",
+        "Template list request entered",
+        {
+            "workspace_id_present": bool(workspace_id),
+            "organization_id_present": bool(current_user.organization_id),
+            "user_id_present": bool(current_user.user_id),
+            "channel": channel,
+            "search_present": bool(search),
+            "category": category,
+        },
+    )
+    # endregion
+    try:
+        service = _communication_service(db)
+        service.seed_default_templates(
+            org_id=UUID(current_user.organization_id),
+            workspace_id=workspace_id,
+            user_id=UUID(current_user.user_id),
+        )
+        # region agent log
+        _debug_log_7b7c67(
+            "H1,H2",
+            "backend/app/candidate_management/api.py:communication_list_templates:after_seed",
+            "Default template seed completed",
+            {"channel": channel},
+        )
+        # endregion
+        rows = service.list_templates(
+            org_id=UUID(current_user.organization_id),
+            workspace_id=workspace_id,
+            channel=channel,
+            search=search,
+            category=category,
+        )
+        # region agent log
+        _debug_log_7b7c67(
+            "H2,H3,H4",
+            "backend/app/candidate_management/api.py:communication_list_templates:after_query",
+            "Template query returned rows",
+            {
+                "row_count": len(rows),
+                "sample": [
+                    {
+                        "id": str(item.id),
+                        "name": item.name,
+                        "channel": item.channel,
+                        "placeholders_type": type(item.placeholders).__name__,
+                        "placeholders_is_none": item.placeholders is None,
+                        "is_deleted": item.is_deleted,
+                    }
+                    for item in rows[:3]
+                ],
+            },
+        )
+        # endregion
+        response_rows = [CommunicationTemplateResponse.model_validate(item) for item in rows]
+        # region agent log
+        _debug_log_7b7c67(
+            "H3",
+            "backend/app/candidate_management/api.py:communication_list_templates:after_validate",
+            "Template response validation completed",
+            {"response_count": len(response_rows)},
+        )
+        # endregion
+        return _success(response_rows)
+    except (ProgrammingError, OperationalError) as exc:
+        db.rollback()
+        # region agent log
+        _debug_log_7b7c67(
+            "H1",
+            "backend/app/candidate_management/api.py:communication_list_templates:db_unavailable",
+            "Template database query failed with schema/connectivity error",
+            {"error_type": type(exc).__name__, "error": str(exc), "traceback": traceback.format_exc()},
+        )
+        # endregion
+        logger.warning("communication.templates_unavailable", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Communication templates database schema is unavailable. Run database migrations.",
+        ) from exc
+    except ValidationError as exc:
+        # region agent log
+        _debug_log_7b7c67(
+            "H3",
+            "backend/app/candidate_management/api.py:communication_list_templates:validation_error",
+            "Template response validation failed",
+            {"errors": exc.errors(), "traceback": traceback.format_exc()},
+        )
+        # endregion
+        raise
+    except Exception as exc:
+        # region agent log
+        _debug_log_7b7c67(
+            "H2,H4",
+            "backend/app/candidate_management/api.py:communication_list_templates:unexpected_error",
+            "Template list failed unexpectedly",
+            {"error_type": type(exc).__name__, "error": str(exc), "traceback": traceback.format_exc()},
+        )
+        # endregion
+        raise
+
+
+@router.post("/communication/templates", response_model=ApiResponse[CommunicationTemplateResponse])
+def communication_create_template(
+    payload: CommunicationTemplateCreate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[CommunicationTemplateResponse]:
+    service = _communication_service(db)
+    row = service.create_template(
+        org_id=UUID(current_user.organization_id),
+        workspace_id=workspace_id,
+        user_id=UUID(current_user.user_id),
+        channel=payload.channel,
+        provider=payload.provider,
+        name=payload.name,
+        category=payload.category,
+        subject_template=payload.subject_template,
+        body_template=payload.body_template,
+    )
+    return _success(CommunicationTemplateResponse.model_validate(row))
+
+
+@router.post("/communication/templates/{template_id}/duplicate", response_model=ApiResponse[CommunicationTemplateResponse])
+def communication_duplicate_template(
+    template_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[CommunicationTemplateResponse]:
+    service = _communication_service(db)
+    row = service.duplicate_template(
+        org_id=UUID(current_user.organization_id),
+        workspace_id=workspace_id,
+        user_id=UUID(current_user.user_id),
+        template_id=template_id,
+    )
+    return _success(CommunicationTemplateResponse.model_validate(row))
+
+
+@router.patch("/communication/templates/{template_id}", response_model=ApiResponse[CommunicationTemplateResponse])
+def communication_update_template(
+    template_id: UUID,
+    payload: CommunicationTemplateUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[CommunicationTemplateResponse]:
+    service = _communication_service(db)
+    row = service.update_template(
+        org_id=UUID(current_user.organization_id),
+        workspace_id=workspace_id,
+        user_id=UUID(current_user.user_id),
+        template_id=template_id,
+        payload=payload.model_dump(exclude_unset=True),
+    )
+    return _success(CommunicationTemplateResponse.model_validate(row))
+
+
+@router.post("/communication/templates/render", response_model=ApiResponse[CommunicationTemplateRenderResponse])
+def communication_render_template(
+    payload: CommunicationTemplateRenderRequest,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[CommunicationTemplateRenderResponse]:
+    service = _communication_service(db)
+    subject, body, unresolved = service.render_template(
+        org_id=UUID(current_user.organization_id),
+        workspace_id=workspace_id,
+        template_id=payload.template_id,
+        values=payload.values,
+    )
+    return _success(
+        CommunicationTemplateRenderResponse(
+            subject=subject,
+            body=body,
+            unresolved_placeholders=unresolved,
+        )
+    )
+
+
+@router.post(
+    "/candidates/{candidate_id}/communication/send-email",
+    response_model=ApiResponse[CommunicationMessageResponse],
+)
+def communication_send_email(
+    candidate_id: UUID,
+    payload: CommunicationSendRequest,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[CommunicationMessageResponse]:
+    service = _communication_service(db)
+    row = service.send_email(
+        org_id=UUID(current_user.organization_id),
+        workspace_id=workspace_id,
+        user_id=UUID(current_user.user_id),
+        candidate_id=candidate_id,
+        provider=payload.provider,
+        to_email=str(payload.to_email),
+        subject=payload.subject,
+        body=payload.body,
+        save_as_draft=payload.save_as_draft,
+        quick_action=payload.quick_action,
+        attachments=payload.attachments,
+        template_id=payload.template_id,
+        template_values=payload.template_values,
+        idempotency_key=payload.idempotency_key,
+    )
+    return _success(CommunicationMessageResponse.model_validate(row))
+
+
+@router.post(
+    "/candidates/{candidate_id}/communication/send-whatsapp",
+    response_model=ApiResponse[CommunicationMessageResponse],
+)
+def communication_send_whatsapp(
+    candidate_id: UUID,
+    payload: CommunicationWhatsAppSendRequest,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[CommunicationMessageResponse]:
+    try:
+        service = _communication_service(db)
+        row = service.send_whatsapp_message(
+            org_id=UUID(current_user.organization_id),
+            workspace_id=workspace_id,
+            user_id=UUID(current_user.user_id),
+            candidate_id=candidate_id,
+            to_phone=payload.to_phone,
+            body=payload.body or "",
+            template_id=payload.template_id,
+            template_values=payload.template_values,
+            idempotency_key=payload.idempotency_key,
+            quick_action=payload.quick_action,
+        )
+        return _success(CommunicationMessageResponse.model_validate(row))
+    except (ProgrammingError, OperationalError):
+        logger.warning("communication.send_whatsapp_unavailable", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Communication backend is not fully set up yet. Please reconnect provider or run migrations.",
+        ) from None
+
+
+@router.get(
+    "/candidates/{candidate_id}/communication/messages",
+    response_model=ApiResponse[list[CommunicationMessageResponse]],
+)
+def communication_messages(
+    candidate_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> ApiResponse[list[CommunicationMessageResponse]]:
+    try:
+        service = _communication_service(db)
+        rows = service.list_messages(
+            org_id=UUID(current_user.organization_id),
+            workspace_id=workspace_id,
+            candidate_id=candidate_id,
+            limit=limit,
+        )
+        return _success([CommunicationMessageResponse.model_validate(item) for item in rows])
+    except (ProgrammingError, OperationalError):
+        logger.warning("communication.messages_unavailable", exc_info=True)
+        return _success([])
+
+
+@router.post(
+    "/candidates/{candidate_id}/communication/reminders",
+    response_model=ApiResponse[CommunicationReminderResponse],
+)
+def communication_create_reminder(
+    candidate_id: UUID,
+    payload: CommunicationReminderCreate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[CommunicationReminderResponse]:
+    service = _communication_service(db)
+    row = service.create_reminder(
+        org_id=UUID(current_user.organization_id),
+        workspace_id=workspace_id,
+        user_id=UUID(current_user.user_id),
+        candidate_id=candidate_id,
+        channel=payload.channel,
+        provider=payload.provider,
+        to_address=payload.to_address,
+        subject=payload.subject,
+        body=payload.body,
+        template_id=payload.template_id,
+        template_values=payload.template_values,
+        scheduled_for=payload.scheduled_for,
+    )
+    return _success(CommunicationReminderResponse.model_validate(row))
+
+
+@router.get(
+    "/candidates/{candidate_id}/communication/reminders",
+    response_model=ApiResponse[list[CommunicationReminderResponse]],
+)
+def communication_list_reminders(
+    candidate_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[list[CommunicationReminderResponse]]:
+    try:
+        service = _communication_service(db)
+        rows = service.list_reminders(
+            org_id=UUID(current_user.organization_id),
+            workspace_id=workspace_id,
+            candidate_id=candidate_id,
+        )
+        return _success([CommunicationReminderResponse.model_validate(item) for item in rows])
+    except (ProgrammingError, OperationalError):
+        logger.warning("communication.reminders_unavailable", exc_info=True)
+        return _success([])
+
+
+@router.post("/communication/reminders/run-due", response_model=ApiResponse[dict[str, int]])
+def communication_run_due_reminders(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[dict[str, int]]:
+    service = _communication_service(db)
+    processed = service.process_due_reminders(
+        org_id=UUID(current_user.organization_id),
+        workspace_id=workspace_id,
+        user_id=UUID(current_user.user_id),
+    )
+    return _success({"processed": processed})
 
 
 @router.post("/bulk-upload", response_model=ApiResponse[BulkUploadStatusResponse], status_code=status.HTTP_202_ACCEPTED)

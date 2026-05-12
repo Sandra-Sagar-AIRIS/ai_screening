@@ -65,6 +65,32 @@ class InteractionType(str, enum.Enum):
     SYSTEM = "system"
 
 
+class CommunicationProvider(str, enum.Enum):
+    GMAIL = "gmail"
+    OUTLOOK = "outlook"
+    WHATSAPP = "whatsapp"
+
+
+class CommunicationChannel(str, enum.Enum):
+    EMAIL = "email"
+    WHATSAPP = "whatsapp"
+
+
+class CommunicationMessageDirection(str, enum.Enum):
+    OUTBOUND = "outbound"
+    INBOUND = "inbound"
+
+
+class CommunicationMessageStatus(str, enum.Enum):
+    DRAFT = "draft"
+    QUEUED = "queued"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    READ = "read"
+    REPLIED = "replied"
+    FAILED = "failed"
+
+
 class BulkUploadStatus(str, enum.Enum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -320,6 +346,225 @@ class CandidateAuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     candidate: Mapped["Candidate"] = relationship("Candidate", back_populates="audit_logs")
+
+
+class CommunicationConnection(Base):
+    __tablename__ = "comm_connections"
+    __table_args__ = (
+        Index("ix_comm_connections_org_workspace_provider", "org_id", "workspace_id", "provider"),
+        UniqueConstraint(
+            "org_id",
+            "workspace_id",
+            "provider",
+            "external_account_id",
+            name="uq_comm_connections_account_provider",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    org_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    user_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True, index=True)
+    provider: Mapped[CommunicationProvider] = mapped_column(
+        Enum(CommunicationProvider, name="communication_provider", native_enum=False),
+        nullable=False,
+    )
+    channel: Mapped[CommunicationChannel] = mapped_column(
+        Enum(CommunicationChannel, name="communication_channel", native_enum=False),
+        nullable=False,
+        server_default=CommunicationChannel.EMAIL.value,
+    )
+    external_account_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    external_account_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    access_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scopes: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="connected")
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CommunicationTemplate(Base):
+    __tablename__ = "comm_templates"
+    __table_args__ = (
+        Index("ix_comm_templates_org_workspace_channel", "org_id", "workspace_id", "channel"),
+        UniqueConstraint(
+            "org_id",
+            "workspace_id",
+            "channel",
+            "name",
+            name="uq_comm_templates_name_per_channel",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    org_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    channel: Mapped[CommunicationChannel] = mapped_column(
+        Enum(CommunicationChannel, name="communication_channel", native_enum=False),
+        nullable=False,
+        server_default=CommunicationChannel.EMAIL.value,
+    )
+    provider: Mapped[CommunicationProvider | None] = mapped_column(
+        Enum(CommunicationProvider, name="communication_provider", native_enum=False),
+        nullable=True,
+    )
+    name: Mapped[str] = mapped_column(String(140), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    subject_template: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    body_template: Mapped[str] = mapped_column(Text, nullable=False)
+    placeholders: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, server_default=sa.text("false"))
+    created_by: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True, index=True)
+    updated_by: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CommunicationMessage(Base):
+    __tablename__ = "comm_messages"
+    __table_args__ = (
+        Index("ix_comm_messages_org_workspace_candidate_created", "org_id", "workspace_id", "candidate_id", "created_at"),
+        Index("ix_comm_messages_org_workspace_status", "org_id", "workspace_id", "status"),
+        UniqueConstraint(
+            "org_id",
+            "workspace_id",
+            "provider",
+            "provider_message_id",
+            name="uq_comm_messages_provider_message_id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    org_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    candidate_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("candidates.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    channel: Mapped[CommunicationChannel] = mapped_column(
+        Enum(CommunicationChannel, name="communication_channel", native_enum=False),
+        nullable=False,
+        server_default=CommunicationChannel.EMAIL.value,
+    )
+    provider: Mapped[CommunicationProvider] = mapped_column(
+        Enum(CommunicationProvider, name="communication_provider", native_enum=False),
+        nullable=False,
+    )
+    direction: Mapped[CommunicationMessageDirection] = mapped_column(
+        Enum(CommunicationMessageDirection, name="communication_message_direction", native_enum=False),
+        nullable=False,
+        server_default=CommunicationMessageDirection.OUTBOUND.value,
+    )
+    status: Mapped[CommunicationMessageStatus] = mapped_column(
+        Enum(CommunicationMessageStatus, name="communication_message_status", native_enum=False),
+        nullable=False,
+        server_default=CommunicationMessageStatus.QUEUED.value,
+    )
+    to_address: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    from_address: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attachments: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
+    template_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("comm_templates.id"), nullable=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_by_user_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CommunicationMessageEvent(Base):
+    __tablename__ = "comm_message_events"
+    __table_args__ = (
+        Index("ix_comm_message_events_message_created", "message_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    org_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    message_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("comm_messages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CommunicationReminder(Base):
+    __tablename__ = "comm_reminders"
+    __table_args__ = (
+        Index("ix_comm_reminders_org_workspace_due", "org_id", "workspace_id", "scheduled_for"),
+        Index("ix_comm_reminders_status_scheduled", "status", "scheduled_for"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    org_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    candidate_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("candidates.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    channel: Mapped[CommunicationChannel] = mapped_column(
+        Enum(CommunicationChannel, name="communication_channel", native_enum=False),
+        nullable=False,
+        server_default=CommunicationChannel.EMAIL.value,
+    )
+    provider: Mapped[CommunicationProvider] = mapped_column(
+        Enum(CommunicationProvider, name="communication_provider", native_enum=False),
+        nullable=False,
+    )
+    template_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("comm_templates.id"), nullable=True)
+    to_address: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    template_values: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, server_default="pending")
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
 
 class BulkUploadJob(Base):

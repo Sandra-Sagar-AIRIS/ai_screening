@@ -219,7 +219,4 @@ class InterviewNote(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=sa.text("now()"),
     )
-    day_of_week: Mapped[int] = mapped_column(Integer, nullable=False)  # 0=Mon 6=Sun
-    start_time: Mapped[time] = mapped_column(Time, nullable=False)
-    end_time: Mapped[time] = mapped_column(Time, nullable=False)
-    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
