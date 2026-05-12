@@ -382,3 +382,17 @@ def mark_no_show(
     svc = InterviewService(db)
     interview = svc.mark_no_show(interview_id, UUID(current_user.organization_id), current_user)
     return InterviewResponse.model_validate(interview)
+
+
+@router.delete("/{interview_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_interview(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_DELETE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> None:
+    svc = InterviewService(db)
+    svc.delete_interview(interview_id, UUID(current_user.organization_id), current_user)
+
+
+

@@ -192,6 +192,65 @@ export type CandidateInteraction = {
   created_at: string;
 };
 
+export type CommunicationConnection = {
+  id: string;
+  provider: "gmail" | "outlook" | "whatsapp";
+  channel: "email" | "whatsapp";
+  external_account_email: string | null;
+  status: string;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CommunicationTemplate = {
+  id: string;
+  channel: "email" | "whatsapp";
+  provider: "gmail" | "outlook" | "whatsapp" | null;
+  name: string;
+  category: string | null;
+  subject_template: string | null;
+  body_template: string;
+  placeholders: string[];
+  is_deleted: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CommunicationMessage = {
+  id: string;
+  candidate_id: string;
+  channel: "email" | "whatsapp";
+  provider: "gmail" | "outlook" | "whatsapp";
+  direction: "outbound" | "inbound";
+  status: "queued" | "sent" | "delivered" | "read" | "failed";
+  to_address: string | null;
+  from_address: string | null;
+  subject: string | null;
+  body: string | null;
+  attachments: Array<{ filename?: string; content_type?: string; content_base64?: string }>;
+  provider_message_id: string | null;
+  failure_reason: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CommunicationReminder = {
+  id: string;
+  candidate_id: string;
+  channel: "email" | "whatsapp";
+  provider: "gmail" | "outlook" | "whatsapp";
+  to_address: string | null;
+  subject: string | null;
+  body: string | null;
+  status: string;
+  failure_reason: string | null;
+  scheduled_for: string;
+  processed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type BulkUploadRequestPayload = {
   files: string[];
   source?: "import";
@@ -464,6 +523,227 @@ export async function getCandidateInteractions(candidateId: string, limit = 50, 
     }
     throw error;
   }
+}
+
+export async function getCommunicationConnections() {
+  const response = await apiRequest<CandidateManagementEnvelope<CommunicationConnection[]>>(
+    "/candidate-management/communication/connections",
+    {
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
+}
+
+export async function startCommunicationOAuth(provider: "gmail" | "outlook") {
+  const response = await apiRequest<
+    CandidateManagementEnvelope<{ provider: string; authorization_url: string; state: string }>
+  >("/candidate-management/communication/oauth/connect", {
+    method: "POST",
+    body: JSON.stringify({ provider }),
+    headers: { ...getWorkspaceHeader() },
+  });
+  return response.data;
+}
+
+export async function disconnectCommunicationProvider(provider: "gmail" | "outlook") {
+  const response = await apiRequest<CandidateManagementEnvelope<{ disconnected: boolean }>>(
+    "/candidate-management/communication/disconnect",
+    {
+      method: "POST",
+      body: JSON.stringify({ provider }),
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
+}
+
+export async function getCommunicationTemplates(
+  channel: "email" | "whatsapp" = "email",
+  options?: { search?: string; category?: string }
+) {
+  const params = new URLSearchParams({ channel });
+  if (options?.search) params.set("search", options.search);
+  if (options?.category) params.set("category", options.category);
+  const response = await apiRequest<CandidateManagementEnvelope<CommunicationTemplate[]>>(
+    `/candidate-management/communication/templates?${params.toString()}`,
+    {
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
+}
+
+export async function renderCommunicationTemplate(
+  templateId: string,
+  values: Record<string, unknown>
+) {
+  const response = await apiRequest<
+    CandidateManagementEnvelope<{
+      subject: string | null;
+      body: string;
+      unresolved_placeholders: string[];
+    }>
+  >("/candidate-management/communication/templates/render", {
+    method: "POST",
+    body: JSON.stringify({ template_id: templateId, values }),
+    headers: { ...getWorkspaceHeader() },
+  });
+  return response.data;
+}
+
+export async function createCommunicationTemplate(payload: {
+  channel?: "email" | "whatsapp";
+  provider?: "gmail" | "outlook" | "whatsapp";
+  name: string;
+  category?: string;
+  subject_template?: string;
+  body_template: string;
+}) {
+  const response = await apiRequest<CandidateManagementEnvelope<CommunicationTemplate>>(
+    "/candidate-management/communication/templates",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
+}
+
+export async function updateCommunicationTemplate(
+  templateId: string,
+  payload: Partial<{
+    name: string;
+    category: string;
+    subject_template: string;
+    body_template: string;
+    is_deleted: boolean;
+  }>
+) {
+  const response = await apiRequest<CandidateManagementEnvelope<CommunicationTemplate>>(
+    `/candidate-management/communication/templates/${templateId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
+}
+
+export async function duplicateCommunicationTemplate(templateId: string) {
+  const response = await apiRequest<CandidateManagementEnvelope<CommunicationTemplate>>(
+    `/candidate-management/communication/templates/${templateId}/duplicate`,
+    {
+      method: "POST",
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
+}
+
+export async function sendCandidateEmail(
+  candidateId: string,
+  payload: {
+    provider: "gmail" | "outlook";
+    to_email: string;
+    subject?: string;
+    body?: string;
+    save_as_draft?: boolean;
+    quick_action?: string;
+    attachments?: Array<{ filename: string; content_type: string; content_base64: string }>;
+    template_id?: string;
+    template_values?: Record<string, unknown>;
+    idempotency_key?: string;
+  }
+) {
+  const response = await apiRequest<CandidateManagementEnvelope<CommunicationMessage>>(
+    `/candidate-management/candidates/${candidateId}/communication/send-email`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
+}
+
+export async function sendCandidateWhatsApp(
+  candidateId: string,
+  payload: {
+    to_phone: string;
+    body?: string;
+    template_id?: string;
+    template_values?: Record<string, unknown>;
+    idempotency_key?: string;
+    quick_action?: string;
+  }
+) {
+  const response = await apiRequest<CandidateManagementEnvelope<CommunicationMessage>>(
+    `/candidate-management/candidates/${candidateId}/communication/send-whatsapp`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
+}
+
+export async function getCandidateCommunicationMessages(candidateId: string, limit = 50) {
+  const response = await apiRequest<CandidateManagementEnvelope<CommunicationMessage[]>>(
+    `/candidate-management/candidates/${candidateId}/communication/messages?limit=${limit}`,
+    {
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
+}
+
+export async function createCandidateCommunicationReminder(
+  candidateId: string,
+  payload: {
+    channel: "email" | "whatsapp";
+    provider: "gmail" | "outlook" | "whatsapp";
+    to_address: string;
+    template_id?: string;
+    template_values?: Record<string, unknown>;
+    subject?: string;
+    body?: string;
+    scheduled_for: string;
+  }
+) {
+  const response = await apiRequest<CandidateManagementEnvelope<CommunicationReminder>>(
+    `/candidate-management/candidates/${candidateId}/communication/reminders`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
+}
+
+export async function getCandidateCommunicationReminders(candidateId: string) {
+  const response = await apiRequest<CandidateManagementEnvelope<CommunicationReminder[]>>(
+    `/candidate-management/candidates/${candidateId}/communication/reminders`,
+    {
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
+}
+
+export async function runDueCommunicationReminders() {
+  const response = await apiRequest<CandidateManagementEnvelope<{ processed: number }>>(
+    "/candidate-management/communication/reminders/run-due",
+    {
+      method: "POST",
+      headers: { ...getWorkspaceHeader() },
+    }
+  );
+  return response.data;
 }
 
 export async function createBulkUploadJob(payload: BulkUploadRequestPayload) {

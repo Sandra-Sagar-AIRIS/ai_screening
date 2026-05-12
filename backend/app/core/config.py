@@ -95,6 +95,37 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SMTP_FROM", "smtp_from"),
     )
 
+    google_client_id: str | None = Field(default=None, validation_alias=AliasChoices("GOOGLE_CLIENT_ID", "google_client_id"))
+    google_client_secret: str | None = Field(
+        default=None, validation_alias=AliasChoices("GOOGLE_CLIENT_SECRET", "google_client_secret")
+    )
+    google_redirect_uri: str | None = Field(
+        default=None, validation_alias=AliasChoices("GOOGLE_REDIRECT_URI", "google_redirect_uri")
+    )
+    ms_client_id: str | None = Field(default=None, validation_alias=AliasChoices("MS_CLIENT_ID", "ms_client_id"))
+    ms_client_secret: str | None = Field(
+        default=None, validation_alias=AliasChoices("MS_CLIENT_SECRET", "ms_client_secret")
+    )
+    ms_redirect_uri: str | None = Field(
+        default=None, validation_alias=AliasChoices("MS_REDIRECT_URI", "ms_redirect_uri")
+    )
+    ms_tenant_id: str = Field(default="common", validation_alias=AliasChoices("MS_TENANT_ID", "ms_tenant_id"))
+    comm_token_encryption_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("COMM_TOKEN_ENCRYPTION_KEY", "comm_token_encryption_key")
+    )
+    comm_oauth_state_secret: str | None = Field(
+        default=None, validation_alias=AliasChoices("COMM_OAUTH_STATE_SECRET", "comm_oauth_state_secret")
+    )
+    twilio_account_sid: str | None = Field(
+        default=None, validation_alias=AliasChoices("TWILIO_ACCOUNT_SID", "twilio_account_sid")
+    )
+    twilio_auth_token: str | None = Field(
+        default=None, validation_alias=AliasChoices("TWILIO_AUTH_TOKEN", "twilio_auth_token")
+    )
+    twilio_whatsapp_number: str | None = Field(
+        default=None, validation_alias=AliasChoices("TWILIO_WHATSAPP_NUMBER", "twilio_whatsapp_number")
+    )
+
     # Groq API key for AI-powered JD parsing.
     groq_api_key: str | None = Field(
         default=None,
