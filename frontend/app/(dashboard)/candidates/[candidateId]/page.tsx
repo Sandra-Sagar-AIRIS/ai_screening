@@ -79,7 +79,9 @@ export default function CandidateDetailPage() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const [composeEmailTo, setComposeEmailTo] = useState("");
   const [phone, setPhone] = useState("");
+  const [composePhoneTo, setComposePhoneTo] = useState("");
   const [location, setLocation] = useState("");
   const [role, setRole] = useState("");
   const [yearsExperience, setYearsExperience] = useState("");
@@ -244,7 +246,9 @@ export default function CandidateDetailPage() {
         setFirstName(data.first_name || "");
         setLastName(data.last_name || "");
         setEmail(data.email || "");
+        setComposeEmailTo(data.email || "");
         setPhone(data.phone ?? "");
+        setComposePhoneTo(data.phone ?? "");
         setLocation(data.location ?? "");
         setRole(data.role ?? "");
         setYearsExperience(data.years_experience !== null && data.years_experience !== undefined ? String(data.years_experience) : "");
@@ -694,6 +698,8 @@ export default function CandidateDetailPage() {
         years_experience: yearsExperience.trim() ? Number(yearsExperience.trim()) : undefined,
       });
       setCandidate(updated);
+      setComposeEmailTo(updated.email || "");
+      setComposePhoneTo(updated.phone || "");
       setIsEditing(false);
       setError(null);
     } catch (err) {
@@ -898,14 +904,14 @@ export default function CandidateDetailPage() {
   }
 
   async function handleSendEmail(saveAsDraft = false, quickAction?: string) {
-    if (!params.candidateId || !candidate?.email) return;
+    if (!params.candidateId || !composeEmailTo) return;
     setSendingEmail(true);
     setCommunicationError(null);
     try {
       if (selectedTemplateId && parseTemplateValues() === null) return;
       const payload = {
         provider: selectedEmailProvider,
-        to_email: candidate.email,
+        to_email: composeEmailTo,
         subject: emailSubject,
         body: emailBody,
         save_as_draft: saveAsDraft,
@@ -931,13 +937,13 @@ export default function CandidateDetailPage() {
   }
 
   async function handleSendWhatsApp(quickAction?: string) {
-    if (!params.candidateId || !candidate?.phone) return;
+    if (!params.candidateId || !composePhoneTo) return;
     setSendingWhatsapp(true);
     setCommunicationError(null);
     try {
       if (selectedWhatsappTemplateId && parseTemplateValues() === null) return;
       await sendCandidateWhatsApp(params.candidateId, {
-        to_phone: candidate.phone,
+        to_phone: composePhoneTo,
         body: whatsappBody || undefined,
         idempotency_key: `${params.candidateId}-wa-${Date.now()}`,
         quick_action: quickAction,
@@ -965,7 +971,7 @@ export default function CandidateDetailPage() {
       await createCandidateCommunicationReminder(params.candidateId, {
         channel: reminderChannel,
         provider: reminderChannel === "email" ? selectedEmailProvider : "whatsapp",
-        to_address: reminderChannel === "email" ? (candidate.email || "") : (candidate.phone || ""),
+        to_address: reminderChannel === "email" ? (composeEmailTo || "") : (composePhoneTo || ""),
         template_id: templateId || undefined,
         template_values: parsedValues,
         subject: reminderChannel === "email" ? (emailSubject || undefined) : undefined,
@@ -1072,13 +1078,13 @@ export default function CandidateDetailPage() {
   const whatsappTemplates = communicationTemplates.filter(
     (tpl) => tpl.channel === "whatsapp" || tpl.name.toLowerCase().includes("whatsapp")
   );
-  const emailSendDisabled = sendingEmail || emailTemplateRendering || !candidate.email || !emailSubject.trim() || !emailBody.trim();
-  const emailDraftDisabled = sendingEmail || emailTemplateRendering || !candidate.email || !emailBody.trim();
-  const whatsappSendDisabled = sendingWhatsapp || whatsappTemplateRendering || !candidate.phone || !whatsappBody.trim();
+  const emailSendDisabled = sendingEmail || emailTemplateRendering || !composeEmailTo || !emailSubject.trim() || !emailBody.trim();
+  const emailDraftDisabled = sendingEmail || emailTemplateRendering || !composeEmailTo || !emailBody.trim();
+  const whatsappSendDisabled = sendingWhatsapp || whatsappTemplateRendering || !composePhoneTo || !whatsappBody.trim();
   const reminderDisabled =
     schedulingReminder ||
     !reminderAt ||
-    (reminderChannel === "email" ? !candidate.email || !emailSubject.trim() || !emailBody.trim() : !candidate.phone || !whatsappBody.trim());
+    (reminderChannel === "email" ? !composeEmailTo || !emailSubject.trim() || !emailBody.trim() : !composePhoneTo || !whatsappBody.trim());
 
 
   return (
@@ -1533,14 +1539,6 @@ export default function CandidateDetailPage() {
                       <MessageSquare className="w-4 h-4 text-[#FF5A1F]" />
                       <h2 className="text-base font-semibold text-gray-900">Communication Hub</h2>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" className="h-8 text-xs" onClick={() => void handleConnectProvider("gmail")}>
-                        Connect Gmail
-                      </Button>
-                      <Button variant="outline" className="h-8 text-xs" onClick={() => void handleConnectProvider("outlook")}>
-                        Connect Outlook
-                      </Button>
-                    </div>
                   </div>
                 </div>
                 <div className="border-b border-gray-100 px-4">
@@ -1678,7 +1676,7 @@ export default function CandidateDetailPage() {
                               <div className="p-0">
                                 <div className="flex items-center border-b border-gray-100 px-4 py-2">
                                   <span className="text-sm text-gray-500 w-12 font-medium">To</span>
-                                  <input className="flex-1 text-sm outline-none bg-transparent" value={candidate.email || ""} readOnly />
+                                  <input className="flex-1 text-sm outline-none bg-transparent" value={composeEmailTo} onChange={(e) => setComposeEmailTo(e.target.value)} />
                                 </div>
                                 <div className="flex items-center border-b border-gray-100 px-4 py-2">
                                   <span className="text-sm text-gray-500 w-12 font-medium">Sub</span>
@@ -1730,7 +1728,7 @@ export default function CandidateDetailPage() {
                               <div className="p-0">
                                 <div className="flex items-center border-b border-gray-100 px-4 py-2">
                                   <span className="text-sm text-gray-500 w-16 font-medium">Phone</span>
-                                  <input className="flex-1 text-sm outline-none bg-transparent" value={candidate.phone || ""} readOnly />
+                                  <input className="flex-1 text-sm outline-none bg-transparent" value={composePhoneTo} onChange={(e) => setComposePhoneTo(e.target.value)} />
                                 </div>
                                 <div className="flex items-center border-b border-gray-100 px-4 py-2 bg-gray-50/30">
                                    <span className="text-sm text-gray-500 w-[100px] font-medium">Use template</span>
@@ -1875,9 +1873,7 @@ export default function CandidateDetailPage() {
                         <div className="p-0 flex-1 flex flex-col overflow-y-auto">
                           <div className="flex items-center px-6 py-3 border-b border-gray-100">
                             <span className="text-sm text-gray-500 w-24 font-medium">To</span>
-                            <select className="flex-1 text-sm outline-none bg-transparent border border-gray-200 rounded-lg px-3 py-2 focus:border-[#FF5A1F] transition-colors font-medium text-gray-900">
-                              <option>{candidate.email}</option>
-                            </select>
+                            <input className="flex-1 text-sm outline-none bg-transparent border border-gray-200 rounded-lg px-3 py-2 focus:border-[#FF5A1F] transition-colors font-medium text-gray-900" value={composeEmailTo} onChange={(e) => setComposeEmailTo(e.target.value)} />
                           </div>
                           <div className="flex items-center px-6 py-3 border-b border-gray-100">
                             <span className="text-sm text-gray-500 w-24 font-medium">Subject</span>
@@ -2081,9 +2077,7 @@ export default function CandidateDetailPage() {
                         <div className="p-0 flex-1 flex flex-col overflow-y-auto">
                           <div className="flex items-center px-6 py-3 border-b border-gray-100">
                             <span className="text-sm text-gray-500 w-28 font-medium">To</span>
-                            <select className="flex-1 text-sm outline-none bg-transparent border border-gray-200 rounded-lg px-3 py-2 focus:border-[#25D366] transition-colors font-medium text-gray-900">
-                              <option>{candidate.phone || "No phone number"}</option>
-                            </select>
+                            <input className="flex-1 text-sm outline-none bg-transparent border border-gray-200 rounded-lg px-3 py-2 focus:border-[#25D366] transition-colors font-medium text-gray-900" value={composePhoneTo} onChange={(e) => setComposePhoneTo(e.target.value)} />
                           </div>
                           <div className="flex items-center px-6 py-3 border-b border-gray-100">
                             <span className="text-sm text-gray-500 w-28 font-medium">Use Template</span>
@@ -2545,45 +2539,7 @@ export default function CandidateDetailPage() {
           </div>
         </div>
 
-  {/* Timeline / Interactions */ }
-  <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-    <div className="border-b border-gray-100 bg-gray-50/50 p-5">
-      <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-        <MessageSquare className="w-4 h-4 text-[#FF5A1F]" /> Activity Timeline
-      </h2>
-    </div>
-    <div className="p-5">
-      <div className="flex gap-2 mb-6 relative">
-        <Input placeholder="Add a note..." className="pr-20" value={newNote} onChange={(e) => setNewNote(e.target.value)} />
-        <Button className="absolute right-1 top-1 bottom-1 h-auto bg-[#FF5A1F] hover:bg-[#E54E1A] text-white" onClick={handleAddNote} disabled={addingNote || !newNote.trim()}>
-          {addingNote ? "..." : "Post"}
-        </Button>
-      </div>
 
-      <div className="space-y-4 relative before:absolute before:inset-0 before:ml-4 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-200 before:to-transparent">
-        {interactionsLoadFailed ? (
-          <p className="text-amber-700 text-center py-4 relative z-10 bg-white">Unable to load interactions. You can still view the profile and ATS data.</p>
-        ) : orderedTimeline.length === 0 ? (
-          <p className="text-sm text-center text-gray-500 py-4 relative z-10 bg-white">No activity yet.</p>
-        ) : (
-          orderedTimeline.map((item) => (
-            <div key={item.id} className="relative z-10 pl-10">
-              {/* Timeline dot */}
-              <div className="absolute left-[6px] top-1.5 h-5 w-5 rounded-full border-4 border-white bg-[#FF5A1F] shadow-sm"></div>
-
-              <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 shadow-sm transition-transform hover:-translate-y-0.5">
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <p className="font-semibold text-gray-900 text-sm">{item.title ?? item.interaction_type}</p>
-                  <span className="text-[10px] font-medium text-gray-400 whitespace-nowrap">{new Date(item.created_at).toLocaleDateString()}</span>
-                </div>
-                {item.body && <p className="text-xs text-gray-600 leading-relaxed">{item.body}</p>}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  </div>
 
         </div >
       )}
