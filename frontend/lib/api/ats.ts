@@ -1,4 +1,4 @@
-import { apiRequest } from "@/lib/api/client";
+import { apiRequest, ApiError } from "@/lib/api/client";
 import type {
   AtsPairStatusResponse,
   CandidateMatchEntry,
@@ -95,10 +95,19 @@ export async function pollJobMatchesUntilEnriched(
   let interval = ENRICHMENT_POLL_INITIAL_MS;
   let last: JobMatchEntry[] = [];
   while (Date.now() < deadline) {
-    const page = await getJobMatchesAts(jobId, params);
-    last = page.matches ?? [];
-    opts?.onTick?.(last);
-    if (!atsAwaitingSemanticEnrichment(last)) break;
+    try {
+      const page = await getJobMatchesAts(jobId, params);
+      last = page.matches ?? [];
+      opts?.onTick?.(last);
+      if (!atsAwaitingSemanticEnrichment(last)) break;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        last = [];
+        opts?.onTick?.(last);
+        break;
+      }
+      throw e;
+    }
     await new Promise((r) => setTimeout(r, interval));
     interval = nextPollMs(interval);
   }

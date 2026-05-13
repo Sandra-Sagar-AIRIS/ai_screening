@@ -4,14 +4,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
-import { createJob, getJobs, updateJob, deleteJob, parseJD, type JobParseResult } from "@/lib/api/jobs";
+import { createJob, getJobs, updateJob, deleteJob, parseJD, uploadJobJdDocument, type JobParseResult } from "@/lib/api/jobs";
 import { JOBS_CREATE_PERMISSION, JOBS_UPDATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import { isAdminRole } from "@/lib/dashboard-nav";
 import type { Job, JobStatus } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Briefcase, CircleDot, Shield, CheckCircle2, RefreshCw } from "lucide-react";
+import { Briefcase, CircleDot, Shield, CheckCircle2, RefreshCw, MapPin, GraduationCap, Calendar, Zap } from "lucide-react";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -127,7 +127,7 @@ function JDInputModal({
   onParsed,
 }: {
   onClose: () => void;
-  onParsed: (result: JobParseResult) => void;
+  onParsed: (result: JobParseResult, sourceFile: File | null) => void;
 }) {
   const [tab, setTab] = useState<"paste" | "upload">("paste");
   const [text, setText] = useState("");
@@ -156,14 +156,15 @@ function JDInputModal({
       const result = tab === "paste"
         ? await parseJD({ type: "text", text })
         : await parseJD({ type: "file", file: file! });
-      onParsed({
-        ...result,
-        // raw_jd_text is now returned by the backend for both paste and file upload.
-        // For paste, also use the locally typed text as a fallback.
-        raw_jd_text: result.raw_jd_text ?? (tab === "paste" ? text : undefined),
-        parsing_source: tab === "paste" ? "text" : "file",
-        parsing_status: "success",
-      });
+      onParsed(
+        {
+          ...result,
+          raw_jd_text: result.raw_jd_text ?? (tab === "paste" ? text : undefined),
+          parsing_source: tab === "paste" ? "text" : "file",
+          parsing_status: "success",
+        },
+        tab === "upload" ? file : null
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Parsing failed. Try again.");
     } finally {
@@ -206,11 +207,11 @@ function JDInputModal({
           >
             <span className="text-3xl">📂</span>
             <p className="mt-2 text-sm">{file ? file.name : "Click to select a JD file"}</p>
-            <p className="text-xs mt-1">Accepted: .pdf, .doc, .docx</p>
+            <p className="text-xs mt-1">Accepted: .pdf, .doc, .docx, .txt</p>
             <input
               ref={fileRef}
               type="file"
-              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              accept=".pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
               className="hidden"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
@@ -240,12 +241,14 @@ function JDInputModal({
 
 function JDPreviewModal({
   initial,
+  sourceFile,
   clientId,
   onBack,
   onClose,
   onCreated,
 }: {
   initial: JobParseResult;
+  sourceFile: File | null;
   clientId: string;
   onBack: () => void;
   onClose: () => void;
@@ -289,7 +292,21 @@ function JDPreviewModal({
         parsing_source: initial.parsing_source,
         parsing_status: initial.parsing_status,
       });
-      onCreated(job);
+      let created = job;
+      if (sourceFile) {
+        try {
+          created = await uploadJobJdDocument(job.id, sourceFile);
+        } catch (uploadErr) {
+          setError(
+            uploadErr instanceof ApiError
+              ? `${uploadErr.message} The job was created; you can re-upload the JD from job settings when available.`
+              : "Job created but JD file upload failed. Try again from the job page."
+          );
+          onCreated(job);
+          return;
+        }
+      }
+      onCreated(created);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create job.");
     } finally {
@@ -461,7 +478,7 @@ export default function JobsPage() {
   // Import from JD flow state
   const [showJDInput, setShowJDInput] = useState(false);
   const [jdClientId, setJdClientId] = useState("");
-  const [parsedResult, setParsedResult] = useState<JobParseResult | null>(null);
+  const [jdImport, setJdImport] = useState<{ result: JobParseResult; sourceFile: File | null } | null>(null);
 
   const refreshJobs = useCallback(async () => {
     setIsRefreshing(true);
@@ -684,11 +701,11 @@ export default function JobsPage() {
 
                 <div className="mb-4 grid grid-cols-2 gap-y-2 gap-x-4 text-[13px] font-medium text-slate-500">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-slate-400">📍</span>
+                    <MapPin className="h-4 w-4 text-slate-400" />
                     <span className="truncate max-w-[120px]">{job.location || "TBD"}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="text-slate-400">🎓</span>
+                    <GraduationCap className="h-4 w-4 text-slate-400" />
                     <span>
                       {(job.experience_min_years !== null || job.experience_max_years !== null) 
                         ? `${job.experience_min_years ?? 0}-${job.experience_max_years ?? "+"} yrs` 
@@ -696,12 +713,12 @@ export default function JobsPage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="text-slate-400">📅</span>
-                    <span>{job.created_at ? new Date(job.created_at).toLocaleDateString() : "Unknown"}</span>
+                    <Calendar className="h-4 w-4 text-slate-400" />
+                    <span>{job.created_at ? new Date(job.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : "Unknown"}</span>
                   </div>
                   {job.urgency && job.urgency !== "normal" && (
                     <div className="flex items-center gap-1.5 text-orange-600">
-                      <span className="text-orange-400">⚡</span>
+                      <Zap className="h-4 w-4 text-orange-400" />
                       <span className="capitalize">{job.urgency}</span>
                     </div>
                   )}
@@ -878,25 +895,26 @@ export default function JobsPage() {
       {showJDInput ? (
         <JDInputModal
           onClose={() => setShowJDInput(false)}
-          onParsed={(result) => {
-            setParsedResult(result);
+          onParsed={(result, sourceFile) => {
+            setJdImport({ result, sourceFile });
             setShowJDInput(false);
           }}
         />
       ) : null}
 
       {/* ── Preview / confirm modal ──────────────────────────────────── */}
-      {parsedResult ? (
+      {jdImport ? (
         <JDPreviewModal
-          initial={parsedResult}
+          initial={jdImport.result}
+          sourceFile={jdImport.sourceFile}
           clientId={jdClientId}
           onBack={() => {
-            setParsedResult(null);
+            setJdImport(null);
             setShowJDInput(true);
           }}
-          onClose={() => { setParsedResult(null); setJdClientId(""); }}
+          onClose={() => { setJdImport(null); setJdClientId(""); }}
           onCreated={(job) => {
-            setParsedResult(null);
+            setJdImport(null);
             setJdClientId("");
             setJobs((prev) => [job, ...prev.filter((j) => j.id !== job.id)]);
             setNotice("Job created. Preparing ATS metadata in the background.");

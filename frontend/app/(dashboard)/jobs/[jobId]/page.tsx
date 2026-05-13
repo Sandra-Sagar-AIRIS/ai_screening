@@ -20,13 +20,15 @@ import { Input } from "@/components/ui/input";
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
 import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
 import { ATSMatchBreakdownPanel } from "@/components/ats/ats-match-breakdown-panel";
+import { DocumentCard } from "@/components/documents/DocumentCard";
 import { normalizeCandidateId } from "@/lib/ats/candidate-id";
+import { isAdminRole } from "@/lib/dashboard-nav";
+import { useAuthStore } from "@/store/auth-store";
 import { 
   Clipboard, 
   Search,
   CheckCircle2,
   ChevronRight,
-  ExternalLink,
   Zap,
   ArrowLeft,
   Users,
@@ -43,7 +45,6 @@ import {
   MoreVertical,
   MapPin,
   Clock,
-  Download
 } from "lucide-react";
 
 // ─── components ─────────────────────────────────────────────────────────────
@@ -124,6 +125,13 @@ function ActionMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => 
 export default function JobDetailPage() {
   const params = useParams<{ jobId: string }>();
   const router = useRouter();
+  const rawJobId = params?.jobId;
+  const jobIdParam =
+    typeof rawJobId === "string"
+      ? rawJobId.trim() || null
+      : Array.isArray(rawJobId)
+        ? rawJobId[0]?.trim() || null
+        : null;
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -134,7 +142,6 @@ export default function JobDetailPage() {
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
   const [bannerVisible, setBannerVisible] = useState(true);
 
-  const [activeTab, setActiveTab] = useState<"overview" | "raw_jd">("overview");
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [jobCandidates, setJobCandidates] = useState<JobCandidateListItem[]>([]);
@@ -151,6 +158,12 @@ export default function JobDetailPage() {
   const [atsSortBy, setAtsSortBy] = useState<"score_desc" | "missing_critical_asc">("score_desc");
   const atsSemanticInFlight = useMemo(() => atsAwaitingSemanticEnrichment(atsMatches), [atsMatches]);
 
+  /** Ignore stale responses when `jobIdParam` changes before in-flight requests finish. */
+  const latestJobIdRequested = useRef<string | null>(null);
+  useEffect(() => {
+    latestJobIdRequested.current = jobIdParam;
+  }, [jobIdParam]);
+
   // Edit Job State
   const [showEdit, setShowEdit] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -160,17 +173,20 @@ export default function JobDetailPage() {
   const [pauseReason, setPauseReason] = useState("");
   const [pendingStatus, setPendingStatus] = useState<JobStatus | null>(null);
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [showParsedJdModal, setShowParsedJdModal] = useState(false);
+  const role = useAuthStore((s) => s.role);
 
   async function handleDeleteConfirm() {
-    if (!params.jobId) return;
+    if (!jobIdParam) return;
+    setDeleting(true);
     try {
-      setDeleting(true);
-      await deleteJob(params.jobId);
+      await deleteJob(jobIdParam);
       router.push("/jobs");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Unable to delete job.");
-      setDeleting(false);
       setShowDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
     }
   }
   const [editTitle, setEditTitle] = useState("");
@@ -202,7 +218,7 @@ export default function JobDetailPage() {
   async function handleUpdateJob() {
     setError(null);
     if (!editTitle.trim()) { setError("Job title is required."); return; }
-    if (!params.jobId) return;
+    if (!jobIdParam) return;
     
     try {
       setUpdating(true);
@@ -210,7 +226,7 @@ export default function JobDetailPage() {
       const pref = editPreferredSkills.split(/[\n,]+/g).map((s) => s.trim()).filter(Boolean);
       const keyResp = editKeyResponsibilities.split(/[\n]+/g).map((s) => s.trim()).filter(Boolean);
       
-      await updateJob(params.jobId, {
+      await updateJob(jobIdParam, {
         title: editTitle.trim(),
         description: editDescription.trim() || null, 
         location: editLocation.trim() || null,
@@ -232,12 +248,12 @@ export default function JobDetailPage() {
   }
 
   async function loadAtsMatches() {
-    if (!params.jobId) return;
+    if (!jobIdParam || !job || String(job.id) !== jobIdParam) return;
     const seq = ++atsRequestSeqRef.current;
     setAtsLoading(true);
     setAtsFetchError(null);
     try {
-      const atsPage = await getJobMatchesAts(params.jobId, {
+      const atsPage = await getJobMatchesAts(jobIdParam, {
         limit: atsLimit,
         offset: atsOffset,
         sort_by: atsSortBy,
@@ -247,7 +263,7 @@ export default function JobDetailPage() {
       setAtsTotal(atsPage.total_count ?? 0);
       // Refresh scored-ID set when listing from the first page (or sort changes), so banner ≠ paginated slice only.
       if (atsOffset === 0) {
-        const atsIdPages = await getJobMatchesAts(params.jobId, {
+        const atsIdPages = await getJobMatchesAts(jobIdParam, {
           limit: 200,
           offset: 0,
           sort_by: atsSortBy,
@@ -262,6 +278,13 @@ export default function JobDetailPage() {
       }
     } catch (err) {
       if (seq !== atsRequestSeqRef.current) return;
+      if (err instanceof ApiError && err.status === 404) {
+        setAtsMatches([]);
+        setAtsTotal(0);
+        setAtsScoredCandidateIdSet(new Set());
+        setAtsFetchError(null);
+        return;
+      }
       setAtsFetchError(err instanceof ApiError ? err.message : "Unable to load ATS matches.");
     } finally {
       if (seq === atsRequestSeqRef.current) {
@@ -271,41 +294,50 @@ export default function JobDetailPage() {
   }
 
   async function loadData() {
-    if (!params.jobId) return;
+    if (!jobIdParam) return;
+    const loadTarget = jobIdParam;
     setLoading(true);
     setError(null);
     setPipelineError(null);
+    setJob(null);
     try {
-      const data = await getJobById(params.jobId);
+      const data = await getJobById(loadTarget);
+      if (latestJobIdRequested.current !== loadTarget) return;
       setJob(data);
-      await loadAtsMatches();
       try {
-        const candidates = await getJobCandidates(params.jobId);
+        const candidates = await getJobCandidates(loadTarget);
+        if (latestJobIdRequested.current !== loadTarget) return;
         setJobCandidates(candidates);
       } catch {
+        if (latestJobIdRequested.current !== loadTarget) return;
         setJobCandidates([]);
       }
       try {
-        const candidates = await getJobCandidates(params.jobId);
-        setJobCandidates(candidates);
-      } catch {
-        setJobCandidates([]);
-      }
-      try {
-        const pipelineData = await getPipelines(200, 0, params.jobId);
+        const pipelineData = await getPipelines(200, 0, loadTarget);
+        if (latestJobIdRequested.current !== loadTarget) return;
         setPipelines(pipelineData);
       } catch (pipelineErr) {
+        if (latestJobIdRequested.current !== loadTarget) return;
         setPipelines([]);
         setPipelineError(pipelineErr instanceof Error ? pipelineErr.message : "Unable to load pipeline summary.");
       }
     } catch (err) {
+      if (latestJobIdRequested.current !== loadTarget) return;
       if (err instanceof ApiError) {
-        setError(err.message);
+        if (err.status === 404) {
+          setError(
+            "This job was not found. It may have been deleted, or you may not have access to it in your organization.",
+          );
+        } else {
+          setError(err.message);
+        }
       } else {
         setError("Unable to load job details");
       }
     } finally {
-      setLoading(false);
+      if (latestJobIdRequested.current === loadTarget) {
+        setLoading(false);
+      }
     }
   }
 
@@ -343,12 +375,21 @@ export default function JobDetailPage() {
   }
 
   useEffect(() => {
-    loadData();
-  }, [params.jobId]);
+    if (!jobIdParam) {
+      setLoading(false);
+      setError("Invalid job link.");
+      setJob(null);
+      return;
+    }
+    void loadData();
+  }, [jobIdParam]);
 
   useEffect(() => {
+    if (!jobIdParam || !job || String(job.id) !== jobIdParam) return;
     void loadAtsMatches();
-  }, [params.jobId, atsOffset, atsSortBy]);
+    // loadAtsMatches closes over the latest job/offset/sort each run; avoid duplicate fetches before job exists.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional gate on loaded job id
+  }, [jobIdParam, job?.id, atsOffset, atsSortBy]);
 
   useEffect(() => {
     if (job) {
@@ -357,11 +398,11 @@ export default function JobDetailPage() {
   }, [job]);
 
   async function loadSubmissions() {
-    if (!params.jobId) return;
+    if (!jobIdParam) return;
     setSubmissionsLoading(true);
     setSubmissionsError(null);
     try {
-      const response = await getJobSubmissions(params.jobId, { limit: 200, offset: 0 });
+      const response = await getJobSubmissions(jobIdParam, { limit: 200, offset: 0 });
       setSubmissions(response.data);
       setSubmissionsTotal(response.total);
     } catch (err) {
@@ -371,30 +412,24 @@ export default function JobDetailPage() {
     }
   }
 
-  const handleCopyJD = () => {
-    if (job?.raw_jd_text) {
-      navigator.clipboard.writeText(job.raw_jd_text);
-    }
-  };
-
   async function handleRescoreAts() {
-    if (!params.jobId) return;
+    if (!jobIdParam) return;
     if (atsSemanticInFlight || atsRescoreBusy) return;
     setAtsRescoreBusy(true);
     setAtsFetchError(null);
     try {
-      const meta = await rescoreJobAts(params.jobId);
+      const meta = await rescoreJobAts(jobIdParam);
       await loadAtsMatches();
       if (meta.semantic_enrichment === "queued") {
         const seq = atsRequestSeqRef.current;
         const pairCandidates = Array.from(new Set(atsMatches.map((m) => m.candidate_id)));
         if (pairCandidates.length > 0) {
           await pollAtsPairStatusesUntilSettled(
-            pairCandidates.map((candidateId) => ({ candidate_id: candidateId, job_id: params.jobId })),
+            pairCandidates.map((candidateId) => ({ candidate_id: candidateId, job_id: jobIdParam })),
           );
         } else {
           await pollJobMatchesUntilEnriched(
-            params.jobId,
+            jobIdParam,
             { limit: atsLimit, offset: atsOffset, sort_by: atsSortBy },
             {
               onTick: (matches) => {
@@ -414,27 +449,6 @@ export default function JobDetailPage() {
       setAtsRescoreBusy(false);
     }
   }
-
-  const handleOpenJD = () => {
-    if (!job?.raw_jd_text) return;
-    const blob = new Blob([job.raw_jd_text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank", "noopener,noreferrer");
-    // Revoke after a short delay to allow the browser to load it
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-  };
-
-  const handleDownloadJD = () => {
-    if (!job?.raw_jd_text) return;
-    const safeName = (job.title || "job-description").replace(/[^a-z0-9]/gi, "_").toLowerCase();
-    const blob = new Blob([job.raw_jd_text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${safeName}_jd.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
   const candidateNamesByIdNorm = useMemo(() => {
     const map: Record<string, string> = {};
@@ -464,6 +478,16 @@ export default function JobDetailPage() {
     return out;
   }, [job, pipelines, atsScoredCandidateIdSet, candidateNamesByIdNorm]);
 
+  const jdDocumentInput = useMemo(
+    () => ({
+      flavor: "job_jd" as const,
+      jobId: jobIdParam || "",
+      jdOriginalAvailable: Boolean(job?.jd_original_available),
+      jdFileName: job?.jd_file_name ?? null,
+    }),
+    [jobIdParam, job?.jd_original_available, job?.jd_file_name],
+  );
+
   if (loading) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
@@ -491,12 +515,22 @@ export default function JobDetailPage() {
   }
 
   if (error) {
+    const isNotFound = error.includes("not found");
     return (
       <div className="flex flex-col items-center justify-center p-20 text-center">
-        <div className="max-w-md">
-          <p className="text-gray-900 font-semibold mb-2">Something went wrong</p>
-          <p className="text-gray-500 text-sm mb-6">{error}</p>
-          <Button onClick={loadData} variant="outline" className="px-3 py-1.5 text-sm">Retry Loading</Button>
+        <div className="max-w-md space-y-4">
+          <p className="text-gray-900 font-semibold">{isNotFound ? "Job not available" : "Something went wrong"}</p>
+          <p className="text-gray-500 text-sm">{error}</p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button type="button" onClick={() => router.push("/jobs")} variant="default" className="px-3 py-1.5 text-sm">
+              Back to jobs
+            </Button>
+            {!isNotFound ? (
+              <Button type="button" onClick={() => void loadData()} variant="outline" className="px-3 py-1.5 text-sm">
+                Retry
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
     );
@@ -597,63 +631,72 @@ export default function JobDetailPage() {
         
         {/* Left Column (70%) */}
         <div className="lg:col-span-7 space-y-6">
-          <div className="border-b border-gray-200 bg-white/95 backdrop-blur z-20 pt-2">
-            <nav className="flex space-x-8 overflow-x-auto scrollbar-hide">
-              {(["overview", "raw_jd"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`
-                    whitespace-nowrap py-3 px-1 text-sm font-bold transition-all border-b-2
-                    ${activeTab === tab
-                      ? "border-[#FF5A1F] text-[#FF5A1F]"
-                      : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"}
-                  `}
-                >
-                  <span className="capitalize">
-                    {tab === "raw_jd" ? "Raw JD" : tab}
-                  </span>
-                </button>
-              ))}
-            </nav>
-          </div>
+          <div className="min-h-[400px] space-y-6">
+            <div className="animate-in fade-in duration-300 space-y-6">
+              <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8">
+                <h2 className="mb-6 flex items-center gap-2 text-lg font-bold text-gray-900">
+                  <FileText className="h-5 w-5 text-[#FF5A1F]" /> About This Role
+                </h2>
+                {job.description ? (
+                  <div className="text-[15px] font-medium leading-relaxed text-gray-700 whitespace-pre-wrap">
+                    {job.description}
+                  </div>
+                ) : (
+                  <p className="text-sm italic text-gray-400">No description provided.</p>
+                )}
 
-          <div className="min-h-[400px]">
-            {activeTab === "overview" && (
-              <div className="animate-in fade-in duration-300 space-y-6">
-                <div className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm">
-                   <h2 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
-                     <FileText className="w-5 h-5 text-[#FF5A1F]" /> About This Role
-                   </h2>
-                   {job.description ? (
-                     <div className="text-[15px] text-gray-700 leading-relaxed whitespace-pre-wrap font-medium">
-                       {job.description}
-                     </div>
-                   ) : (
-                     <p className="italic text-gray-400 text-sm">No description provided.</p>
-                   )}
-                   
-                   {job.key_responsibilities && job.key_responsibilities.length > 0 && (
-                     <div className="mt-8 pt-6 border-t border-gray-100">
-                       <h3 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2">
-                         <Target className="w-5 h-5 text-[#FF5A1F]" /> Key Responsibilities
-                       </h3>
-                       <ul className="list-disc pl-5 space-y-2 text-[14px] text-gray-700">
-                         {job.key_responsibilities.map((resp, i) => (
-                           <li key={i} className="leading-relaxed">{resp}</li>
-                         ))}
-                       </ul>
-                     </div>
-                   )}
-                   
-                   <div className="mt-8 pt-6 border-t border-gray-100 flex items-center gap-4">
-                     <Button variant="outline" onClick={() => setActiveTab('raw_jd')} className="text-sm font-medium border-gray-300 flex items-center gap-2 rounded-lg shadow-sm hover:bg-gray-50 text-gray-700">
-                       <FileText className="w-4 h-4" /> View Full JD
-                     </Button>
-                   </div>
-                </div>
+                {job.key_responsibilities && job.key_responsibilities.length > 0 && (
+                  <div className="mt-8 border-t border-gray-100 pt-6">
+                    <h3 className="mb-4 flex items-center gap-2 text-base font-bold text-gray-900">
+                      <Target className="h-5 w-5 text-[#FF5A1F]" /> Key Responsibilities
+                    </h3>
+                    <ul className="list-disc space-y-2 pl-5 text-[14px] text-gray-700">
+                      {job.key_responsibilities.map((resp, i) => (
+                        <li key={i} className="leading-relaxed">
+                          {resp}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
 
-<div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+              <DocumentCard
+                heading="Job description document"
+                document={jdDocumentInput}
+                hasSource={Boolean(job.jd_original_available)}
+                emptyTitle="No original JD file on record"
+                emptyDescription="This job may have been created before document storage was enabled, or from a source without a saved file. Parsed text is still used for search and ATS behind the scenes."
+                extras={
+                  <>
+                    {job.raw_jd_text ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 gap-2 border-gray-200 px-3 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(job.raw_jd_text || "");
+                        }}
+                      >
+                        <Clipboard className="h-3.5 w-3.5" />
+                        Copy parsed text
+                      </Button>
+                    ) : null}
+                    {isAdminRole(role) && job.raw_jd_text ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 border-dashed border-amber-300 px-3 text-xs font-medium text-amber-800 hover:bg-amber-50"
+                        onClick={() => setShowParsedJdModal(true)}
+                      >
+                        View parsed text (admin)
+                      </Button>
+                    ) : null}
+                  </>
+                }
+              />
+
+              <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
                   <div className="mb-4 flex items-center justify-between">
                     <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
                       <Sparkles className="w-5 h-5 text-[#FF5A1F]" /> ATS Matches
@@ -695,46 +738,59 @@ export default function JobDetailPage() {
                   ) : null}
                   {!atsLoading && (atsMatches.length > 0 || pendingAtsBannerEntries.length > 0) ? (
                     <div className="space-y-3">
-                      {atsMatches.map((m) => (
-                        <div key={m.candidate_id} className="rounded-lg border border-gray-100 p-3 space-y-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <Link href={`/candidates/${m.candidate_id}`} className="text-sm font-semibold text-indigo-700 hover:underline">
-                              {m.candidate_name ||
-                                candidateNamesByIdNorm[normalizeCandidateId(m.candidate_id)] ||
-                                m.candidate_id}
-                            </Link>
-                            <div className="flex items-center gap-1.5">
-                              <ATSScoreBadge score={m.fit_score} compact />
-                              <ATSRecommendationBadge recommendation={m.recommendation} awaitingMatch={false} compact />
+                      {atsMatches.map((m) => {
+                        const name = m.candidate_name || candidateNamesByIdNorm[normalizeCandidateId(m.candidate_id)] || m.candidate_id || "Unknown Candidate";
+                        return (
+                          <Link 
+                            key={m.candidate_id} 
+                            href={`/candidates/${m.candidate_id}`}
+                            className="block rounded-[16px] border border-slate-100/80 bg-white p-5 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-slate-200 transition-all duration-300 group"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-500 font-bold text-lg group-hover:bg-[#FF5A1F]/10 group-hover:text-[#FF5A1F] transition-colors duration-300">
+                                  {name.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <h4 className="text-[15px] font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{name}</h4>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-[12px] font-medium text-slate-500 flex items-center gap-1">
+                                      <Calendar className="h-3.5 w-3.5" />
+                                      {m.evaluated_at ? new Date(m.evaluated_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : "Pending"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3 shrink-0">
+                                <ATSScoreBadge score={m.fit_score} />
+                                <ATSRecommendationBadge recommendation={m.recommendation} awaitingMatch={false} />
+                                <ChevronRight className="h-5 w-5 text-slate-300 group-hover:text-[#FF5A1F] transition-transform group-hover:translate-x-1 duration-300" />
+                              </div>
                             </div>
-                          </div>
-                          <ATSMatchBreakdownPanel
-                            title="Match Breakdown"
-                            data={{
-                              fit_score: m.fit_score,
-                              deterministic_match_score: m.deterministic_match_score,
-                              semantic_match_score: m.semantic_match_score,
-                              ai_enrichment_status: m.ai_enrichment_status,
-                              ats_pipeline_status: m.ats_pipeline_status,
-                              enrichment_error: m.enrichment_error,
-                              deterministic_completed_at: m.deterministic_completed_at,
-                              semantic_completed_at: m.semantic_completed_at,
-                              recruiter_summary: m.recruiter_summary,
-                              confidence_reasoning: m.confidence_reasoning,
-                              semantic_skill_matches: m.semantic_skill_matches,
-                              transferable_skills: m.transferable_skills,
-                              inferred_strengths: m.inferred_strengths,
-                              inferred_gaps: m.inferred_gaps,
-                              recommendation: m.recommendation,
-                              category_scores: m.category_scores,
-                              matched_skills: m.matched_skills,
-                              missing_skills: m.missing_skills,
-                              confidence_score: m.confidence_score,
-                              evaluated_at: m.evaluated_at ?? undefined,
-                            }}
-                          />
-                        </div>
-                      ))}
+                            
+                            <div className="mt-5 pt-4 border-t border-slate-100/80 grid grid-cols-2 gap-4">
+                                <div>
+                                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Matched Skills</p>
+                                  {m.matched_skills && m.matched_skills.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {m.matched_skills.slice(0, 4).map(s => <span key={s} className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100/50 text-[10px] font-bold">{s}</span>)}
+                                      {m.matched_skills.length > 4 && <span className="px-2 py-0.5 rounded-md bg-slate-50 text-slate-600 border border-slate-100 text-[10px] font-bold">+{m.matched_skills.length - 4}</span>}
+                                    </div>
+                                  ) : <span className="text-xs text-slate-400">-</span>}
+                                </div>
+                                <div>
+                                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Missing Skills</p>
+                                  {m.missing_skills && m.missing_skills.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {m.missing_skills.slice(0, 3).map(s => <span key={s} className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-100/50 text-[10px] font-bold">{s}</span>)}
+                                      {m.missing_skills.length > 3 && <span className="px-2 py-0.5 rounded-md bg-slate-50 text-slate-600 border border-slate-100 text-[10px] font-bold">+{m.missing_skills.length - 3}</span>}
+                                    </div>
+                                  ) : <span className="text-xs text-slate-400">-</span>}
+                                </div>
+                            </div>
+                          </Link>
+                        );
+                      })}
                       {pendingAtsBannerEntries.length > 0 && (
                         <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/60 p-3">
                           <p className="text-xs font-semibold text-amber-700">
@@ -779,44 +835,7 @@ export default function JobDetailPage() {
                     </div>
                   ) : null}
                 </div>
-              </div>
-            )}
-
-            {activeTab === "raw_jd" && (
-              <div className="animate-in fade-in duration-300">
-                <div className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 border-b border-gray-100 pb-4 gap-4">
-                    <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                       <FileText className="w-5 h-5 text-[#FF5A1F]" /> Raw Job Description
-                    </h2>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button variant="outline" onClick={handleCopyJD} className="text-xs font-medium border-gray-300 text-gray-700 h-8 gap-2 px-3 py-1.5 hover:bg-gray-50" disabled={!job.raw_jd_text}>
-                        <Clipboard className="w-3.5 h-3.5" />
-                        Copy Text
-                      </Button>
-                      <Button variant="outline" onClick={handleOpenJD} className="text-xs font-medium border-gray-300 text-gray-700 h-8 gap-2 px-3 py-1.5 hover:bg-gray-50" disabled={!job.raw_jd_text}>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        Open JD
-                      </Button>
-                      <Button variant="outline" onClick={handleDownloadJD} className="text-xs font-medium border-orange-200 text-[#FF5A1F] h-8 gap-2 px-3 py-1.5 hover:bg-orange-50 hover:text-[#E54E1A]" disabled={!job.raw_jd_text}>
-                        <Download className="w-3.5 h-3.5" />
-                        Download JD
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg p-6 border border-gray-100">
-                    {job.raw_jd_text ? (
-                      <pre className="text-gray-700 text-sm font-mono whitespace-pre-wrap leading-relaxed max-h-[600px] overflow-y-auto">
-                        {job.raw_jd_text}
-                      </pre>
-                    ) : (
-                      <p className="text-sm text-gray-400 italic">No JD available.</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
+            </div>
           </div>
         </div>
 
@@ -881,20 +900,7 @@ export default function JobDetailPage() {
                 <span className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2"><Clock className="w-3.5 h-3.5" /> Experience</span>
                 <span className="text-sm font-semibold text-gray-900">{job.experience_min_years !== null && job.experience_min_years !== undefined ? `${job.experience_min_years} - ${job.experience_max_years || '+'} years` : "Not specified"}</span>
               </div>
-              <div className="flex flex-col gap-1 pb-3 border-b border-gray-100">
-                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Organization Unit</span>
-                <span className="text-sm font-semibold text-gray-900 truncate">{job.organization_id ? job.organization_id.split("-")[0] : "Not set"}</span>
-              </div>
-              <div className="flex flex-col gap-1 pb-3 border-b border-gray-100">
-                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Client Account</span>
-                <span className="text-sm font-semibold text-gray-900 truncate">
-                  {job.client_id ? job.client_id.split("-")[0] : "Internal"}
-                </span>
-              </div>
-              <div className="flex flex-col gap-1 pb-3 border-b border-gray-100">
-                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Created By</span>
-                <span className="text-sm font-semibold text-gray-900 truncate">{job.created_by || "System"}</span>
-              </div>
+
               <div className="flex flex-col gap-1">
                 <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Created On</span>
                 <span className="text-sm font-semibold text-gray-900">{formatDate(job.created_at)}</span>
@@ -1049,6 +1055,26 @@ export default function JobDetailPage() {
           </div>
         </div>
       )}
+      {showParsedJdModal && job?.raw_jd_text ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+              <h3 className="text-base font-bold text-gray-900">Parsed JD text (admin)</h3>
+              <button
+                type="button"
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-50 hover:text-gray-700"
+                aria-label="Close"
+                onClick={() => setShowParsedJdModal(false)}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="max-h-[calc(85vh-4rem)] overflow-auto p-5">
+              <pre className="whitespace-pre-wrap break-words font-mono text-xs text-gray-800">{job.raw_jd_text}</pre>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {showPauseReasonModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-xl bg-white shadow-2xl overflow-hidden">

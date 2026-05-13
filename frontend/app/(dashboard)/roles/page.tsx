@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { RoleTable } from "@/components/RoleTable";
-import { ApiError } from "@/lib/api/client";
 import { getRoles, type Role } from "@/lib/api";
 import { useAuthStore } from "@/store/auth-store";
+import { ShieldCheck } from "lucide-react";
+
 
 const ROLE_FLASH_KEY = "airis_role_flash";
 
@@ -49,7 +50,7 @@ export default function RolesPage() {
         const roleRows = await getRoles();
         setRoles(roleRows);
       } catch (err) {
-        if (err instanceof ApiError) {
+        if (err instanceof Error) {
           setError("Failed to load roles. Please try again.");
         } else {
           setError("Something went wrong. Please try again.");
@@ -71,14 +72,24 @@ export default function RolesPage() {
   }
 
   return (
-    <section className="space-y-4">
-      <h1 className="text-2xl font-semibold">Roles</h1>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <ShieldCheck className="w-6 h-6 text-[#FF5A1F]" />
+            Organization Roles
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">Manage custom roles and configure permissions</p>
+        </div>
+      </div>
+
       {successMessage ? (
-        <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900" role="status">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 flex items-center gap-2 shadow-sm">
           {successMessage}
-        </p>
+        </div>
       ) : null}
+      
       <RoleTable roles={roles} error={error} />
-    </section>
+    </div>
   );
 }

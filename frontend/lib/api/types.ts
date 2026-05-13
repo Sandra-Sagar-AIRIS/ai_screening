@@ -215,6 +215,9 @@ export type Job = {
   raw_jd_text?: string | null;
   parsing_source?: string | null;
   parsing_status?: string | null;
+  /** Original JD binary stored server-side (not derived from parsed text). */
+  jd_file_name?: string | null;
+  jd_original_available?: boolean;
   /** Async ATS / match pipeline: created | enriching | ready | failed */
   enrichment_status?: string | null;
   created_by?: string | null;

@@ -2,18 +2,20 @@
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { RefreshCw } from "lucide-react";
 import {
   closestCorners,
   DndContext,
   DragOverlay,
   type DragEndEvent,
-  PointerSensor,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
   useDraggable,
   useDroppable,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
+import { GripVertical, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { getCandidates } from "@/lib/api/candidates";
@@ -69,45 +71,65 @@ function CandidateCard({
   boardLoading,
   isMoving,
   isTopMatch,
+  isDragging,
 }: {
   pipeline: Pipeline;
   candidate?: Candidate;
   atsScore?: number;
   recommendation?: string;
-  /** Truncated AI recruiter summary when enrichment completed. */
   semanticInsight?: string | null;
-  /** From candidate_job_matches; drives compact semantic / fallback copy. */
   aiEnrichmentStatus?: string | null;
-  /** No row in candidate_job_matches for this job yet (or data not loaded). */
   awaitingAtsMatch?: boolean;
-  /** Full pipeline board is fetching jobs + ATS matches — do not show “pending” on every card. */
   boardLoading?: boolean;
   isMoving?: boolean;
   isTopMatch?: boolean;
+  isDragging?: boolean;
 }) {
   return (
-    <div className={`relative group transition-transform duration-300 w-full cursor-grab active:cursor-grabbing ${isMoving ? 'opacity-70' : 'hover:-translate-y-1'}`}>
-      <div className="relative rounded-2xl bg-white p-5 border border-slate-100/80 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all duration-300 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-slate-200 h-full">
+    <div 
+      className={`relative group transition-all duration-300 w-full cursor-grab active:cursor-grabbing 
+        ${isMoving ? 'opacity-70' : ''} 
+        ${isDragging ? 'z-50' : 'hover:-translate-y-1'}`}
+    >
+      <div className={`relative rounded-[20px] bg-white p-5 border transition-all duration-300 h-full
+        ${isDragging 
+          ? 'shadow-[0_20px_50px_rgba(0,0,0,0.15)] border-orange-200 scale-[1.02]' 
+          : 'border-slate-100/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-slate-200'
+        }`}
+      >
+        {/* Drag Handle Cue */}
+        <div className="absolute right-4 top-5 opacity-0 group-hover:opacity-30 transition-opacity">
+          <GripVertical className="h-4 w-4 text-slate-400" />
+        </div>
+
         <Link href={`/candidates/${pipeline.candidate_id}`} className="block">
-          <div className="mb-2.5 flex items-center gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 border border-slate-100/80 text-[10px] font-bold text-slate-500 transition-colors duration-300 group-hover:bg-orange-50 group-hover:text-[#FF5A1F] group-hover:border-orange-100">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-50 border border-slate-100/80 text-[11px] font-bold text-slate-600 transition-colors duration-300 group-hover:bg-orange-50 group-hover:text-[#FF5A1F] group-hover:border-orange-100">
               {candidate ? `${candidate.first_name.charAt(0)}${candidate.last_name.charAt(0)}` : "?"}
             </div>
-            <p className="text-sm font-bold leading-tight text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">
-              {candidate ? `${candidate.first_name} ${candidate.last_name}` : "Unknown candidate"}
-            </p>
+            <div className="min-w-0">
+              <p className="truncate text-[14px] font-bold leading-tight text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">
+                {candidate ? `${candidate.first_name} ${candidate.last_name}` : "Unknown candidate"}
+              </p>
+              <p className="truncate text-[12px] text-slate-500 font-medium mt-0.5">{candidate?.role ?? "Role not specified"}</p>
+            </div>
           </div>
-          <p className="text-[13px] leading-snug text-slate-500 font-medium">{candidate?.role ?? "Role not specified"}</p>
-          <p className="mt-2 text-xs text-slate-400 font-medium">
-            Exp:{" "}
-            {candidate?.years_experience !== null && candidate?.years_experience !== undefined ? `${candidate.years_experience}y` : "-"}
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {isTopMatch ? (
-              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+          
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Exp</span>
+              <span className="text-[12px] text-slate-700 font-bold">
+                {candidate?.years_experience !== null && candidate?.years_experience !== undefined ? `${candidate.years_experience}y` : "-"}
+              </span>
+            </div>
+            {isTopMatch && (
+              <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[9px] font-bold text-emerald-600 border border-emerald-100 uppercase tracking-wider">
                 Top Match
               </span>
-            ) : null}
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
             <ATSScoreBadge
               score={atsScore}
               scorePending={Boolean(awaitingAtsMatch && !boardLoading)}
@@ -115,17 +137,25 @@ function CandidateCard({
             />
             <ATSRecommendationBadge recommendation={recommendation} awaitingMatch={awaitingAtsMatch && !boardLoading} compact />
           </div>
+
           {semanticInsight ? (
-            <p className="mt-2 line-clamp-2 text-[11px] leading-snug text-violet-800" title={semanticInsight}>
-              {semanticInsight}
-            </p>
+            <div className="mt-4 p-3 rounded-xl bg-violet-50/40 border border-violet-100/30">
+              <p className="line-clamp-2 text-[11px] leading-relaxed text-violet-600/90 italic" title={semanticInsight}>
+                "{semanticInsight}"
+              </p>
+            </div>
           ) : aiEnrichmentStatus === "failed" ? (
-            <p className="mt-2 line-clamp-2 text-[11px] leading-snug text-slate-500">
-              AI semantic layer unavailable — deterministic score shown.
+            <p className="mt-4 text-[11px] leading-snug text-slate-400">
+              AI insights currently unavailable.
             </p>
           ) : null}
         </Link>
-        {isMoving ? <p className="mt-3 text-xs font-semibold text-[#FF5A1F]">Updating stage...</p> : null}
+        {isMoving ? (
+          <div className="mt-4 pt-4 border-t border-slate-50 flex items-center gap-2">
+            <RefreshCw className="h-3 w-3 text-[#FF5A1F] animate-spin" />
+            <p className="text-[10px] font-bold text-[#FF5A1F] uppercase tracking-wider">Syncing stage...</p>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -163,13 +193,15 @@ function DraggableCandidateCard({
 
   const style = {
     transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+    zIndex: isDragging ? 100 : undefined,
+    touchAction: "none", // Prevent scrolling while dragging
   };
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`transition-transform duration-150 ease-out ${isDragging ? "scale-105 opacity-80 shadow-xl" : ""}`}
+      className={`${isDragging ? "opacity-40" : ""}`}
       {...attributes}
       {...listeners}
     >
@@ -184,6 +216,7 @@ function DraggableCandidateCard({
         boardLoading={boardLoading}
         isMoving={isMoving}
         isTopMatch={isTopMatch}
+        isDragging={isDragging}
       />
     </div>
   );
@@ -210,28 +243,30 @@ function StageColumn({
   const isDraggingAny = Boolean(activePipelineId);
 
   return (
-    <div className="relative group transition-transform duration-300 hover:-translate-y-1 cursor-default">
+    <div className="relative group transition-all duration-300 cursor-default h-full">
       <div
         ref={setNodeRef}
-        className={`relative flex flex-col min-h-[420px] min-w-[300px] rounded-[20px] bg-slate-50/50 p-4 border transition-all duration-300 ${isDropTarget ? "bg-orange-50/50 border-[#FF5A1F]/30 shadow-md" : "border-slate-100/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.04)] hover:border-slate-200"
+        className={`relative flex flex-col h-[calc(100vh-320px)] min-h-[500px] min-w-[340px] rounded-[24px] bg-slate-50/30 border transition-all duration-300 ${isDropTarget ? "bg-orange-50/40 border-orange-200 shadow-[0_8px_30px_rgba(255,90,31,0.06)] scale-[1.005]" : "border-slate-100/60 shadow-[0_2px_12px_rgba(0,0,0,0.01)]"
           }`}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-transparent pb-3 border-b border-slate-100/80 mb-4">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${STAGE_ACCENT[stage]} shadow-sm`} />
-            <p className="truncate text-sm font-bold tracking-wide uppercase text-slate-700">{STAGE_LABELS[stage]}</p>
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-slate-50/80 backdrop-blur-md p-5 rounded-t-[24px] border-b border-slate-100/80 mb-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${STAGE_ACCENT[stage]} shadow-[0_0_8px_rgba(0,0,0,0.1)]`} />
+            <p className="truncate text-[13px] font-bold tracking-wider uppercase text-slate-600">{STAGE_LABELS[stage]}</p>
           </div>
-          <span className="flex items-center justify-center h-6 min-w-6 rounded-full bg-white px-2 text-[11px] font-bold text-slate-500 shadow-sm border border-slate-100">
+          <span className="flex items-center justify-center h-6 min-w-6 rounded-lg bg-white px-2 text-[11px] font-bold text-slate-500 shadow-sm border border-slate-100/80">
             {count}
           </span>
         </div>
-        <div className="flex-1 space-y-3">
+        <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-4 scrollbar-hide hover:scrollbar-default transition-all">
           {isDropTarget ? (
-            <div className="rounded-xl border border-dashed border-[#FF5A1F]/40 bg-orange-50/50 py-3 text-center text-[12px] font-bold text-[#FF5A1F]">
+            <div className="rounded-2xl border-2 border-dashed border-[#FF5A1F]/30 bg-orange-50/30 py-4 text-center text-[12px] font-bold text-[#FF5A1F] animate-pulse">
               Drop here
             </div>
           ) : null}
-          {!count && !isDraggingAny ? <div className="h-20 rounded-2xl border border-dashed border-slate-200/60 bg-white/40" /> : null}
+          {!count && !isDraggingAny ? <div className="h-32 rounded-[20px] border border-dashed border-slate-200/50 bg-white/30 flex items-center justify-center">
+             <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">No Candidates</span>
+          </div> : null}
           {children}
         </div>
       </div>
@@ -266,7 +301,20 @@ export default function PipelinePage() {
   const rescoreRequestedJobIdsRef = useRef<Set<string>>(new Set());
   const canUpdatePipeline = hasPermission(permissions, PIPELINE_UPDATE_PERMISSION);
   const canReadCandidates = permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 10,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 200,
+        tolerance: 5,
+      },
+    }),
+    useSensor(KeyboardSensor)
+  );
 
   useEffect(() => {
     async function fetchActiveCandidates() {
@@ -408,15 +456,7 @@ export default function PipelinePage() {
   );
   const activePipeline = activePipelineId ? pipelineById.get(activePipelineId) : undefined;
 
-  function handleBoardWheel(event: React.WheelEvent<HTMLDivElement>) {
-    const container = boardScrollRef.current;
-    if (!container) return;
-    const hasHorizontalOverflow = container.scrollWidth > container.clientWidth;
-    if (!hasHorizontalOverflow) return;
-    if (event.deltaY === 0) return;
-    event.preventDefault();
-    container.scrollLeft += event.deltaY;
-  }
+
 
   function resolveStageFromDropId(dropId: string): BoardStage | null {
     if (STAGES.includes(dropId as BoardStage)) {
@@ -470,9 +510,9 @@ export default function PipelinePage() {
   }
 
   return (
-    <section className="min-w-0 space-y-6">
-      <div className="mb-4 space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Pipeline Board</h1>
+    <section className="min-w-0 space-y-6 pb-12">
+      <div className="space-y-2">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Pipeline Board</h1>
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div className="w-full max-w-sm">
             <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">Select Job</label>
@@ -568,8 +608,7 @@ export default function PipelinePage() {
         >
           <div
             ref={boardScrollRef}
-            onWheel={handleBoardWheel}
-            className="max-w-full overflow-x-scroll overscroll-x-contain pb-4 touch-pan-x [scrollbar-gutter:stable_both-edges] [scrollbar-color:rgb(148_163_184)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/80 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-2"
+            className="max-w-full overflow-x-auto overscroll-x-contain pb-4 touch-pan-x [scrollbar-gutter:stable_both-edges] [scrollbar-color:rgb(148_163_184)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/80 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-2"
           >
             <div className="flex min-w-[1500px] items-start gap-6 pr-6">
               {STAGES.map((stage) => (
@@ -607,9 +646,9 @@ export default function PipelinePage() {
               ))}
             </div>
           </div>
-          <DragOverlay>
+          <DragOverlay dropAnimation={null}>
             {activePipeline ? (
-              <div className="w-[260px] rotate-1 scale-105 opacity-95 shadow-xl">
+              <div className="w-[320px] -rotate-1 scale-105 opacity-100 shadow-[0_20px_50px_rgba(0,0,0,0.2)]">
                 {(() => {
                   const ats = atsByCandidateId[normalizeCandidateId(activePipeline.candidate_id)];
                   return (

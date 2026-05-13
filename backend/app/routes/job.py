@@ -10,7 +10,7 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -370,6 +370,103 @@ def create_job(
     )
 
 
+@router.post("/{job_id}/jd-document", response_model=JobResponse)
+async def upload_job_jd_document(
+    job_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(JOBS_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    file: UploadFile = File(...),
+) -> JobResponse:
+    """Attach or replace the original JD file (PDF, DOC, DOCX, TXT)."""
+    content = await file.read()
+    service = JobService(db)
+    return service.save_job_jd_upload(
+        job_id,
+        UUID(current_user.organization_id),
+        current_user,
+        content,
+        file.filename or "job-description.pdf",
+    )
+
+
+@router.get("/{job_id}/jd-document")
+def download_job_jd_document(
+    job_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(JOBS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    disposition: Annotated[str, Query(pattern="^(inline|attachment)$")] = "attachment",
+):
+    """Serve the original JD with Content-Disposition inline (preview) or attachment (download)."""
+    service = JobService(db)
+    job = service.get_job_by_id(job_id, UUID(current_user.organization_id), current_user)
+    path = service.jd_disk_path_for_job(job)
+    if path is None or not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No JD document stored for this job.")
+    from app.documents.file_security import media_type_for_filename
+
+    media_type = media_type_for_filename(job.jd_file_name or path.name)
+    return FileResponse(
+        path=str(path),
+        filename=job.jd_file_name or path.name,
+        media_type=media_type,
+        content_disposition_type=disposition,
+    )
+
+
+@router.get("/{job_id}/jd-document/preview")
+def preview_job_jd_document(
+    job_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(JOBS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+):
+    """Return server-generated HTML preview for DOC/DOCX (same contract as resume preview)."""
+    service = JobService(db)
+    job = service.get_job_by_id(job_id, UUID(current_user.organization_id), current_user)
+    path = service.jd_disk_path_for_job(job)
+    if path is None or not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No JD document stored for this job.")
+
+    name = (job.jd_file_name or path.name).lower()
+    if name.endswith(".docx"):
+        from app.documents.docx_html_preview import docx_body_html_from_path, wrap_document_preview_html
+
+        body_html = docx_body_html_from_path(path)
+        html_doc = wrap_document_preview_html(
+            title="Job description preview",
+            display_name=job.jd_file_name or path.name,
+            body_html=body_html,
+        )
+    elif name.endswith(".doc"):
+        body_html = (
+            "<p>Preview for .doc is limited.</p>"
+            "<p>Please use <strong>Download</strong> to view the original file in Word for full fidelity.</p>"
+        )
+        from app.documents.docx_html_preview import wrap_document_preview_html
+
+        html_doc = wrap_document_preview_html(
+            title="Job description preview",
+            display_name=job.jd_file_name or path.name,
+            body_html=body_html,
+        )
+    else:
+        body_html = "<p>Inline server preview is available for DOCX. Use Open for PDF/TXT or Download for the original file.</p>"
+        from app.documents.docx_html_preview import wrap_document_preview_html
+
+        html_doc = wrap_document_preview_html(
+            title="Job description preview",
+            display_name=job.jd_file_name or path.name,
+            body_html=body_html,
+        )
+
+    return {
+        "file_name": job.jd_file_name or path.name,
+        "html": html_doc,
+    }
+
+
 @router.get("")
 def list_jobs(
     db: Annotated[Session, Depends(get_db)],
@@ -509,10 +606,10 @@ async def parse_job_description(
     text = ""
     if pdf_file is not None:
         filename = (pdf_file.filename or "").lower()
-        if not (filename.endswith(".pdf") or filename.endswith(".doc") or filename.endswith(".docx")):
+        if not (filename.endswith(".pdf") or filename.endswith(".doc") or filename.endswith(".docx") or filename.endswith(".txt")):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only .pdf, .doc, or .docx files are accepted.",
+                detail="Only .pdf, .doc, .docx, or .txt files are accepted.",
             )
         file_bytes = await pdf_file.read()
         try:
@@ -522,6 +619,8 @@ async def parse_job_description(
             elif filename.endswith(".docx"):
                 document = Document(io.BytesIO(file_bytes))
                 text = "\n".join((p.text or "").strip() for p in document.paragraphs if (p.text or "").strip())
+            elif filename.endswith(".txt"):
+                text = file_bytes.decode("utf-8", errors="replace").strip()
             else:
                 # Legacy .doc files are binary; we use a best-effort decode for now.
                 text = file_bytes.decode("utf-8", errors="ignore").strip()

@@ -7,6 +7,7 @@ import { listOrganizationRoles } from "@/lib/api/roles";
 import { getUsers, updateUserRole } from "@/lib/api/users";
 import type { OrganizationRole, OrganizationUser, UserRoleOption } from "@/lib/api/types";
 import { useAuthStore } from "@/store/auth-store";
+import { Users, Shield, Clock, Search, MoreHorizontal, UserCog } from "lucide-react";
 
 export default function UsersPage() {
   const [users, setUsers] = useState<OrganizationUser[]>([]);
@@ -67,57 +68,113 @@ export default function UsersPage() {
   }
 
   return (
-    <section className="space-y-4">
-      <h1 className="text-2xl font-semibold">Users</h1>
-      {loading ? <p className="text-sm text-slate-600">Loading users...</p> : null}
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
-      {updateError ? <p className="text-sm text-red-600">{updateError}</p> : null}
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <Users className="w-6 h-6 text-[#FF5A1F]" />
+            Organization Users
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">Manage team members and their access levels</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+          <p className="text-sm text-slate-500">Loading users...</p>
+        </div>
+      ) : null}
+      
+      {error ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 flex items-center gap-2">
+          {error}
+        </div>
+      ) : null}
+      
+      {updateError ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 flex items-center gap-2">
+          {updateError}
+        </div>
+      ) : null}
 
       {!loading && !error ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>User List</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-600">
-                    <th className="px-2 py-2">Email</th>
-                    <th className="px-2 py-2">Role</th>
-                    <th className="px-2 py-2">Type</th>
-                    <th className="px-2 py-2">Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((user) => (
-                    <tr key={user.id} className="border-b border-slate-100">
-                      <td className="px-2 py-2">{user.email}</td>
-                      <td className="px-2 py-2">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <UserCog className="w-5 h-5 text-gray-400" />
+              Active Users
+            </h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm whitespace-nowrap">
+              <thead className="bg-slate-50">
+                <tr className="border-b border-gray-200 text-slate-500 font-medium">
+                  <th className="px-6 py-4">User</th>
+                  <th className="px-6 py-4">Role</th>
+                  <th className="px-6 py-4">Type</th>
+                  <th className="px-6 py-4">Joined Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {users.map((user) => (
+                  <tr key={user.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-full bg-[#FF5A1F]/10 flex items-center justify-center text-[#FF5A1F] font-medium text-xs">
+                          {user.email.charAt(0).toUpperCase()}
+                        </div>
+                        <span className="font-medium text-gray-900">{user.email}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <Shield className="w-4 h-4 text-slate-400" />
                         <select
-                          className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm"
+                          className="h-8 rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-gray-700 shadow-sm focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F] outline-none transition-all disabled:opacity-50"
                           value={user.role}
                           disabled={updatingUserId === user.id}
                           onChange={(event) => onRoleChange(user.id, event.target.value as UserRoleOption)}
                         >
                           {roleChoices.map((option) => (
                             <option key={option.id} value={option.key}>
-                              {option.name} ({option.key})
+                              {option.name}
                             </option>
                           ))}
                         </select>
-                      </td>
-                      <td className="px-2 py-2">{user.type}</td>
-                      <td className="px-2 py-2">{new Date(user.created_at).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {users.length === 0 ? <p className="mt-3 text-sm text-slate-500">No users found.</p> : null}
-            </div>
-          </CardContent>
-        </Card>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        user.type === 'internal' 
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                          : 'bg-blue-50 text-blue-700 border border-blue-200'
+                      }`}>
+                        {user.type}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-slate-500 flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-slate-400" />
+                      {new Date(user.created_at).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {users.length === 0 ? (
+              <div className="py-12 text-center">
+                <Users className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+                <p className="text-sm font-medium text-slate-900">No users found</p>
+                <p className="text-sm text-slate-500 mt-1">There are currently no users in this organization.</p>
+              </div>
+            ) : null}
+          </div>
+        </div>
       ) : null}
-    </section>
+    </div>
+
   );
 }

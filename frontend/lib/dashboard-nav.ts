@@ -50,12 +50,6 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     anyOfPermissions: [NAV_PERMISSION_CODES.PIPELINE_READ],
   },
   {
-    name: "Invite",
-    path: "/invite",
-    anyOfPermissions: [NAV_PERMISSION_CODES.USERS_INVITE],
-    adminMayAccess: true,
-  },
-  {
     name: "Invites",
     path: "/invites",
     anyOfPermissions: [NAV_PERMISSION_CODES.USERS_INVITE],
@@ -102,13 +96,6 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
   {
     name: "Invites (dashboard path)",
     path: "/dashboard/invites",
-    anyOfPermissions: [NAV_PERMISSION_CODES.USERS_INVITE],
-    adminMayAccess: true,
-    showInSidebar: false,
-  },
-  {
-    name: "Invite (dashboard path)",
-    path: "/dashboard/invite",
     anyOfPermissions: [NAV_PERMISSION_CODES.USERS_INVITE],
     adminMayAccess: true,
     showInSidebar: false,

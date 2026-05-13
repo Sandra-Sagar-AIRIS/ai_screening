@@ -96,6 +96,17 @@ function shouldSuppressApiErrorLog(path: string, status: number): boolean {
   if (status === 404 && /^\/candidates\/[^/]+\/matches(?:\?|$)/.test(path)) {
     return true;
   }
+  // Job removed, wrong org, or no access — detail page degrades without console spam.
+  if (status === 404 && /^\/jobs\/[^/]+\/matches(?:\?|$)/.test(path)) {
+    return true;
+  }
+  // GET single job by id (UUID) — not list (`/jobs?`) or static routes like `/jobs/search`.
+  if (
+    status === 404 &&
+    /^\/jobs\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?:\?.*)?$/i.test(path)
+  ) {
+    return true;
+  }
   // Older backends without POST /jobs/{id}/submit, or rollout mismatch — candidates page PATCH-fallback.
   if (status === 404 && /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path)) {
     return true;
