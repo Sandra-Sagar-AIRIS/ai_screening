@@ -15,7 +15,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { GripVertical, RefreshCw } from "lucide-react";
+import { Brain, GripVertical, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { getCandidates } from "@/lib/api/candidates";
@@ -727,7 +727,6 @@ export default function PipelinePage() {
               <div className="w-[320px] -rotate-1 scale-105 opacity-100 shadow-[0_20px_50px_rgba(0,0,0,0.2)]">
                 {(() => {
                   const ats = atsByCandidateId[normalizeCandidateId(activePipeline.candidate_id)];
-                  const aiScreening = screeningsByCandidateId[normalizeCandidateId(activePipeline.candidate_id)] ?? null;
                   return (
                     <CandidateCard
                       pipeline={activePipeline}
@@ -742,7 +741,6 @@ export default function PipelinePage() {
                       boardLoading={loading}
                       isTopMatch={(ats?.score ?? -1) >= 85}
                       isMoving={false}
-                      aiScreening={aiScreening}
                     />
                   );
                 })()}

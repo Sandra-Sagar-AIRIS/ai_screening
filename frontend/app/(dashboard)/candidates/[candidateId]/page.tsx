@@ -55,8 +55,47 @@ import type { Candidate, CandidateMatchEntry, Interview, Job, OrganizationUser, 
 import { getUsers } from "@/lib/api/users";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Mail, Phone, MapPin, Briefcase, Calendar, FileText, MessageSquare, Clock, ArrowLeft, Edit3, Save, X, Plus, User, Star, Sparkles, Layers, Activity, Brain, CornerDownLeft, Paperclip, Bold, Italic, Underline, List as ListIcon, ListOrdered, Link as LinkIcon, Search, ChevronDown, Maximize2, MoreVertical, ChevronLeft, ChevronRight, Copy, Filter, Image as ImageIcon, MoreHorizontal, CheckCircle2, Eye } from "lucide-react";
-import { Mail, Phone, MapPin, Briefcase, Calendar, FileText, Download, ExternalLink, MessageSquare, Clock, ArrowLeft, Edit3, Save, X, Plus, User, Star, Sparkles, Layers , Activity, Brain, CornerDownLeft, Paperclip, Bold, Italic, Underline, List as ListIcon, ListOrdered, Link as LinkIcon, Search, ChevronDown, Maximize2, MoreVertical, ChevronLeft, ChevronRight, Copy, Filter, Image as ImageIcon, MoreHorizontal, CheckCircle2, Eye } from "lucide-react";
+import {
+  Mail,
+  Phone,
+  MapPin,
+  Briefcase,
+  Calendar,
+  FileText,
+  MessageSquare,
+  Clock,
+  ArrowLeft,
+  Edit3,
+  Save,
+  X,
+  Plus,
+  User,
+  Star,
+  Sparkles,
+  Layers,
+  Activity,
+  Brain,
+  CornerDownLeft,
+  Paperclip,
+  Bold,
+  Italic,
+  Underline,
+  List as ListIcon,
+  ListOrdered,
+  Link as LinkIcon,
+  Search,
+  ChevronDown,
+  Maximize2,
+  MoreVertical,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Filter,
+  Image as ImageIcon,
+  MoreHorizontal,
+  CheckCircle2,
+  Eye,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
