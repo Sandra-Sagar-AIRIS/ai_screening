@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
 import { createJob, getJobs, updateJob, deleteJob, parseJD, uploadJobJdDocument, type JobParseResult } from "@/lib/api/jobs";
 import { JOBS_CREATE_PERMISSION, JOBS_UPDATE_PERMISSION, hasPermission } from "@/lib/rbac";
@@ -22,6 +21,7 @@ function enrichmentStatusLabel(status: string | null | undefined): string | null
   if (status === "failed") return "Metadata failed";
   return null;
 }
+
 
 function SkillTags({
   skills,
@@ -101,8 +101,8 @@ function ActionMenu({ onEdit, onDetails, onDelete }: { onEdit: () => void; onDet
   }, [open]);
   return (
     <div className="relative" ref={menuRef}>
-      <button 
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(!open); }} 
+      <button
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(!open); }}
         className="p-1.5 hover:bg-slate-100 rounded-md transition-colors"
       >
         <svg className="w-5 h-5 text-slate-400" fill="currentColor" viewBox="0 0 20 20">
@@ -435,6 +435,7 @@ function JDPreviewModal({
 
 // ─── main page ────────────────────────────────────────────────────────────────
 
+
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -456,10 +457,7 @@ export default function JobsPage() {
     void refreshPermissions();
   }, [token, refreshPermissions]);
 
-  // regular create form
   const [creating, setCreating] = useState(false);
-  const createPanelLock = useRef(false);
-  const [showCreate, setShowCreate] = useState(false);
   const [clientId, setClientId] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -474,11 +472,12 @@ export default function JobsPage() {
   // Edit form state
   const [showEdit, setShowEdit] = useState(false);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
-  
+
   // Import from JD flow state
   const [showJDInput, setShowJDInput] = useState(false);
   const [jdClientId, setJdClientId] = useState("");
   const [jdImport, setJdImport] = useState<{ result: JobParseResult; sourceFile: File | null } | null>(null);
+
 
   const refreshJobs = useCallback(async () => {
     setIsRefreshing(true);
@@ -519,10 +518,6 @@ export default function JobsPage() {
     return () => globalThis.clearTimeout(t);
   }, [notice]);
 
-  function handleImportClick() {
-    setShowJDInput(true);
-  }
-
   function resetForm() {
     setTitle(""); setDescription(""); setLocation(""); setClientId("");
     setExpMin(""); setExpMax(""); setEmploymentType("");
@@ -540,7 +535,7 @@ export default function JobsPage() {
     setExpMin(job.experience_min_years?.toString() || "");
     setExpMax(job.experience_max_years?.toString() || "");
     setEmploymentType(job.employment_type || "");
-    
+
     setEditingJobId(job.id);
     setShowEdit(true);
   }
@@ -589,20 +584,17 @@ export default function JobsPage() {
             <RefreshCw className={`h-4 w-4 text-slate-600 ${isRefreshing ? "animate-spin" : ""}`} />
             <span className="sr-only">Refresh</span>
           </Button>
-        {canCreateJobs ? (
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={handleImportClick} className="h-11 rounded-2xl border-slate-200/80 text-slate-600 hover:bg-slate-50 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all font-semibold">
-              ✨ Import from JD
-            </Button>
-            <Button onClick={() => setShowCreate(true)} className="h-11 bg-[#FF5A1F] hover:bg-[#e04814] text-white rounded-2xl px-5 font-bold shadow-sm transition-colors">
-              + Create Job
-            </Button>
-          </div>
-        ) : null}
+          {canCreateJobs ? (
+            <Link href="/jobs/create">
+              <Button className="h-11 bg-[#FF5A1F] hover:bg-[#e04814] text-white rounded-2xl px-5 font-bold shadow-sm transition-colors">
+                + Create Job
+              </Button>
+            </Link>
+          ) : null}
         </div>
       </div>
 
-      {error && !showCreate ? <p className="text-sm text-red-600">{error}</p> : null}
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
       {/* ── KPI Strip ─────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -638,7 +630,7 @@ export default function JobsPage() {
             <p className="text-[13px] font-semibold text-slate-600 group-hover:text-[#FF5A1F] transition-colors duration-300">Closed</p>
           </div>
           <div className="flex items-center gap-2">
-            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{jobs.filter(j => j.status === "cancelled" || j.status === "filled" || j.status === "closed").length}</p>
+            <p className="text-[32px] leading-none font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{jobs.filter(j => j.status === "filled" || j.status === "closed").length}</p>
           </div>
         </div>
       </div>
@@ -665,9 +657,8 @@ export default function JobsPage() {
                   key={filter}
                   type="button"
                   onClick={() => setStatusFilter(filter)}
-                  className={`cursor-pointer rounded-xl px-4 py-1.5 text-[13px] font-bold transition-all duration-200 ${
-                    statusFilter === filter ? "bg-white text-slate-900 shadow-sm border border-slate-200/50" : "text-slate-500 hover:text-slate-700"
-                  }`}
+                  className={`cursor-pointer rounded-xl px-4 py-1.5 text-[13px] font-bold transition-all duration-200 ${statusFilter === filter ? "bg-white text-slate-900 shadow-sm border border-slate-200/50" : "text-slate-500 hover:text-slate-700"
+                    }`}
                 >
                   {filter === "all" ? "All" : filter === "closed" ? "Closed" : filter.charAt(0).toUpperCase() + filter.slice(1)}
                 </button>
@@ -677,149 +668,68 @@ export default function JobsPage() {
         </div>
         <div className="p-6">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filteredJobs.map((job) => (
-            <div key={job.id} className="relative group transition-transform duration-300 hover:-translate-y-1 cursor-pointer">
-              <Link
-                href={`/jobs/${job.id}`}
-                className="relative flex h-full flex-col rounded-2xl bg-white p-5 border border-slate-100/80 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all duration-300 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-slate-200"
-              >
-                <div className="mb-3 flex items-start justify-between gap-3">
-                  <div className="min-w-0 space-y-2">
-                    <p className="truncate text-base font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{job.title}</p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${getStatusBadgeClass(job.status)}`}>
-                        {getStatusLabel(job.status)}
-                      </span>
-                      {enrichmentStatusLabel(job.enrichment_status) ? (
-                        <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-amber-800">
-                          {enrichmentStatusLabel(job.enrichment_status)}
+            {filteredJobs.map((job) => (
+              <div key={job.id} className="relative group transition-transform duration-300 hover:-translate-y-1 cursor-pointer">
+                <Link
+                  href={`/jobs/${job.id}`}
+                  className="relative flex h-full flex-col rounded-2xl bg-white p-5 border border-slate-100/80 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all duration-300 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-slate-200"
+                >
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-2">
+                      <p className="truncate text-base font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">{job.title}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${getStatusBadgeClass(job.status)}`}>
+                          {getStatusLabel(job.status)}
                         </span>
-                      ) : null}
+                        {enrichmentStatusLabel(job.enrichment_status) ? (
+                          <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-amber-800">
+                            {enrichmentStatusLabel(job.enrichment_status)}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="mb-4 grid grid-cols-2 gap-y-2 gap-x-4 text-[13px] font-medium text-slate-500">
-                  <div className="flex items-center gap-1.5">
-                    <MapPin className="h-4 w-4 text-slate-400" />
-                    <span className="truncate max-w-[120px]">{job.location || "TBD"}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <GraduationCap className="h-4 w-4 text-slate-400" />
-                    <span>
-                      {(job.experience_min_years !== null || job.experience_max_years !== null) 
-                        ? `${job.experience_min_years ?? 0}-${job.experience_max_years ?? "+"} yrs` 
-                        : "TBD"}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Calendar className="h-4 w-4 text-slate-400" />
-                    <span>{job.created_at ? new Date(job.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : "Unknown"}</span>
-                  </div>
-                  {job.urgency && job.urgency !== "normal" && (
-                    <div className="flex items-center gap-1.5 text-orange-600">
-                      <Zap className="h-4 w-4 text-orange-400" />
-                      <span className="capitalize">{job.urgency}</span>
+                  <div className="mb-4 grid grid-cols-2 gap-y-2 gap-x-4 text-[13px] font-medium text-slate-500">
+                    <div className="flex items-center gap-1.5">
+                      <MapPin className="h-4 w-4 text-slate-400" />
+                      <span className="truncate max-w-[120px]">{job.location || "TBD"}</span>
                     </div>
-                  )}
-                </div>
+                    <div className="flex items-center gap-1.5">
+                      <GraduationCap className="h-4 w-4 text-slate-400" />
+                      <span>
+                        {(job.experience_min_years !== null || job.experience_max_years !== null)
+                          ? `${job.experience_min_years ?? 0}-${job.experience_max_years ?? "+"} yrs`
+                          : "TBD"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="h-4 w-4 text-slate-400" />
+                      <span>{job.created_at ? new Date(job.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : "Unknown"}</span>
+                    </div>
+                    {job.urgency && job.urgency !== "normal" && (
+                      <div className="flex items-center gap-1.5 text-orange-600">
+                        <Zap className="h-4 w-4 text-orange-400" />
+                        <span className="capitalize">{job.urgency}</span>
+                      </div>
+                    )}
+                  </div>
 
-                <div className="mt-auto pt-4 border-t border-slate-100/80 flex items-center justify-between text-[13px] font-bold text-slate-400 group-hover:text-[#FF5A1F] transition-colors duration-300">
-                  <span>View Details</span>
-                  <span className="transform transition-transform duration-300 group-hover:translate-x-1">→</span>
-                </div>
-              </Link>
-            </div>
-          ))}
-          {!filteredJobs.length ? (
-            <div className="rounded-xl bg-slate-50 p-8 text-center text-sm font-medium text-slate-500 md:col-span-2 xl:col-span-3">
-              No jobs found for the current search or filters.
-            </div>
-          ) : null}
+                  <div className="mt-auto pt-4 border-t border-slate-100/80 flex items-center justify-between text-[13px] font-bold text-slate-400 group-hover:text-[#FF5A1F] transition-colors duration-300">
+                    <span>View Details</span>
+                    <span className="transform transition-transform duration-300 group-hover:translate-x-1">→</span>
+                  </div>
+                </Link>
+              </div>
+            ))}
+            {!filteredJobs.length ? (
+              <div className="rounded-xl bg-slate-50 p-8 text-center text-sm font-medium text-slate-500 md:col-span-2 xl:col-span-3">
+                No jobs found for the current search or filters.
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
-
-      {/* ── Create Job Slide-In Panel ─────────────────────────────────── */}
-      {showCreate ? (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setShowCreate(false); resetForm(); setError(null); }} />
-          <div className="relative w-full max-w-[480px] bg-white shadow-2xl h-full flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
-            <div className="flex items-center justify-between p-6 border-b shrink-0">
-              <h2 className="text-xl font-semibold text-slate-800">Create Job</h2>
-              <button onClick={() => { setShowCreate(false); resetForm(); setError(null); }} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1">✕</button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 text-sm">
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Client ID (UUID) *</label>
-                  <Input value={clientId} onChange={(e) => setClientId(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Title *</label>
-                  <Input value={title} onChange={(e) => setTitle(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
-                  <Input value="Open" disabled />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Description</label>
-                  <textarea className="w-full h-32 rounded-md border border-slate-200 p-2 text-sm resize-none" value={description} onChange={(e) => setDescription(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Location</label>
-                  <Input value={location} onChange={(e) => setLocation(e.target.value)} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-xs font-medium text-slate-500 mb-1">Min Exp</label><Input type="number" value={expMin} onChange={(e) => setExpMin(e.target.value)} /></div>
-                  <div><label className="block text-xs font-medium text-slate-500 mb-1">Max Exp</label><Input type="number" value={expMax} onChange={(e) => setExpMax(e.target.value)} /></div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Required Skills (comma/newline)</label>
-                  <textarea className="h-24 w-full rounded-md border border-slate-200 p-2 text-sm resize-none" value={requiredSkills} onChange={(e) => setRequiredSkills(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Preferred Skills (comma/newline)</label>
-                  <textarea className="h-24 w-full rounded-md border border-slate-200 p-2 text-sm resize-none" value={preferredSkills} onChange={(e) => setPreferredSkills(e.target.value)} />
-                </div>
-              </div>
-              {error && <p className="text-sm font-medium text-red-600 bg-red-50 p-3 rounded-md border border-red-100">{error}</p>}
-            </div>
-            <div className="p-6 border-t bg-slate-50 shrink-0">
-              <Button className="w-full py-6 text-lg bg-[#FF5A1F] hover:bg-[#E54E1A] text-white" disabled={creating} onClick={async () => {
-                if (!title.trim() || !clientId.trim()) {
-                  setError("Title and Client ID are required.");
-                  return;
-                }
-                if (createPanelLock.current) return;
-                createPanelLock.current = true;
-                try {
-                  setCreating(true);
-                  const req = requiredSkills.split(/[\n,]+/g).map((s) => s.trim()).filter(Boolean);
-                  const pref = preferredSkills.split(/[\n,]+/g).map((s) => s.trim()).filter(Boolean);
-                  const created = await createJob({
-                    client_id: clientId.trim(),
-                    title: title.trim(),
-                    description: description.trim() || null,
-                    status: "open",
-                    location: location.trim() || undefined,
-                    experience_min_years: expMin ? Number(expMin) : null,
-                    experience_max_years: expMax ? Number(expMax) : null,
-                    required_skills: req,
-                    preferred_skills: pref,
-                  });
-                  setShowCreate(false);
-                  resetForm();
-                  setJobs((prev) => [created, ...prev.filter((j) => j.id !== created.id)]);
-                  setNotice("Job created. Preparing ATS metadata in the background.");
-                  void refreshJobs();
-                } catch (err) { setError(err instanceof ApiError ? err.message : "Unable to create job."); } finally { createPanelLock.current = false; setCreating(false); }
-              }}>{creating ? "Creating..." : "Create Job"}</Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {/* ── Edit Job Slide-In Panel ─────────────────────────────────── */}
       {showEdit ? (
@@ -922,6 +832,6 @@ export default function JobsPage() {
           }}
         />
       ) : null}
-    </section>
+    </section >
   );
 }

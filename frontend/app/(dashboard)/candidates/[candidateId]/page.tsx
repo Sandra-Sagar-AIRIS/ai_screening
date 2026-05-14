@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentCard } from "@/components/documents/DocumentCard";
 import { ApiError } from "@/lib/api/client";
@@ -62,6 +62,8 @@ import {
   Briefcase,
   Calendar,
   FileText,
+  Download,
+  ExternalLink,
   MessageSquare,
   Clock,
   ArrowLeft,
@@ -109,7 +111,9 @@ function snapJobIdsFromMatches(matches: CandidateMatchEntry[]): string[] {
 }
 
 export default function CandidateDetailPage() {
-  const params = useParams<{ candidateId: string }>();
+   const params = useParams<{ candidateId: string }>();
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab") || "profile";
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [interactions, setInteractions] = useState<CandidateInteraction[]>([]);
@@ -140,7 +144,7 @@ export default function CandidateDetailPage() {
   const [atsLoading, setAtsLoading] = useState(false);
   const [atsRescoreBusy, setAtsRescoreBusy] = useState(false);
   const [atsHint, setAtsHint] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("profile");
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [activeCommunicationTab, setActiveCommunicationTab] = useState<"timeline" | "email" | "whatsapp" | "templates">("timeline");
   const [communicationConnections, setCommunicationConnections] = useState<CommunicationConnection[]>([]);
   const [communicationTemplates, setCommunicationTemplates] = useState<CommunicationTemplate[]>([]);
@@ -226,6 +230,24 @@ export default function CandidateDetailPage() {
     for (let i = 0; i < attempts; i++) {
       try {
         const result = await getCandidateMatchesAts(candidateId, { limit: 50, offset: 0 });
+        // #region agent log
+        fetch("http://127.0.0.1:7675/ingest/4eb54ee1-e774-4d05-9ae0-3cff8d045ce2", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "473244" },
+          body: JSON.stringify({
+            sessionId: "473244",
+            hypothesisId: "H4",
+            location: "page.tsx:loadCandidateMatchesWithRetry",
+            message: "retry_attempt",
+            data: {
+              attempt: i + 1,
+              matchLen: result.matches.length,
+              candidateIdSuffix: candidateId.slice(-8),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         if (loadSeq !== candidateLoadSeqRef.current) {
           return [];
         }
@@ -283,6 +305,25 @@ export default function CandidateDetailPage() {
         setJobs((jobsResult as Job[]).filter(Boolean));
         setUsers((usersResult as OrganizationUser[]).filter((u) => u.role === "recruiter" || u.role === "admin"));
         setAtsMatches(initialMatches);
+        // #region agent log
+        fetch("http://127.0.0.1:7675/ingest/4eb54ee1-e774-4d05-9ae0-3cff8d045ce2", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "473244" },
+          body: JSON.stringify({
+            sessionId: "473244",
+            hypothesisId: "H3",
+            location: "page.tsx:loadData",
+            message: "ats_initial_state",
+            data: {
+              initialMatchCount: initialMatches.length,
+              pipelineCount: loadedPipelines.length,
+              willRescoreEmpty: initialMatches.length === 0 && loadedPipelines.length > 0,
+              candidateIdSuffix: params.candidateId.slice(-8),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         if (initialMatches.length === 0 && loadedPipelines.length > 0) {
           // ATS scoring is async; trigger once and poll briefly before showing unavailable.
           await rescoreCandidateAts(params.candidateId).catch(() => undefined);
@@ -290,6 +331,20 @@ export default function CandidateDetailPage() {
             return;
           }
           const retried = await loadCandidateMatchesWithRetry(params.candidateId, loadSeq, 4, 1200);
+          // #region agent log
+          fetch("http://127.0.0.1:7675/ingest/4eb54ee1-e774-4d05-9ae0-3cff8d045ce2", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "473244" },
+            body: JSON.stringify({
+              sessionId: "473244",
+              hypothesisId: "H3",
+              location: "page.tsx:loadData",
+              message: "ats_after_retry",
+              data: { retriedMatchCount: retried.length, candidateIdSuffix: params.candidateId.slice(-8) },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
           if (retried.length > 0) {
             setAtsMatches(retried);
           }

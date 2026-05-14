@@ -130,7 +130,7 @@ export async function uploadJobJdDocument(jobId: string, file: File) {
 }
 
 export async function createJob(payload: {
-  client_id: string;
+  client_id?: string | null;
   title: string;
   description?: string | null;
   status?: JobStatus;

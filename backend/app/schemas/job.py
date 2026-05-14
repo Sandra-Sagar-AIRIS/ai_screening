@@ -45,7 +45,8 @@ class JobSubmissionStatus(StrEnum):
 
 
 class JobCreate(BaseModel):
-    client_id: UUID | str
+    """When client_id is omitted, the service assigns the organization default client."""
+    client_id: UUID | str | None = None
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
     status: JobStatus = JobStatus.OPEN

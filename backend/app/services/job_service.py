@@ -327,34 +327,26 @@ class JobService:
         import logging
         logger = logging.getLogger(__name__)
 
-        client_exists = False
-        valid_client_id = None
+        explicit_client = payload.client_id is not None and str(payload.client_id).strip() != ""
 
-        try:
-            if payload.client_id:
+        if explicit_client:
+            try:
                 valid_client_id = UUID(str(payload.client_id))
                 self._clients.get_client_by_id(valid_client_id, organization_id)
-                client_exists = True
-        except Exception as e:
-            logger.warning(f"Error checking client: {str(e)}")
-            client_exists = False
-
-        if not client_exists:
-            if DEV_MODE:
-                logger.warning("Using default client for job creation (DEV MODE)")
-                try:
-                    default_client = self.get_or_create_default_client(organization_id)
-                    payload.client_id = default_client.id
-                except Exception as e:
-                    logger.error(f"Error in job creation: {str(e)}")
-                    raise HTTPException(status_code=400, detail="Unable to create default client. Check organization mapping.")
-            else:
-                logger.error(f"Error in job creation: Client not found for id {payload.client_id}")
-                raise HTTPException(status_code=400, detail="Client not found")
+                payload.client_id = valid_client_id
+            except Exception as e:
+                logger.warning("Error checking client: %s", str(e))
+                raise HTTPException(status_code=400, detail="Client not found") from e
         else:
-            if valid_client_id is None:
-                raise HTTPException(status_code=400, detail="Client resolution failed")
-            payload.client_id = valid_client_id
+            try:
+                default_client = self.get_or_create_default_client(organization_id)
+                payload.client_id = default_client.id
+            except Exception as e:
+                logger.error("Error resolving default client for job creation: %s", str(e))
+                raise HTTPException(
+                    status_code=400,
+                    detail="Unable to resolve organization client for job creation.",
+                ) from e
 
         if payload.salary_min is not None and payload.salary_max is not None and payload.salary_min > payload.salary_max:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"error": "INVALID_SALARY_RANGE"})
