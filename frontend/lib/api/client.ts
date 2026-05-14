@@ -149,7 +149,32 @@ export async function apiRequest<T>(
     const hit = _getCache.get(path);
     if (hit) {
       // Return live or in-flight data without an extra network round-trip.
-      if (hit.expiresAt > now) return hit.data as T;
+      if (hit.expiresAt > now) {
+        // #region agent log
+        if (path.includes("/matches")) {
+          let cachedMatchCount: number | null = null;
+          try {
+            const d = hit.data as { matches?: unknown[] };
+            if (d && Array.isArray(d.matches)) cachedMatchCount = d.matches.length;
+          } catch {
+            /* ignore */
+          }
+          fetch("http://127.0.0.1:7675/ingest/4eb54ee1-e774-4d05-9ae0-3cff8d045ce2", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "473244" },
+            body: JSON.stringify({
+              sessionId: "473244",
+              hypothesisId: "H1",
+              location: "client.ts:apiRequest",
+              message: "GET_served_from_cache",
+              data: { path, cachedMatchCount },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+        }
+        // #endregion
+        return hit.data as T;
+      }
       if (hit.inflight) return hit.inflight as Promise<T>;
     }
     // Prime the inflight dedup slot before the fetch starts.

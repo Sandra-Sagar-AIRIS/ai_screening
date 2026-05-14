@@ -43,6 +43,7 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     name: "My Jobs",
     path: "/vendor/jobs",
     anyOfPermissions: [NAV_PERMISSION_CODES.JOBS_READ_LIMITED],
+    showInSidebar: false,
   },
   {
     name: "Pipeline",

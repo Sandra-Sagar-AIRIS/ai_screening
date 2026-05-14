@@ -743,7 +743,7 @@ export default function JobDetailPage() {
                         return (
                           <Link 
                             key={m.candidate_id} 
-                            href={`/candidates/${m.candidate_id}`}
+                            href={`/candidates/${m.candidate_id}?tab=ats`}
                             className="block rounded-[16px] border border-slate-100/80 bg-white p-5 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-slate-200 transition-all duration-300 group"
                           >
                             <div className="flex items-center justify-between">
@@ -800,7 +800,7 @@ export default function JobDetailPage() {
                             {pendingAtsBannerEntries.map((entry) => (
                               <Link
                                 key={entry.candidateId}
-                                href={`/candidates/${entry.candidateId}`}
+                                href={`/candidates/${entry.candidateId}?tab=ats`}
                                 className="block text-xs text-amber-800 hover:underline"
                               >
                                 {entry.label}

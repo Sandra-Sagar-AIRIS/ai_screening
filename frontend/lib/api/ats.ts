@@ -143,7 +143,29 @@ export async function getCandidateMatchesAts(candidateId: string, params?: { lim
     limit: String(params?.limit ?? 50),
     offset: String(params?.offset ?? 0),
   });
-  return apiRequest<CandidateMatchesResponse>(`/candidates/${candidateId}/matches?${query.toString()}`);
+  const path = `/candidates/${candidateId}/matches?${query.toString()}`;
+  const result = await apiRequest<CandidateMatchesResponse>(path);
+  // #region agent log
+  fetch("http://127.0.0.1:7675/ingest/4eb54ee1-e774-4d05-9ae0-3cff8d045ce2", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "473244" },
+    body: JSON.stringify({
+      sessionId: "473244",
+      hypothesisId: "H2",
+      location: "ats.ts:getCandidateMatchesAts",
+      message: "matches_response",
+      data: {
+        candidateIdSuffix: candidateId.slice(-8),
+        matchCount: result.matches?.length ?? 0,
+        totalCount: result.total_count ?? null,
+        pipelineJobCount: result.pipeline_job_count ?? null,
+        atsHint: result.ats_hint ?? null,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+  return result;
 }
 
 export async function rescoreCandidateAts(candidateId: string) {
