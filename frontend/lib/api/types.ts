@@ -355,7 +355,7 @@ export type AtsPairStatusResponse = {
   enqueue_delay_ms?: number | null;
 };
 
-export type PipelineStage = "applied" | "screening" | "interview" | "offer" | "placed" | "rejected";
+export type PipelineStage = "applied" | "screening" | "ai_screening" | "interview" | "offer" | "placed" | "rejected";
 export type PipelineStatus = "active" | "on_hold" | "withdrawn" | "closed";
 
 export type Pipeline = {
@@ -549,4 +549,151 @@ export type InterviewerProfile = {
   bio: string | null;
   skills: string[];
   created_at: string;
+};
+
+// ── AI Screening domain ───────────────────────────────────────────────
+
+export type ScreeningStatus =
+  | "pending"
+  | "generating_questions"
+  | "questions_ready"
+  | "evaluating"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type ScreeningType =
+  | "technical"
+  | "hr"
+  | "communication"
+  | "leadership"
+  | "behavioral"
+  | "role_fit";
+
+export type ScreeningRecommendation =
+  | "strong_proceed"
+  | "proceed"
+  | "needs_manual_review"
+  | "weak_match"
+  | "reject_recommendation";
+
+export type RecruiterDecision = "advance" | "reject" | "hold" | "needs_review";
+
+export type AIScreening = {
+  id: string;
+  organization_id: string;
+  candidate_id: string;
+  job_id: string | null;
+  created_by: string | null;
+  status: ScreeningStatus;
+  screening_type: ScreeningType;
+  ai_model: string | null;
+  overall_score: number | null;
+  communication_score: number | null;
+  technical_score: number | null;
+  confidence_score: number | null;
+  recommendation: ScreeningRecommendation | null;
+  ai_summary: string | null;
+  recruiter_summary: string | null;
+  recruiter_decision: RecruiterDecision | null;
+  recruiter_notes: string | null;
+  prompt_tokens_used: number | null;
+  completion_tokens_used: number | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type AIScreeningQuestion = {
+  id: string;
+  screening_id: string;
+  category: string;
+  difficulty: "easy" | "medium" | "hard";
+  position: number;
+  question_text: string;
+  expected_signals: {
+    key_concepts?: string[];
+    red_flags?: string[];
+    ideal_depth?: string;
+  } | null;
+  generated_by_ai: boolean;
+  created_at: string;
+};
+
+export type AIScreeningAnswer = {
+  id: string;
+  screening_id: string;
+  question_id: string;
+  answer_text: string;
+  recruiter_entered: boolean;
+  source_type: "manual" | "uploaded" | "link_response";
+  created_at: string;
+  updated_at: string;
+};
+
+export type AIScreeningEvaluation = {
+  id: string;
+  screening_id: string;
+  question_id: string;
+  ai_score: number | null;
+  communication_rating: number | null;
+  technical_rating: number | null;
+  strengths: string[] | null;
+  concerns: string[] | null;
+  reasoning: string | null;
+  follow_up_suggestion: string | null;
+  confidence: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AIScreeningDetail = AIScreening & {
+  questions: AIScreeningQuestion[];
+  answers: AIScreeningAnswer[];
+  evaluations: AIScreeningEvaluation[];
+  candidate_name: string | null;
+  candidate_email: string | null;
+  job_title: string | null;
+  ats_score: number | null;
+  ats_recommendation: string | null;
+};
+
+export type AIScreeningListItem = {
+  id: string;
+  candidate_id: string;
+  job_id: string | null;
+  status: ScreeningStatus;
+  screening_type: ScreeningType;
+  overall_score: number | null;
+  recommendation: ScreeningRecommendation | null;
+  recruiter_decision: RecruiterDecision | null;
+  created_at: string;
+  completed_at: string | null;
+  candidate_name: string | null;
+  candidate_email: string | null;
+  job_title: string | null;
+};
+
+export type AIScreeningCreatePayload = {
+  candidate_id: string;
+  job_id?: string | null;
+  screening_type?: ScreeningType;
+};
+
+export type AnswerUpsertPayload = {
+  answer_text: string;
+  source_type?: "manual" | "uploaded" | "link_response";
+};
+
+export type RecruiterDecisionPayload = {
+  decision: RecruiterDecision;
+  notes?: string | null;
+};
+
+export type StartScreeningPayload = {
+  candidate_id: string;
+  job_id?: string | null;
+  screening_type?: ScreeningType;
+  move_pipeline_stage?: boolean;
+  pipeline_id?: string | null;
 };

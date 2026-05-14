@@ -4,13 +4,13 @@ import type { Pipeline } from "@/lib/api/types";
 type PipelineCreatePayload = {
   candidate_id: string;
   job_id: string;
-  stage?: "applied" | "screening" | "interview" | "offer" | "placed" | "rejected";
+  stage?: "applied" | "screening" | "ai_screening" | "interview" | "offer" | "placed" | "rejected";
   status?: "active" | "on_hold" | "withdrawn" | "closed";
   notes?: string;
 };
 
 type PipelineUpdatePayload = {
-  stage?: "applied" | "screening" | "interview" | "offer" | "placed" | "rejected";
+  stage?: "applied" | "screening" | "ai_screening" | "interview" | "offer" | "placed" | "rejected";
   status?: "active" | "on_hold" | "withdrawn" | "closed";
   notes?: string;
 };

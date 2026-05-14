@@ -25,6 +25,7 @@ from app.schemas.interview import (
     FeedbackSummary,
     InterviewCreate,
     InterviewFeedbackCreate,
+    InterviewFeedbackResponse,
     InterviewParticipantCreate,
     InterviewParticipantResponse,
     InterviewResponse,
@@ -562,8 +563,14 @@ class InterviewService:
     ) -> InterviewFeedback:
         interview = self.get_interview_by_id(interview_id, organization_id, current_user)
 
-        # Feedback is only unlocked once the interview session has ended.
-        feedback_allowed_statuses = {InterviewStatus.COMPLETED.value, InterviewStatus.FEEDBACK_PENDING.value}
+        # Feedback is unlocked once the session has ended.
+        # feedback_submitted is also included so later panelists can still submit
+        # after the first reviewer has already advanced the global status.
+        feedback_allowed_statuses = {
+            InterviewStatus.COMPLETED.value,
+            InterviewStatus.FEEDBACK_PENDING.value,
+            InterviewStatus.FEEDBACK_SUBMITTED.value,
+        }
         if interview.status not in feedback_allowed_statuses:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -606,10 +613,12 @@ class InterviewService:
         )
         self.db.add(feedback)
 
-        # Advance status to feedback_submitted after scorecard is recorded.
-        _validate_status_transition(interview.status, InterviewStatus.FEEDBACK_SUBMITTED.value)
-        interview.status = InterviewStatus.FEEDBACK_SUBMITTED.value
-        self.db.add(interview)
+        # Advance global status to feedback_submitted on first submission.
+        # Skip if already there (multi-panel: later reviewers don't re-transition).
+        if interview.status != InterviewStatus.FEEDBACK_SUBMITTED.value:
+            _validate_status_transition(interview.status, InterviewStatus.FEEDBACK_SUBMITTED.value)
+            interview.status = InterviewStatus.FEEDBACK_SUBMITTED.value
+            self.db.add(interview)
 
         self.db.commit()
         self.db.refresh(feedback)
@@ -728,6 +737,13 @@ class InterviewService:
         notes = self._get_notes(interview_id, organization_id, current_user)
         feedback_summary = self._build_feedback_summary(interview_id)
 
+        my_feedback = self.db.scalar(
+            select(InterviewFeedback).where(
+                InterviewFeedback.interview_id == interview_id,
+                InterviewFeedback.reviewer_id == UUID(current_user.user_id),
+            )
+        )
+
         return WorkspaceResponse(
             interview=InterviewResponse.model_validate(interview),
             candidate=CandidateWorkspaceInfo.model_validate(candidate) if candidate else None,
@@ -735,6 +751,7 @@ class InterviewService:
             participants=[InterviewParticipantResponse.model_validate(p) for p in participants],
             notes=[NoteResponse.model_validate(n) for n in notes],
             feedback_summary=feedback_summary,
+            my_feedback=InterviewFeedbackResponse.model_validate(my_feedback) if my_feedback else None,
         )
 
     # ── Notes ────────────────────────────────────────────────────────────

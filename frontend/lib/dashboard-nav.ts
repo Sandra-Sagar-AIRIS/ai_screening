@@ -89,6 +89,13 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     adminMayAccess: true,
     showInSidebar: false,
   },
+  // ── AI Screening section ───────────────────────────────────────────────
+  {
+    name: "AI Screenings",
+    path: "/ai-screenings",
+    anyOfPermissions: [NAV_PERMISSION_CODES.CANDIDATES_READ],
+    adminMayAccess: true,
+  },
   // Same RBAC as above, for alternate URLs that still use DashboardShell.
   { name: "Jobs (dashboard path)", path: "/dashboard/jobs", anyOfPermissions: [NAV_PERMISSION_CODES.JOBS_READ], showInSidebar: false },
   {

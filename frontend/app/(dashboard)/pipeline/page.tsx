@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { RefreshCw } from "lucide-react";
+import { Brain, RefreshCw, Zap } from "lucide-react";
 import {
   closestCorners,
   DndContext,
@@ -20,20 +20,23 @@ import { getCandidates } from "@/lib/api/candidates";
 import { getJobs } from "@/lib/api/jobs";
 import { getJobMatchesAts, rescoreJobAts } from "@/lib/api/ats";
 import { getPipelines, updatePipeline } from "@/lib/api/pipeline";
+import { listScreenings } from "@/lib/api/ai_screening";
 import { PIPELINE_UPDATE_PERMISSION, hasPermission } from "@/lib/rbac";
-import type { Candidate, Job, Pipeline } from "@/lib/api/types";
+import type { AIScreeningListItem, Candidate, Job, Pipeline } from "@/lib/api/types";
+import { StartScreeningModal } from "@/components/pipeline/StartScreeningModal";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
 import { ATSScoreBadge } from "@/components/ats/ats-score-badge";
 import { normalizeCandidateId } from "@/lib/ats/candidate-id";
 
-type BoardStage = "applied" | "screening" | "interview" | "offered" | "hired";
+type BoardStage = "applied" | "screening" | "ai_screening" | "interview" | "offered" | "hired";
 
-const STAGES: BoardStage[] = ["applied", "screening", "interview", "offered", "hired"];
+const STAGES: BoardStage[] = ["applied", "screening", "ai_screening", "interview", "offered", "hired"];
 const STAGE_LABELS: Record<BoardStage, string> = {
   applied: "Applied",
   screening: "Screening",
+  ai_screening: "AI Screening",
   interview: "Interview",
   offered: "Offered",
   hired: "Hired",
@@ -41,6 +44,7 @@ const STAGE_LABELS: Record<BoardStage, string> = {
 const STAGE_ACCENT: Record<BoardStage, string> = {
   applied: "bg-violet-400",
   screening: "bg-sky-400",
+  ai_screening: "bg-orange-400",
   interview: "bg-emerald-400",
   offered: "bg-amber-400",
   hired: "bg-cyan-400",
@@ -49,13 +53,51 @@ const STAGE_ACCENT: Record<BoardStage, string> = {
 function toBoardStage(stage: Pipeline["stage"]): BoardStage {
   if (stage === "offer") return "offered";
   if (stage === "placed") return "hired";
+  if ((stage as string) === "ai_screening") return "ai_screening";
   return stage as BoardStage;
 }
 
 function toPipelineStage(stage: BoardStage): Pipeline["stage"] {
   if (stage === "offered") return "offer";
   if (stage === "hired") return "placed";
+  if (stage === "ai_screening") return "ai_screening" as Pipeline["stage"];
   return stage;
+}
+
+// ── AI screening status badge helpers ─────────────────────────────────────────
+
+const SCREENING_STATUS_LABELS: Record<string, string> = {
+  pending: "Pending",
+  generating_questions: "Generating…",
+  questions_ready: "Ready",
+  evaluating: "Evaluating…",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+const SCREENING_STATUS_COLORS: Record<string, string> = {
+  pending: "bg-slate-100 text-slate-500",
+  generating_questions: "bg-orange-50 text-orange-500",
+  questions_ready: "bg-sky-50 text-sky-600",
+  evaluating: "bg-orange-50 text-orange-500",
+  completed: "bg-emerald-50 text-emerald-700",
+  failed: "bg-red-50 text-red-600",
+  cancelled: "bg-slate-100 text-slate-400",
+};
+
+function AIScreeningBadge({ screening }: { screening: AIScreeningListItem }) {
+  const label = SCREENING_STATUS_LABELS[screening.status] ?? screening.status;
+  const color = SCREENING_STATUS_COLORS[screening.status] ?? "bg-slate-100 text-slate-500";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${color}`}>
+      <Brain className="h-2.5 w-2.5" />
+      {label}
+      {screening.overall_score !== null && screening.overall_score !== undefined && (
+        <span className="ml-0.5 opacity-70">{Math.round(screening.overall_score)}%</span>
+      )}
+    </span>
+  );
 }
 
 function CandidateCard({
@@ -69,28 +111,29 @@ function CandidateCard({
   boardLoading,
   isMoving,
   isTopMatch,
+  aiScreening,
+  onStartScreening,
 }: {
   pipeline: Pipeline;
   candidate?: Candidate;
   atsScore?: number;
   recommendation?: string;
-  /** Truncated AI recruiter summary when enrichment completed. */
   semanticInsight?: string | null;
-  /** From candidate_job_matches; drives compact semantic / fallback copy. */
   aiEnrichmentStatus?: string | null;
-  /** No row in candidate_job_matches for this job yet (or data not loaded). */
   awaitingAtsMatch?: boolean;
-  /** Full pipeline board is fetching jobs + ATS matches — do not show “pending” on every card. */
   boardLoading?: boolean;
   isMoving?: boolean;
   isTopMatch?: boolean;
+  aiScreening?: AIScreeningListItem | null;
+  onStartScreening?: () => void;
 }) {
+  const isAiStage = (pipeline.stage as string) === "ai_screening";
   return (
     <div className={`relative group transition-transform duration-300 w-full cursor-grab active:cursor-grabbing ${isMoving ? 'opacity-70' : 'hover:-translate-y-1'}`}>
-      <div className="relative rounded-2xl bg-white p-5 border border-slate-100/80 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all duration-300 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:border-slate-200 h-full">
+      <div className={`relative rounded-2xl bg-white p-5 border shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all duration-300 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] h-full ${isAiStage ? "border-orange-100/80 hover:border-orange-200" : "border-slate-100/80 hover:border-slate-200"}`}>
         <Link href={`/candidates/${pipeline.candidate_id}`} className="block">
           <div className="mb-2.5 flex items-center gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-50 border border-slate-100/80 text-[10px] font-bold text-slate-500 transition-colors duration-300 group-hover:bg-orange-50 group-hover:text-[#FF5A1F] group-hover:border-orange-100">
+            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold transition-colors duration-300 ${isAiStage ? "bg-orange-50 text-orange-500 border-orange-100 group-hover:bg-orange-100" : "bg-slate-50 text-slate-500 border-slate-100/80 group-hover:bg-orange-50 group-hover:text-[#FF5A1F] group-hover:border-orange-100"}`}>
               {candidate ? `${candidate.first_name.charAt(0)}${candidate.last_name.charAt(0)}` : "?"}
             </div>
             <p className="text-sm font-bold leading-tight text-slate-900 group-hover:text-[#FF5A1F] transition-colors duration-300">
@@ -115,6 +158,12 @@ function CandidateCard({
             />
             <ATSRecommendationBadge recommendation={recommendation} awaitingMatch={awaitingAtsMatch && !boardLoading} compact />
           </div>
+          {/* AI Screening badge — shown when an existing screening exists */}
+          {aiScreening ? (
+            <div className="mt-2">
+              <AIScreeningBadge screening={aiScreening} />
+            </div>
+          ) : null}
           {semanticInsight ? (
             <p className="mt-2 line-clamp-2 text-[11px] leading-snug text-violet-800" title={semanticInsight}>
               {semanticInsight}
@@ -125,6 +174,33 @@ function CandidateCard({
             </p>
           ) : null}
         </Link>
+
+        {/* AI Screening stage actions */}
+        {isAiStage && onStartScreening && !aiScreening && (
+          <div className="mt-3 pt-3 border-t border-orange-100">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onStartScreening(); }}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-orange-50 border border-orange-200 px-3 py-1.5 text-xs font-semibold text-orange-600 hover:bg-orange-100 transition-colors"
+            >
+              <Zap className="h-3 w-3" />
+              Start AI Screening
+            </button>
+          </div>
+        )}
+        {isAiStage && aiScreening && (
+          <div className="mt-3 pt-3 border-t border-orange-100">
+            <Link
+              href={`/ai-screenings/${aiScreening.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-slate-50 border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              <Brain className="h-3 w-3" />
+              {aiScreening.status === "completed" ? "View Results" : "Open Screening"}
+            </Link>
+          </div>
+        )}
+
         {isMoving ? <p className="mt-3 text-xs font-semibold text-[#FF5A1F]">Updating stage...</p> : null}
       </div>
     </div>
@@ -143,6 +219,8 @@ function DraggableCandidateCard({
   canDrag,
   isMoving,
   isTopMatch,
+  aiScreening,
+  onStartScreening,
 }: {
   pipeline: Pipeline;
   candidate?: Candidate;
@@ -155,6 +233,8 @@ function DraggableCandidateCard({
   canDrag: boolean;
   isMoving: boolean;
   isTopMatch?: boolean;
+  aiScreening?: AIScreeningListItem | null;
+  onStartScreening?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: pipeline.id,
@@ -184,6 +264,8 @@ function DraggableCandidateCard({
         boardLoading={boardLoading}
         isMoving={isMoving}
         isTopMatch={isTopMatch}
+        aiScreening={aiScreening}
+        onStartScreening={onStartScreening}
       />
     </div>
   );
@@ -249,6 +331,12 @@ export default function PipelinePage() {
   const permissions = useAuthStore((state) => state.permissions);
   const [movingPipelineId, setMovingPipelineId] = useState<string | null>(null);
   const [activePipelineId, setActivePipelineId] = useState<string | null>(null);
+  // AI Screening state
+  const [screeningsByCandidateId, setScreeningsByCandidateId] = useState<Record<string, AIScreeningListItem>>({});
+  const [startScreeningTarget, setStartScreeningTarget] = useState<{
+    pipeline: Pipeline;
+    candidate: Candidate;
+  } | null>(null);
   const [atsByCandidateId, setAtsByCandidateId] = useState<
     Record<
       string,
@@ -342,6 +430,21 @@ export default function PipelinePage() {
         };
       }
       setAtsByCandidateId(nextAtsByCandidate);
+
+      // Load AI screenings for this job so we can show badges on pipeline cards.
+      // Non-critical: failures are swallowed so the board remains usable.
+      void listScreenings({ job_id: jobId, limit: 200 }).then((screenings) => {
+        const byCandidate: Record<string, AIScreeningListItem> = {};
+        // Latest screening per candidate (list is sorted newest-first from backend)
+        for (const s of screenings) {
+          const cid = typeof s.candidate_id === "string" ? s.candidate_id : String(s.candidate_id);
+          if (!byCandidate[cid]) {
+            byCandidate[cid] = s;
+          }
+        }
+        setScreeningsByCandidateId(byCandidate);
+      }).catch(() => { /* non-critical */ });
+
       const hasUnscoredCandidates = pipelineData.some(
         (pipeline) => !nextAtsByCandidate[normalizeCandidateId(pipeline.candidate_id)]
       );
@@ -571,7 +674,7 @@ export default function PipelinePage() {
             onWheel={handleBoardWheel}
             className="max-w-full overflow-x-scroll overscroll-x-contain pb-4 touch-pan-x [scrollbar-gutter:stable_both-edges] [scrollbar-color:rgb(148_163_184)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/80 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:h-2"
           >
-            <div className="flex min-w-[1500px] items-start gap-6 pr-6">
+            <div className="flex min-w-[1800px] items-start gap-6 pr-6">
               {STAGES.map((stage) => (
                 <StageColumn
                   key={stage}
@@ -583,6 +686,8 @@ export default function PipelinePage() {
                   {grouped[stage]?.length ? (
                     grouped[stage].map(({ pipeline, candidate }) => {
                       const ats = atsByCandidateId[normalizeCandidateId(pipeline.candidate_id)];
+                      const candidateIdStr = normalizeCandidateId(pipeline.candidate_id);
+                      const aiScreening = screeningsByCandidateId[candidateIdStr] ?? null;
                       return (
                         <DraggableCandidateCard
                           key={pipeline.id}
@@ -599,6 +704,12 @@ export default function PipelinePage() {
                           isTopMatch={(ats?.score ?? -1) >= 85}
                           canDrag={canUpdatePipeline && movingPipelineId === null}
                           isMoving={movingPipelineId === pipeline.id}
+                          aiScreening={aiScreening}
+                          onStartScreening={
+                            candidate
+                              ? () => setStartScreeningTarget({ pipeline, candidate })
+                              : undefined
+                          }
                         />
                       );
                     })
@@ -609,9 +720,10 @@ export default function PipelinePage() {
           </div>
           <DragOverlay>
             {activePipeline ? (
-              <div className="w-[260px] rotate-1 scale-105 opacity-95 shadow-xl">
+              <div className="w-[280px] rotate-1 scale-105 opacity-95 shadow-xl">
                 {(() => {
                   const ats = atsByCandidateId[normalizeCandidateId(activePipeline.candidate_id)];
+                  const aiScreening = screeningsByCandidateId[normalizeCandidateId(activePipeline.candidate_id)] ?? null;
                   return (
                     <CandidateCard
                       pipeline={activePipeline}
@@ -626,6 +738,7 @@ export default function PipelinePage() {
                       boardLoading={loading}
                       isTopMatch={(ats?.score ?? -1) >= 85}
                       isMoving={false}
+                      aiScreening={aiScreening}
                     />
                   );
                 })()}
@@ -634,6 +747,25 @@ export default function PipelinePage() {
           </DragOverlay>
         </DndContext>
       ) : null}
+
+      {/* Start AI Screening modal */}
+      {startScreeningTarget && (
+        <StartScreeningModal
+          candidateId={startScreeningTarget.candidate.id}
+          candidateName={`${startScreeningTarget.candidate.first_name} ${startScreeningTarget.candidate.last_name}`}
+          jobId={selectedJobId || undefined}
+          jobTitle={jobs.find((j) => j.id === selectedJobId)?.title}
+          pipelineId={startScreeningTarget.pipeline.id}
+          onClose={() => setStartScreeningTarget(null)}
+          onStarted={(screeningId) => {
+            setStartScreeningTarget(null);
+            // Refresh pipeline + screenings so the board shows updated stage + badge
+            void loadPipelines(selectedJobId);
+            // Navigate to screening workspace
+            window.open(`/ai-screenings/${screeningId}`, "_blank");
+          }}
+        />
+      )}
     </section>
   );
 }

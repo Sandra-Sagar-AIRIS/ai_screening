@@ -1,7 +1,7 @@
 """Lightweight Communication Hub MVP extensions.
 
-Revision ID: 20260512_0002
-Revises: 20260512_0001
+Revision ID: 20260512_comm_0002
+Revises: 20260512_comm_0001
 Create Date: 2026-05-12
 """
 
@@ -14,8 +14,8 @@ from sqlalchemy.dialects import postgresql
 
 from app.core.config import get_settings
 
-revision: str = "20260512_0002"
-down_revision: str | None = "20260512_0001"
+revision: str = "20260512_comm_0002"
+down_revision: str | None = "20260512_comm_0001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

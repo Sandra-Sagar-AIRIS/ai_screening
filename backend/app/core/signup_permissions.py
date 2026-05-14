@@ -23,12 +23,25 @@ _RECRUITER_DEFAULTS: tuple[str, ...] = (
     "jobs:update",
     "candidates:create",
     "candidates:read",
+    "candidates:update",
     # Listing pipelines (dashboard, job detail candidates) requires read; update alone is not enough.
     "pipeline:read",
     "pipeline:create",
     "pipeline:update",
     "ats:read",
     "ats:rescore",
+    # AI Screening layer
+    "ai_screening:create",
+    "ai_screening:read",
+    "ai_screening:update",
+    "ai_screening:evaluate",
+    # Interview workflow
+    "interviews:create",
+    "interviews:read",
+    "interviews:update",
+    "interviews:feedback",
+    "interviews:claim",
+    "interviews:panel",
 )
 _CLIENT_DEFAULTS: tuple[str, ...] = (
     "jobs:read",
@@ -105,3 +118,25 @@ def seed_default_role_permissions(db: Session, organization_id: UUID) -> None:
             "inserted_count": inserted_count,
         },
     )
+
+
+def backfill_all_organizations(db: Session) -> None:
+    """Re-run seed_default_role_permissions for every organization in the database.
+
+    Idempotent — only inserts missing (role_id, permission) rows, never deletes.
+    Called once at application startup so new permissions added to ALL_PERMISSIONS
+    or _RECRUITER_DEFAULTS are automatically propagated to existing orgs.
+    """
+    from app.models.organization import Organization  # local import avoids circular dep
+
+    org_ids = db.scalars(select(Organization.id)).all()
+    logger.info("permission_backfill.start org_count=%d", len(org_ids))
+    total_inserted = 0
+    for org_id in org_ids:
+        try:
+            seed_default_role_permissions(db, org_id)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning("permission_backfill.org_failed org_id=%s: %s", org_id, exc)
+    logger.info("permission_backfill.complete total_orgs=%d", len(org_ids))

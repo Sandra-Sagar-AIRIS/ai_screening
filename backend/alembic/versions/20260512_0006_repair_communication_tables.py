@@ -1,7 +1,7 @@
 """Repair missing communication hub tables.
 
 Revision ID: 20260512_0006
-Revises: 20260512_0005
+Revises: 20260512_0005, 20260512_merge_comm_ats
 Create Date: 2026-05-12
 """
 
@@ -15,7 +15,7 @@ from sqlalchemy.dialects import postgresql
 from app.core.config import get_settings
 
 revision: str = "20260512_0006"
-down_revision: str | None = "20260512_0005"
+down_revision: str | tuple[str, str] | None = ("20260512_0005", "20260512_merge_comm_ats")
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

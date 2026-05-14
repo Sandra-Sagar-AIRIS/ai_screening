@@ -16,6 +16,7 @@ from app.routes.candidate import router as candidate_router
 from app.routes.client import router as client_router
 from app.routes.health import router as health_router
 from app.routes.interview import router as interview_router
+from app.routes.ai_screening import router as ai_screening_router
 from app.routes.invites import router as invites_router
 from app.routes.job import router as job_router
 from app.routes.me import router as me_router
@@ -177,6 +178,21 @@ async def request_timing_middleware(request: Request, call_next):
 @app.on_event("startup")
 def startup_event() -> None:
     reflect_database_schema()
+    _backfill_permissions()
+
+
+def _backfill_permissions() -> None:
+    """Idempotently propagate new permissions to all existing org roles."""
+    from app.core.signup_permissions import backfill_all_organizations
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        backfill_all_organizations(db)
+    except Exception:
+        logger.exception("startup.permission_backfill_failed — permissions may be missing for some orgs")
+    finally:
+        db.close()
 
 
 app.include_router(health_router, prefix="/api/v1")
@@ -191,6 +207,7 @@ app.include_router(pipeline_router, prefix="/api/v1")
 app.include_router(pipeline_singular_router, prefix="/api/v1")
 app.include_router(application_router, prefix="/api/v1")
 app.include_router(interview_router, prefix="/api/v1")
+app.include_router(ai_screening_router, prefix="/api/v1")
 app.include_router(invites_router, prefix="/api/v1/invites", tags=["invites"])
 app.include_router(permission_catalog_router, prefix="/api/v1")
 app.include_router(roles_router, prefix="/api/v1/roles", tags=["roles"])

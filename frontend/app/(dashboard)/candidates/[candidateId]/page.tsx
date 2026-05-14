@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
@@ -38,6 +38,9 @@ import { getInterviews } from "@/lib/api/interviews";
 import { InterviewList } from "@/components/interviews/InterviewList";
 import { InterviewTimeline } from "@/components/interviews/InterviewTimeline";
 import { ScheduleInterviewModal } from "@/components/interviews/ScheduleInterviewModal";
+import { listScreenings, retryScreening } from "@/lib/api/ai_screening";
+import type { AIScreeningListItem } from "@/lib/api/types";
+import { StartScreeningModal } from "@/components/pipeline/StartScreeningModal";
 import { getJobs, submitCandidateToJob } from "@/lib/api/jobs";
 import { getPipelines, updatePipeline } from "@/lib/api/pipeline";
 import {
@@ -51,7 +54,7 @@ import type { Candidate, CandidateMatchEntry, Interview, Job, OrganizationUser, 
 import { getUsers } from "@/lib/api/users";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Mail, Phone, MapPin, Briefcase, Calendar, FileText, Download, ExternalLink, MessageSquare, Clock, ArrowLeft, Edit3, Save, X, Plus, User, Star, Sparkles, Layers , Activity, Brain, CornerDownLeft, Paperclip, Bold, Italic, Underline, List as ListIcon, ListOrdered, Link as LinkIcon, Search, ChevronDown, Maximize2, MoreVertical, ChevronLeft, ChevronRight, Copy, Filter, Image as ImageIcon, MoreHorizontal, CheckCircle2, Eye } from "lucide-react";
+import { Mail, Phone, MapPin, Briefcase, Calendar, FileText, Download, ExternalLink, MessageSquare, Clock, ArrowLeft, Edit3, Save, X, Plus, User, Star, Sparkles, Layers , Activity, Brain, CornerDownLeft, Paperclip, Bold, Italic, Underline, List as ListIcon, ListOrdered, Link as LinkIcon, Search, ChevronDown, Maximize2, MoreVertical, ChevronLeft, ChevronRight, Copy, Filter, Image as ImageIcon, MoreHorizontal, CheckCircle2, Eye, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
@@ -136,6 +139,12 @@ export default function CandidateDetailPage() {
   const candidateLoadSeqRef = useRef(0);
   const templateEditorRef = useRef<HTMLTextAreaElement>(null);
   const atsSemanticInFlight = useMemo(() => atsAwaitingSemanticEnrichment(atsMatches), [atsMatches]);
+
+  // ── AI Screening state ─────────────────────────────────────────────────────
+  const [aiScreenings, setAiScreenings] = useState<AIScreeningListItem[]>([]);
+  const [aiScreeningsLoading, setAiScreeningsLoading] = useState(false);
+  const [showStartScreeningModal, setShowStartScreeningModal] = useState(false);
+  const [retryingScreeningId, setRetryingScreeningId] = useState<string | null>(null);
 
   const insertVariable = (variable: string) => {
     if (selectedTemplateId) return;
@@ -254,6 +263,21 @@ export default function CandidateDetailPage() {
         setYearsExperience(data.years_experience !== null && data.years_experience !== undefined ? String(data.years_experience) : "");
         setSelectedRecruiterId(data.recruiter_id ?? "");
         setError(null);
+
+        // Load AI screenings for this candidate (non-blocking, non-critical)
+        setAiScreeningsLoading(true);
+        listScreenings({ candidate_id: params.candidateId, limit: 50 })
+          .then((screenings) => {
+            if (loadSeq === candidateLoadSeqRef.current) {
+              setAiScreenings(screenings);
+            }
+          })
+          .catch(() => { /* screenings unavailable — don't block the rest of the page */ })
+          .finally(() => {
+            if (loadSeq === candidateLoadSeqRef.current) {
+              setAiScreeningsLoading(false);
+            }
+          });
       } catch (err) {
         if (err instanceof ApiError) {
           setError(err.message);
@@ -567,7 +591,7 @@ export default function CandidateDetailPage() {
   const currentPipeline = sortedPipelines[0];
   const stageLabel = currentPipeline ? formatPipelineStage(currentPipeline.stage).toUpperCase() : "NOT SUBMITTED";
   const eligiblePipelines = useMemo(
-    () => pipelines.filter((p) => ["screening", "interview", "offer", "placed"].includes(p.stage)),
+    () => pipelines.filter((p) => ["screening", "ai_screening", "interview", "offer", "placed"].includes(p.stage)),
     [pipelines]
   );
   const recruiterName = users.find((user) => user.id === candidate?.recruiter_id)?.email ?? candidate?.recruiter_id ?? "-";
@@ -1429,7 +1453,7 @@ export default function CandidateDetailPage() {
                           ATS scores are still missing after waiting. Check backend logs for{" "}
                           <code className="rounded bg-slate-100 px-1">ats.rescore</code> /{" "}
                           <code className="rounded bg-slate-100 px-1">ats.task.failed</code>, confirm Celery or the in-process
-                          fallback ran, then use “Rescore ATS” or re-open this page.
+                          fallback ran, then use "Rescore ATS" or re-open this page.
                         </p>
                       ) : null}
                     </div>
@@ -2461,19 +2485,28 @@ export default function CandidateDetailPage() {
               )}
             </h2>
             {pipelines.length > 0 && (
-              <div className="relative group/sched">
+              <div className="flex items-center gap-2">
+                <div className="relative group/sched">
+                  <Button
+                    className="h-7 text-xs bg-[#FF5A1F] hover:bg-[#E54E1A] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => setSchedulingModalOpen(true)}
+                    disabled={eligiblePipelines.length === 0}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1" /> Schedule
+                  </Button>
+                  {eligiblePipelines.length === 0 && (
+                    <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/sched:block z-10 w-52 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
+                      Move the candidate to Screening before scheduling interviews.
+                    </div>
+                  )}
+                </div>
                 <Button
-                  className="h-7 text-xs bg-[#FF5A1F] hover:bg-[#E54E1A] text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={() => setSchedulingModalOpen(true)}
-                  disabled={eligiblePipelines.length === 0}
+                  variant="outline"
+                  className="h-7 text-xs border-orange-200 text-orange-700 hover:bg-orange-50 gap-1"
+                  onClick={() => setShowStartScreeningModal(true)}
                 >
-                  <Plus className="w-3.5 h-3.5 mr-1" /> Schedule
+                  <Brain className="w-3 h-3" /> AI Screening
                 </Button>
-                {eligiblePipelines.length === 0 && (
-                  <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/sched:block z-10 w-52 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
-                    Move the candidate to Screening before scheduling interviews.
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -2509,6 +2542,142 @@ export default function CandidateDetailPage() {
             </div>
           </div>
         )}
+
+        {/* ── AI Screening Section ─────────────────────────────────────────── */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="border-b border-gray-100 bg-gray-50/50 p-5 flex items-center justify-between">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <Brain className="w-4 h-4 text-[#FF5A1F]" /> AI Screening
+              {aiScreenings.length > 0 && (
+                <span className="ml-1 rounded-full bg-orange-50 border border-orange-100 px-2 py-0.5 text-[11px] font-bold text-orange-600">
+                  {aiScreenings.length}
+                </span>
+              )}
+            </h2>
+            <Button
+              className="h-7 text-xs bg-orange-500 hover:bg-orange-600 text-white gap-1"
+              onClick={() => setShowStartScreeningModal(true)}
+            >
+              <Zap className="w-3 h-3" /> Start New Screening
+            </Button>
+          </div>
+          <div className="p-4">
+            {aiScreeningsLoading ? (
+              <p className="text-xs text-slate-400 py-4 text-center">Loading screenings…</p>
+            ) : aiScreenings.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/40 py-8 flex flex-col items-center gap-3">
+                <Brain className="w-8 h-8 text-slate-200" />
+                <p className="text-sm text-slate-400 font-medium">No AI screenings yet</p>
+                <Button
+                  className="h-8 text-xs bg-orange-500 hover:bg-orange-600 text-white gap-1"
+                  onClick={() => setShowStartScreeningModal(true)}
+                >
+                  <Zap className="w-3 h-3" /> Start First Screening
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {aiScreenings.map((screening) => {
+                  const statusColors: Record<string, string> = {
+                    completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+                    failed: "bg-red-50 text-red-600 border-red-200",
+                    questions_ready: "bg-sky-50 text-sky-600 border-sky-200",
+                    evaluating: "bg-orange-50 text-orange-500 border-orange-200",
+                    pending: "bg-slate-50 text-slate-500 border-slate-200",
+                    generating_questions: "bg-orange-50 text-orange-500 border-orange-200",
+                    cancelled: "bg-slate-50 text-slate-400 border-slate-200",
+                  };
+                  const statusLabel: Record<string, string> = {
+                    pending: "Pending",
+                    generating_questions: "Generating Questions…",
+                    questions_ready: "Ready for Answers",
+                    evaluating: "Evaluating…",
+                    completed: "Completed",
+                    failed: "Failed",
+                    cancelled: "Cancelled",
+                  };
+                  const recColors: Record<string, string> = {
+                    strong_proceed: "text-emerald-700",
+                    proceed: "text-emerald-600",
+                    needs_manual_review: "text-amber-600",
+                    weak_match: "text-orange-600",
+                    reject_recommendation: "text-red-600",
+                  };
+                  const recLabel: Record<string, string> = {
+                    strong_proceed: "Strong Proceed",
+                    proceed: "Proceed",
+                    needs_manual_review: "Manual Review",
+                    weak_match: "Weak Match",
+                    reject_recommendation: "Reject",
+                  };
+                  return (
+                    <div
+                      key={screening.id}
+                      className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/40 px-4 py-3 gap-4"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusColors[screening.status] ?? "bg-slate-50 text-slate-500 border-slate-200"}`}>
+                            {statusLabel[screening.status] ?? screening.status}
+                          </span>
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500 capitalize">
+                            {screening.screening_type.replace("_", " ")}
+                          </span>
+                          {screening.job_title && (
+                            <span className="text-[11px] text-slate-400 truncate">{screening.job_title}</span>
+                          )}
+                        </div>
+                        <div className="mt-1 flex items-center gap-3">
+                          {screening.overall_score !== null && screening.overall_score !== undefined && (
+                            <span className="text-xs font-bold text-slate-700">
+                              Score: {Math.round(screening.overall_score)}%
+                            </span>
+                          )}
+                          {screening.recommendation && (
+                            <span className={`text-xs font-semibold ${recColors[screening.recommendation] ?? "text-slate-500"}`}>
+                              {recLabel[screening.recommendation] ?? screening.recommendation}
+                            </span>
+                          )}
+                          {screening.recruiter_decision && (
+                            <span className="text-xs text-slate-400 capitalize">
+                              Decision: {screening.recruiter_decision.replace("_", " ")}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {screening.status === "failed" && (
+                          <Button
+                            variant="outline"
+                            className="h-7 text-xs border-orange-200 text-orange-600 hover:bg-orange-50"
+                            disabled={retryingScreeningId === screening.id}
+                            onClick={async () => {
+                              setRetryingScreeningId(screening.id);
+                              try {
+                                await retryScreening(screening.id);
+                                const refreshed = await listScreenings({ candidate_id: params.candidateId, limit: 50 });
+                                setAiScreenings(refreshed);
+                              } catch { /* silent */ } finally {
+                                setRetryingScreeningId(null);
+                              }
+                            }}
+                          >
+                            {retryingScreeningId === screening.id ? "Retrying…" : "Retry"}
+                          </Button>
+                        )}
+                        <Link href={`/ai-screenings/${screening.id}`}>
+                          <Button variant="outline" className="h-7 text-xs">
+                            {screening.status === "completed" ? "View Results" : "Open"}
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Record Details */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -2554,6 +2723,27 @@ export default function CandidateDetailPage() {
           onCreated={(interview) => {
             setInterviews((prev) => [interview, ...prev]);
             void refreshInterviewData();
+          }}
+        />
+      )}
+
+      {/* Start AI Screening modal */}
+      {showStartScreeningModal && candidate && (
+        <StartScreeningModal
+          candidateId={candidate.id}
+          candidateName={`${candidate.first_name} ${candidate.last_name}`}
+          jobId={currentPipeline?.job_id ?? undefined}
+          jobTitle={jobs.find((j) => j.id === currentPipeline?.job_id)?.title}
+          pipelineId={currentPipeline?.id ?? undefined}
+          onClose={() => setShowStartScreeningModal(false)}
+          onStarted={(screeningId) => {
+            setShowStartScreeningModal(false);
+            // Refresh screenings list
+            listScreenings({ candidate_id: candidate.id, limit: 50 })
+              .then((s) => setAiScreenings(s))
+              .catch(() => {});
+            // Open the screening workspace in a new tab
+            window.open(`/ai-screenings/${screeningId}`, "_blank");
           }}
         />
       )}
