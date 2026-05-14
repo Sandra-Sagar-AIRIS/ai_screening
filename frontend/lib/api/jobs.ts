@@ -1,4 +1,5 @@
-import { apiRequest, ApiError, API_BASE_URL } from "@/lib/api/client";
+import { assertAllowedDocumentFile } from "@/lib/documents/fileSecurityValidator";
+import { apiRequest, ApiError, API_BASE_URL, invalidateApiCache } from "@/lib/api/client";
 import type {
   Job,
   JobCandidateListItem,
@@ -96,6 +97,38 @@ export async function submitCandidateToJob(
   });
 }
 
+export async function uploadJobJdDocument(jobId: string, file: File) {
+  assertAllowedDocumentFile(file);
+  const token =
+    typeof window !== "undefined" ? window.localStorage.getItem("airis_access_token") : null;
+  const orgId =
+    typeof window !== "undefined" ? window.localStorage.getItem("airis_organization_id") : null;
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/jd-document`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(orgId ? { "X-Workspace-Id": orgId } : {}),
+    },
+    body: form,
+  });
+  if (!response.ok) {
+    let detail: unknown = null;
+    try {
+      detail = await response.json();
+    } catch {
+      detail = await response.text();
+    }
+    const msg =
+      detail && typeof detail === "object" && "detail" in detail
+        ? String((detail as { detail: unknown }).detail)
+        : `Upload failed (${response.status})`;
+    throw new ApiError(msg, response.status, detail);
+  }
+  return (await response.json()) as Job;
+}
+
 export async function createJob(payload: {
   client_id: string;
   title: string;
@@ -138,9 +171,13 @@ export async function changeJobStatus(jobId: string, status: JobStatus, reason?:
 }
 
 export async function deleteJob(jobId: string) {
-  return apiRequest(`/jobs/${jobId}`, {
+  const result = await apiRequest(`/jobs/${jobId}`, {
     method: "DELETE",
   });
+  // Drop cached GETs for this job and list queries so UI does not briefly show a deleted job.
+  invalidateApiCache(`/jobs/${jobId}`);
+  invalidateApiCache("/jobs?");
+  return result;
 }
 
 export async function getJobSubmissions(jobId: string, params?: { submission_status?: JobSubmissionStatus; limit?: number; offset?: number }) {

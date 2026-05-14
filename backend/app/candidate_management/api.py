@@ -566,10 +566,46 @@ def get_candidate(
         safe_data = service._normalize_candidate(candidate)
         return _success(CandidateResponse.model_validate(safe_data))
     except HTTPException as exc:
-        # Candidate detail can be served from legacy candidate storage while candidate-management
-        # timeline data is absent. Treat "not found" as empty timeline to keep the UI functional.
         if exc.status_code == status.HTTP_404_NOT_FOUND:
-            return _success([])
+            try:
+                legacy_service = LegacyCandidateService(db)
+                legacy_candidate = legacy_service.get_candidate_by_id(candidate_id, UUID(current_user.organization_id), current_user)
+                candidate_resp = CandidateResponse(
+                    id=legacy_candidate.id,
+                    org_id=UUID(current_user.organization_id),
+                    workspace_id=workspace_id,
+                    first_name=legacy_candidate.first_name,
+                    last_name=legacy_candidate.last_name,
+                    full_name=f"{legacy_candidate.first_name} {legacy_candidate.last_name}".strip(),
+                    email=legacy_candidate.email,
+                    phone=legacy_candidate.phone,
+                    location=legacy_candidate.location,
+                    years_experience=None,
+                    headline=None,
+                    summary=legacy_candidate.experience_summary,
+                    source="unknown",
+                    status="active",
+                    resume_s3_key=None,
+                    resume_file_name=None,
+                    resume_uploaded_at=None,
+                    ai_parse_version=None,
+                    parse_confidence=None,
+                    parsed_resume_data=None,
+                    merged_into_candidate_id=None,
+                    merged_at=None,
+                    created_by=legacy_candidate.created_by,
+                    updated_by=legacy_candidate.created_by,
+                    deleted_by=None,
+                    created_at=legacy_candidate.created_at,
+                    updated_at=legacy_candidate.updated_at,
+                    deleted_at=None,
+                    skills=[],
+                )
+                return _success(candidate_resp)
+            except HTTPException as e2:
+                if e2.status_code == status.HTTP_404_NOT_FOUND:
+                    raise HTTPException(status_code=404, detail="Candidate not found")
+                raise e2
         raise
     except Exception as e:
         logger.error(f"FATAL: Internal error in get_candidate for {candidate_id}: {str(e)}")
@@ -661,79 +697,35 @@ def preview_candidate_resume(
 
     name = (candidate.resume_file_name or file_path.name).lower()
     if name.endswith(".docx"):
-        from docx import Document
+        from app.documents.docx_html_preview import docx_body_html_from_path, wrap_document_preview_html
 
-        document = Document(str(file_path))
-        parts: list[str] = []
-        in_list = False
-        for paragraph in document.paragraphs:
-            raw = paragraph.text or ""
-            if not raw.strip():
-                if in_list:
-                    parts.append("</ul>")
-                    in_list = False
-                continue
-
-            style_name = (paragraph.style.name or "").lower() if paragraph.style is not None else ""
-            run_html = "".join(
-                (
-                    f"<strong>{html.escape(run.text)}</strong>"
-                    if run.bold
-                    else f"<em>{html.escape(run.text)}</em>"
-                    if run.italic
-                    else html.escape(run.text)
-                )
-                for run in paragraph.runs
-                if (run.text or "")
-            ).strip()
-            if not run_html:
-                run_html = html.escape(raw.strip())
-
-            if "list" in style_name:
-                if not in_list:
-                    parts.append("<ul>")
-                    in_list = True
-                parts.append(f"<li>{run_html}</li>")
-                continue
-
-            if in_list:
-                parts.append("</ul>")
-                in_list = False
-
-            if "heading" in style_name or paragraph.style.name in {"Title", "Subtitle"}:
-                parts.append(f"<h3>{run_html}</h3>")
-            else:
-                parts.append(f"<p>{run_html}</p>")
-
-        if in_list:
-            parts.append("</ul>")
-        if not parts:
-            parts.append("<p>No previewable text found in this DOCX file.</p>")
-
-        body_html = "".join(parts)
+        body_html = docx_body_html_from_path(file_path)
+        html_doc = wrap_document_preview_html(
+            title="Resume preview",
+            display_name=candidate.resume_file_name or file_path.name,
+            body_html=body_html,
+        )
     elif name.endswith(".doc"):
         body_html = (
             "<p>Preview for .doc is limited.</p>"
             "<p>Please use <strong>Download</strong> to view the original file in Word for full fidelity.</p>"
         )
+        from app.documents.docx_html_preview import wrap_document_preview_html
+
+        html_doc = wrap_document_preview_html(
+            title="Resume preview",
+            display_name=candidate.resume_file_name or file_path.name,
+            body_html=body_html,
+        )
     else:
         body_html = "<p>Inline preview is available for DOCX. Use Open for PDF or Download for other formats.</p>"
+        from app.documents.docx_html_preview import wrap_document_preview_html
 
-    html_doc = (
-        "<!doctype html><html><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "<style>"
-        "body{margin:0;background:#f8fafc;font-family:Inter,Segoe UI,Arial,sans-serif;color:#0f172a;}"
-        ".wrap{max-width:900px;margin:24px auto;padding:24px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;}"
-        ".meta{font-size:13px;color:#64748b;margin-bottom:14px;}"
-        "h3{margin:18px 0 8px;font-size:18px;line-height:1.3;}"
-        "p{margin:8px 0;line-height:1.6;white-space:pre-wrap;}"
-        "ul{margin:8px 0 8px 20px;line-height:1.6;}"
-        "li{margin:4px 0;}"
-        "</style></head><body>"
-        f"<div class='wrap'><div class='meta'>{html.escape(candidate.resume_file_name or file_path.name)}</div>{body_html}</div>"
-        "</body></html>"
-    )
+        html_doc = wrap_document_preview_html(
+            title="Resume preview",
+            display_name=candidate.resume_file_name or file_path.name,
+            body_html=body_html,
+        )
 
     return {
         "file_name": candidate.resume_file_name or file_path.name,

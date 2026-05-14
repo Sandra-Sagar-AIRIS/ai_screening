@@ -292,6 +292,10 @@ class JobResponse(BaseModel):
     parsing_status: str | None = None
     enrichment_status: str | None = None
 
+    # Original JD binary (PDF/DOCX/TXT) — API exposes filename + availability only.
+    jd_file_name: str | None = None
+    jd_original_available: bool = False
+
     created_at: datetime
     updated_at: datetime
 

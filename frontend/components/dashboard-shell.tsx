@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
-  Menu, Bell, Search,
+  Menu, Search,
   LayoutDashboard, Users, Briefcase, Filter, Mail, UserCheck,
   CalendarDays, List, Settings, Shield, Brain,
   ChevronLeft, ChevronRight, LogOut
@@ -119,8 +119,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 title={isCollapsed ? item.name : undefined}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                  isActive 
-                    ? "bg-orange-50 text-orange-600" 
+                  isActive
+                    ? "bg-orange-50 text-orange-600"
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
                   isCollapsed && "justify-center px-0"
                 )}
@@ -188,7 +188,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="p-4 border-t border-slate-100">
-          <button 
+          <button
             onClick={onLogout}
             className={cn(
               "flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-500 hover:text-red-600 w-full rounded-lg hover:bg-red-50 transition-colors",
@@ -216,21 +216,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             {/* Search Bar */}
             <div className="hidden sm:flex items-center relative max-w-md w-full">
               <Search className="w-4 h-4 absolute left-3 text-slate-400" />
-              <input 
-                type="text" 
-                placeholder="Search candidates, jobs..." 
+              <input
+                type="text"
+                placeholder="Search candidates, jobs..."
                 className="w-full h-9 pl-9 pr-4 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F] transition-all"
               />
             </div>
           </div>
 
           <div className="flex items-center gap-4 pl-4">
-            <button className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors rounded-full hover:bg-slate-50">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#FF5A1F] rounded-full border-2 border-white"></span>
-            </button>
-            
-            <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
 
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-[#FF5A1F] font-bold text-sm">

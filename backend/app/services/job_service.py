@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -237,6 +239,8 @@ class JobService:
             parsing_source=job.parsing_source,
             parsing_status=job.parsing_status,
             enrichment_status=getattr(job, "enrichment_status", None),
+            jd_file_name=getattr(job, "jd_file_name", None),
+            jd_original_available=bool(getattr(job, "jd_document_key", None)),
             created_at=job.created_at or _now,
             updated_at=job.updated_at or _now,
         )
@@ -252,6 +256,72 @@ class JobService:
             self.db.commit()
             self.db.refresh(client)
         return client
+
+    def jd_disk_path_for_job(self, job: Job) -> Path | None:
+        key = getattr(job, "jd_document_key", None)
+        if not key:
+            return None
+        root = Path(os.getenv("JOB_JD_UPLOAD_DIR", "tmp/job-jds"))
+        p = root / str(key).replace("/", "_")
+        if p.exists():
+            return p
+        alt = root / str(key)
+        return alt if alt.exists() else None
+
+    def _persist_pasted_jd_document(self, organization_id: UUID, job: Job, payload: JobCreate) -> None:
+        if getattr(job, "jd_document_key", None):
+            return
+        if (payload.parsing_source or "").strip().lower() != "text":
+            return
+        body = (payload.raw_jd_text or "").strip()
+        if not body:
+            return
+        from app.documents.file_security import sanitize_storage_filename, validate_document_upload
+
+        raw_bytes = body.encode("utf-8")
+        validate_document_upload(filename="pasted-jd.txt", file_bytes=raw_bytes, allowed_extensions=frozenset({".txt"}))
+        root = Path(os.getenv("JOB_JD_UPLOAD_DIR", "tmp/job-jds"))
+        root.mkdir(parents=True, exist_ok=True)
+        safe = sanitize_storage_filename("job-description.txt")
+        key = f"job_jds/{organization_id}/{job.id}/{safe}"
+        dest = root / key.replace("/", "_")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(raw_bytes)
+        job.jd_document_key = key
+        job.jd_file_name = safe
+        self.db.add(job)
+
+    def save_job_jd_upload(
+        self,
+        job_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        file_bytes: bytes,
+        original_name: str,
+    ) -> JobResponse:
+        from app.documents.file_security import sanitize_storage_filename, validate_document_upload
+
+        job = self.get_job_by_id(job_id, organization_id, current_user)
+        _ext, _media = validate_document_upload(filename=original_name or "jd.pdf", file_bytes=file_bytes)
+        safe = sanitize_storage_filename(original_name or "job-description.pdf")
+        root = Path(os.getenv("JOB_JD_UPLOAD_DIR", "tmp/job-jds"))
+        root.mkdir(parents=True, exist_ok=True)
+        key = f"job_jds/{organization_id}/{job.id}/{safe}"
+        dest = root / key.replace("/", "_")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        old_path = self.jd_disk_path_for_job(job)
+        dest.write_bytes(file_bytes)
+        if old_path is not None and old_path.resolve() != dest.resolve():
+            try:
+                old_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        job.jd_document_key = key
+        job.jd_file_name = safe
+        self.db.add(job)
+        self.db.commit()
+        self.db.refresh(job)
+        return self._get_job_response(job)
 
     def create_job(self, organization_id: UUID, payload: JobCreate, *, created_by: UUID | None = None) -> JobResponse:
         import logging
@@ -346,6 +416,14 @@ class JobService:
             if job.parsing_status is None:
                 job.parsing_status = "pending"
             self.db.add(job)
+
+        try:
+            self._persist_pasted_jd_document(organization_id, job, payload)
+        except Exception:
+            logger.exception(
+                "job.create.jd_persist_failed",
+                extra={"job_id": str(job.id), "organization_id": str(organization_id)},
+            )
 
         self.db.commit()
         self.db.refresh(job)
@@ -559,12 +637,19 @@ class JobService:
         logger = logging.getLogger(__name__)
         logger.info(f"DELETE_START: Job={job_id} Org={organization_id}")
         job = self.get_job_by_id(job_id, organization_id, current_user)
-        
-        from app.models.pipeline import Pipeline
+
+        jd_path = self.jd_disk_path_for_job(job)
+        if jd_path is not None:
+            try:
+                jd_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("job.delete.jd_file_unlink_failed", extra={"path": str(jd_path)})
+
+        from app.models.interview import Interview
         from app.models.job_vendor import JobVendor
         from app.models.client_job_access import ClientJobAccess
         from app.models.application import Application
-        
+
         # Helper to safely delete from a model using savepoints
         def _safe_delete(model):
             try:
@@ -575,8 +660,29 @@ class JobService:
                 logger.warning(f"Table for {model.__name__} might be missing, ignoring: {e}")
             except Exception as e:
                 logger.warning(f"Error deleting from {model.__name__}: {e}")
-                
+
+        def _safe_delete_interviews_for_job() -> None:
+            """Interviews reference pipelines; pipelines must not be deleted first."""
+            try:
+                with self.db.begin_nested():
+                    self.db.execute(
+                        sa.delete(Interview).where(
+                            sa.or_(
+                                Interview.job_id == job.id,
+                                Interview.pipeline_id.in_(select(Pipeline.id).where(Pipeline.job_id == job.id)),
+                            )
+                        )
+                    )
+            except sa.exc.ProgrammingError as e:
+                logger.warning("Interviews table might be missing, skipping interview cleanup: %s", e)
+            except Exception as e:
+                logger.warning("Error deleting interviews for job %s: %s", job.id, e)
+
         try:
+            # Order matters: interviews → pipeline rows → job
+            _safe_delete_interviews_for_job()
+            _safe_delete(CandidateJobMatch)
+            _safe_delete(JobStatusHistory)
             # Delete dependent records safely
             _safe_delete(Pipeline)
             _safe_delete(JobVendor)
@@ -585,10 +691,20 @@ class JobService:
             _safe_delete(JobSkill)
             _safe_delete(ClientJobAccess)
             _safe_delete(Application)
-            
+
             self.db.delete(job)
             self.db.commit()
             logger.info(f"DELETE_SUCCESS: Job {job_id} deleted")
+        except IntegrityError as e:
+            self.db.rollback()
+            logger.exception("DELETE_INTEGRITY: Job=%s", job_id)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This job could not be deleted because other records still reference it. "
+                    "If the problem persists, contact an administrator."
+                ),
+            ) from e
         except Exception as e:
             logger.error(f"DELETE_ERROR: {e}")
             self.db.rollback()

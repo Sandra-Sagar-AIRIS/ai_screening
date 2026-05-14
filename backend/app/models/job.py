@@ -47,6 +47,9 @@ class Job(Base):
     raw_jd_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsing_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
     parsing_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Original JD document (PDF/DOCX/TXT) stored server-side; never expose filesystem paths in APIs.
+    jd_document_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    jd_file_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # Async ATS / match-cache pipeline: queued → running → ready | failed (null = not tracked / legacy).
     enrichment_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
@@ -71,3 +74,7 @@ class Job(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+    @property
+    def jd_original_available(self) -> bool:
+        return bool(self.jd_document_key)
