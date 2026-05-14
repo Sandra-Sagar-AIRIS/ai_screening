@@ -121,6 +121,37 @@ def get_my_interviews(
     return [InterviewResponse.model_validate(i) for i in interviews]
 
 
+# ── Interviewer Profile (static paths before /{interview_id}) ────────────
+
+@router.get("/profile/me", response_model=InterviewerProfileResponse | None)
+def get_my_profile(
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> InterviewerProfileResponse | None:
+    svc = InterviewService(db)
+    profile = svc.get_my_profile(UUID(current_user.organization_id), current_user)
+    if profile is None:
+        return None
+    resp = InterviewerProfileResponse.model_validate(profile)
+    resp.skills = svc.get_profile_skills(profile.id)
+    return resp
+
+
+@router.put("/profile/me", response_model=InterviewerProfileResponse)
+def upsert_my_profile(
+    payload: InterviewerProfileCreate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> InterviewerProfileResponse:
+    svc = InterviewService(db)
+    profile = svc.upsert_my_profile(UUID(current_user.organization_id), current_user, payload)
+    resp = InterviewerProfileResponse.model_validate(profile)
+    resp.skills = svc.get_profile_skills(profile.id)
+    return resp
+
+
 # ── Single interview ─────────────────────────────────────────────────────
 
 @router.get("/{interview_id}", response_model=InterviewResponse)
@@ -275,37 +306,6 @@ def get_feedback(
     return [InterviewFeedbackResponse.model_validate(f) for f in feedback_list]
 
 
-# ── Interviewer Profile ───────────────────────────────────────────────────
-
-@router.get("/profile/me", response_model=InterviewerProfileResponse | None)
-def get_my_profile(
-    db: Annotated[Session, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> InterviewerProfileResponse | None:
-    svc = InterviewService(db)
-    profile = svc.get_my_profile(UUID(current_user.organization_id), current_user)
-    if profile is None:
-        return None
-    resp = InterviewerProfileResponse.model_validate(profile)
-    resp.skills = svc.get_profile_skills(profile.id)
-    return resp
-
-
-@router.put("/profile/me", response_model=InterviewerProfileResponse)
-def upsert_my_profile(
-    payload: InterviewerProfileCreate,
-    db: Annotated[Session, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> InterviewerProfileResponse:
-    svc = InterviewService(db)
-    profile = svc.upsert_my_profile(UUID(current_user.organization_id), current_user, payload)
-    resp = InterviewerProfileResponse.model_validate(profile)
-    resp.skills = svc.get_profile_skills(profile.id)
-    return resp
-
-
 # ── Workspace ─────────────────────────────────────────────────────────────
 
 @router.get("/{interview_id}/workspace", response_model=WorkspaceResponse)
@@ -382,17 +382,3 @@ def mark_no_show(
     svc = InterviewService(db)
     interview = svc.mark_no_show(interview_id, UUID(current_user.organization_id), current_user)
     return InterviewResponse.model_validate(interview)
-
-
-@router.delete("/{interview_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_interview(
-    interview_id: UUID,
-    db: Annotated[Session, Depends(get_db)],
-    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_DELETE))],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> None:
-    svc = InterviewService(db)
-    svc.delete_interview(interview_id, UUID(current_user.organization_id), current_user)
-
-
-

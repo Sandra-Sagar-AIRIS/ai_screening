@@ -1,14 +1,14 @@
-"""Restore local revision marker for databases stamped at 20260512_0005.
+"""Merge ATS perf head with communication hub branch (no-op marker).
 
-Revision ID: 20260512_0005
-Revises: 20260511_0003, 20260512_0002
+Revision ID: 20260512_merge_comm_ats
+Revises: 20260511_0003, 20260512_comm_0002
 Create Date: 2026-05-12
 """
 
 from collections.abc import Sequence
 
-revision: str = "20260512_0005"
-down_revision: str | tuple[str, str] | None = ("20260511_0003", "20260512_0002")
+revision: str = "20260512_merge_comm_ats"
+down_revision: str | tuple[str, str] | None = ("20260511_0003", "20260512_comm_0002")
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

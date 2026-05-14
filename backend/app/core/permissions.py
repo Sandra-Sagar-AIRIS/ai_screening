@@ -38,6 +38,12 @@ CLIENTS_UPDATE = "clients:update"
 ATS_READ = "ats:read"
 ATS_RESCORE = "ats:rescore"
 
+AI_SCREENING_CREATE = "ai_screening:create"
+AI_SCREENING_READ = "ai_screening:read"
+AI_SCREENING_UPDATE = "ai_screening:update"
+AI_SCREENING_DELETE = "ai_screening:delete"
+AI_SCREENING_EVALUATE = "ai_screening:evaluate"
+
 # Vendor-scoped permissions.
 SUBMISSIONS_CREATE = "submissions:create"
 SUBMISSIONS_READ_OWN = "submissions:read_own"
@@ -72,6 +78,11 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     CLIENTS_UPDATE,
     ATS_READ,
     ATS_RESCORE,
+    AI_SCREENING_CREATE,
+    AI_SCREENING_READ,
+    AI_SCREENING_UPDATE,
+    AI_SCREENING_DELETE,
+    AI_SCREENING_EVALUATE,
     SUBMISSIONS_CREATE,
     SUBMISSIONS_READ_OWN,
 )

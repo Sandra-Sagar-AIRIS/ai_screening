@@ -183,6 +183,24 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("RESUME_GROK_INTELLIGENCE", "resume_grok_intelligence"),
     )
 
+    # OpenAI — AI Screening layer (GPT-4.1-mini)
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_API_KEY", "openai_api_key"),
+    )
+    openai_api_base: str = Field(
+        default="https://api.openai.com/v1",
+        validation_alias=AliasChoices("OPENAI_API_BASE", "openai_api_base"),
+    )
+    openai_screening_model: str = Field(
+        default="gpt-4.1-mini",
+        validation_alias=AliasChoices("OPENAI_SCREENING_MODEL", "openai_screening_model"),
+    )
+    openai_timeout_seconds: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("OPENAI_TIMEOUT_SECONDS", "openai_timeout_seconds"),
+    )
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",

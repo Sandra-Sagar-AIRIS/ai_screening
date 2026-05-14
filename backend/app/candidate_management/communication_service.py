@@ -18,6 +18,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, status
 from sqlalchemy import Select, select
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
@@ -624,7 +625,10 @@ class CommunicationService:
                     is_deleted=False,
                 )
             )
-        self.db.commit()
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
 
     def create_reminder(
         self,

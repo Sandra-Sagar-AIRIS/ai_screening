@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
@@ -39,6 +39,9 @@ import { getInterviews } from "@/lib/api/interviews";
 import { InterviewList } from "@/components/interviews/InterviewList";
 import { InterviewTimeline } from "@/components/interviews/InterviewTimeline";
 import { ScheduleInterviewModal } from "@/components/interviews/ScheduleInterviewModal";
+import { listScreenings, retryScreening } from "@/lib/api/ai_screening";
+import type { AIScreeningListItem } from "@/lib/api/types";
+import { StartScreeningModal } from "@/components/pipeline/StartScreeningModal";
 import { getJobs, submitCandidateToJob } from "@/lib/api/jobs";
 import { getPipelines, updatePipeline } from "@/lib/api/pipeline";
 import {
@@ -52,8 +55,47 @@ import type { Candidate, CandidateMatchEntry, Interview, Job, OrganizationUser, 
 import { getUsers } from "@/lib/api/users";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Mail, Phone, MapPin, Briefcase, Calendar, FileText, MessageSquare, Clock, ArrowLeft, Edit3, Save, X, Plus, User, Star, Sparkles, Layers, Activity, Brain, CornerDownLeft, Paperclip, Bold, Italic, Underline, List as ListIcon, ListOrdered, Link as LinkIcon, Search, ChevronDown, Maximize2, MoreVertical, ChevronLeft, ChevronRight, Copy, Filter, Image as ImageIcon, MoreHorizontal, CheckCircle2, Eye } from "lucide-react";
-import { Mail, Phone, MapPin, Briefcase, Calendar, FileText, Download, ExternalLink, MessageSquare, Clock, ArrowLeft, Edit3, Save, X, Plus, User, Star, Sparkles, Layers , Activity, Brain, CornerDownLeft, Paperclip, Bold, Italic, Underline, List as ListIcon, ListOrdered, Link as LinkIcon, Search, ChevronDown, Maximize2, MoreVertical, ChevronLeft, ChevronRight, Copy, Filter, Image as ImageIcon, MoreHorizontal, CheckCircle2, Eye } from "lucide-react";
+import {
+  Mail,
+  Phone,
+  MapPin,
+  Briefcase,
+  Calendar,
+  FileText,
+  MessageSquare,
+  Clock,
+  ArrowLeft,
+  Edit3,
+  Save,
+  X,
+  Plus,
+  User,
+  Star,
+  Sparkles,
+  Layers,
+  Activity,
+  Brain,
+  CornerDownLeft,
+  Paperclip,
+  Bold,
+  Italic,
+  Underline,
+  List as ListIcon,
+  ListOrdered,
+  Link as LinkIcon,
+  Search,
+  ChevronDown,
+  Maximize2,
+  MoreVertical,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Filter,
+  Image as ImageIcon,
+  MoreHorizontal,
+  CheckCircle2,
+  Eye,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { ATSRecommendationBadge } from "@/components/ats/ats-recommendation-badge";
@@ -139,6 +181,12 @@ export default function CandidateDetailPage() {
   const candidateLoadSeqRef = useRef(0);
   const templateEditorRef = useRef<HTMLTextAreaElement>(null);
   const atsSemanticInFlight = useMemo(() => atsAwaitingSemanticEnrichment(atsMatches), [atsMatches]);
+
+  // ── AI Screening state ─────────────────────────────────────────────────────
+  const [aiScreenings, setAiScreenings] = useState<AIScreeningListItem[]>([]);
+  const [aiScreeningsLoading, setAiScreeningsLoading] = useState(false);
+  const [showStartScreeningModal, setShowStartScreeningModal] = useState(false);
+  const [retryingScreeningId, setRetryingScreeningId] = useState<string | null>(null);
 
   const insertVariable = (variable: string) => {
     if (selectedTemplateId) return;
@@ -257,6 +305,21 @@ export default function CandidateDetailPage() {
         setYearsExperience(data.years_experience !== null && data.years_experience !== undefined ? String(data.years_experience) : "");
         setSelectedRecruiterId(data.recruiter_id ?? "");
         setError(null);
+
+        // Load AI screenings for this candidate (non-blocking, non-critical)
+        setAiScreeningsLoading(true);
+        listScreenings({ candidate_id: params.candidateId, limit: 50 })
+          .then((screenings) => {
+            if (loadSeq === candidateLoadSeqRef.current) {
+              setAiScreenings(screenings);
+            }
+          })
+          .catch(() => { /* screenings unavailable — don't block the rest of the page */ })
+          .finally(() => {
+            if (loadSeq === candidateLoadSeqRef.current) {
+              setAiScreeningsLoading(false);
+            }
+          });
       } catch (err) {
         if (err instanceof ApiError) {
           setError(err.message);
@@ -469,7 +532,7 @@ export default function CandidateDetailPage() {
   const currentPipeline = sortedPipelines[0];
   const stageLabel = currentPipeline ? formatPipelineStage(currentPipeline.stage).toUpperCase() : "NOT SUBMITTED";
   const eligiblePipelines = useMemo(
-    () => pipelines.filter((p) => ["screening", "interview", "offer", "placed"].includes(p.stage)),
+    () => pipelines.filter((p) => ["screening", "ai_screening", "interview", "offer", "placed"].includes(p.stage)),
     [pipelines]
   );
   const recruiterName = users.find((user) => user.id === candidate?.recruiter_id)?.email ?? candidate?.recruiter_id ?? "-";
@@ -2336,6 +2399,27 @@ export default function CandidateDetailPage() {
           onCreated={(interview) => {
             setInterviews((prev) => [interview, ...prev]);
             void refreshInterviewData();
+          }}
+        />
+      )}
+
+      {/* Start AI Screening modal */}
+      {showStartScreeningModal && candidate && (
+        <StartScreeningModal
+          candidateId={candidate.id}
+          candidateName={`${candidate.first_name} ${candidate.last_name}`}
+          jobId={currentPipeline?.job_id ?? undefined}
+          jobTitle={jobs.find((j) => j.id === currentPipeline?.job_id)?.title}
+          pipelineId={currentPipeline?.id ?? undefined}
+          onClose={() => setShowStartScreeningModal(false)}
+          onStarted={(screeningId) => {
+            setShowStartScreeningModal(false);
+            // Refresh screenings list
+            listScreenings({ candidate_id: candidate.id, limit: 50 })
+              .then((s) => setAiScreenings(s))
+              .catch(() => {});
+            // Open the screening workspace in a new tab
+            window.open(`/ai-screenings/${screeningId}`, "_blank");
           }}
         />
       )}

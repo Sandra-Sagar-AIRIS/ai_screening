@@ -1,6 +1,6 @@
 """Add communication hub tables for email integrations.
 
-Revision ID: 20260512_0001
+Revision ID: 20260512_comm_0001
 Revises: f29daa89b7cc
 Create Date: 2026-05-12
 """
@@ -14,7 +14,7 @@ from sqlalchemy.dialects import postgresql
 
 from app.core.config import get_settings
 
-revision: str = "20260512_0001"
+revision: str = "20260512_comm_0001"
 down_revision: str | None = "f29daa89b7cc"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 class PipelineStage(StrEnum):
     APPLIED = "applied"
     SCREENING = "screening"
+    AI_SCREENING = "ai_screening"
     INTERVIEW = "interview"
     OFFER = "offer"
     PLACED = "placed"

@@ -247,6 +247,7 @@ class WorkspaceResponse(BaseModel):
     participants: list[InterviewParticipantResponse]
     notes: list[NoteResponse]
     feedback_summary: FeedbackSummary | None
+    my_feedback: InterviewFeedbackResponse | None
 
 
 # ── Interviewer profiles ───────────────────────────────────────────────────
