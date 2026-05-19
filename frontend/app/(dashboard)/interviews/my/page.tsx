@@ -14,6 +14,16 @@ const ROUND_LABELS: Record<string, string> = {
   hr: "HR", technical: "Technical", managerial: "Managerial", final: "Final", ai_screening: "AI Screening",
 };
 
+// Defined outside the component so they are stable references and never
+// need to appear in useMemo dependency arrays.
+const ACTIVE_STATUSES = new Set([
+  "scheduled", "confirmed", "panel_confirmed", "in_progress",
+]);
+const TERMINAL_STATUSES = new Set([
+  "completed", "feedback_submitted", "feedback_pending",
+  "cancelled", "no_show",
+]);
+
 function MyInterviewCard({
   interview,
   job,
@@ -145,13 +155,19 @@ export default function MyInterviewsPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const now = new Date();
   const upcoming = useMemo(
-    () => interviews.filter((i) => new Date(i.scheduled_at) >= now && !["cancelled", "no_show"].includes(i.status)),
+    () => interviews.filter((i) => ACTIVE_STATUSES.has(i.status)),
     [interviews]
   );
   const past = useMemo(
-    () => interviews.filter((i) => new Date(i.scheduled_at) < now || ["cancelled", "no_show"].includes(i.status)),
+    () => interviews.filter(
+      (i) =>
+        i.status !== "feedback_pending" && (
+          TERMINAL_STATUSES.has(i.status) ||
+          // Catch any unknown statuses that are also time-expired
+          (!ACTIVE_STATUSES.has(i.status) && new Date(i.scheduled_at) < new Date())
+        )
+    ),
     [interviews]
   );
   const feedbackPending = useMemo(
@@ -235,9 +251,9 @@ export default function MyInterviewsPage() {
           <p className="text-sm font-medium text-gray-500">No interviews assigned to you yet</p>
           <p className="text-xs text-gray-400 mt-1">
             Visit the{" "}
-            <a href="/interviews/queue" className="text-[#FF5A1F] hover:underline">
+            <Link href="/interviews/queue" className="text-[#FF5A1F] hover:underline">
               interview queue
-            </a>{" "}
+            </Link>{" "}
             to claim one.
           </p>
         </div>
@@ -253,12 +269,12 @@ export default function MyInterviewsPage() {
           <Section
             title="Upcoming"
             icon={<Clock className="w-4 h-4 text-blue-500" />}
-            items={upcoming.filter((i) => i.status !== "feedback_pending")}
+            items={upcoming}
           />
           <Section
             title="Past Interviews"
             icon={<CheckCircle2 className="w-4 h-4 text-gray-400" />}
-            items={past.filter((i) => i.status !== "feedback_pending")}
+            items={past}
           />
         </>
       )}

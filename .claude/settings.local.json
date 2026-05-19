@@ -34,7 +34,11 @@
       "mcp__8044e41c-c61e-47ad-9cfc-9629e08e9831__getJiraProjectIssueTypesMetadata",
       "mcp__8044e41c-c61e-47ad-9cfc-9629e08e9831__searchJiraIssuesUsingJql",
       "mcp__8044e41c-c61e-47ad-9cfc-9629e08e9831__getVisibleJiraProjects",
-      "mcp__8044e41c-c61e-47ad-9cfc-9629e08e9831__createJiraIssue"
+      "mcp__8044e41c-c61e-47ad-9cfc-9629e08e9831__createJiraIssue",
+      "Bash(python3 -c ' *)",
+      "mcp__809f0415-9ce5-40bb-bfc7-e31f9d765ed7__editJiraIssue",
+      "mcp__809f0415-9ce5-40bb-bfc7-e31f9d765ed7__createJiraIssue",
+      "mcp__809f0415-9ce5-40bb-bfc7-e31f9d765ed7__transitionJiraIssue"
     ]
   }
 }

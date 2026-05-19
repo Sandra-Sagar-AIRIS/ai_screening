@@ -126,12 +126,7 @@ export default function JobDetailPage() {
   const params = useParams<{ jobId: string }>();
   const router = useRouter();
   const rawJobId = params?.jobId;
-  const jobIdParam =
-    typeof rawJobId === "string"
-      ? rawJobId.trim() || null
-      : Array.isArray(rawJobId)
-        ? rawJobId[0]?.trim() || null
-        : null;
+  const jobIdParam = rawJobId?.trim() || null;
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

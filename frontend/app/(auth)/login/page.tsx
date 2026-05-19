@@ -4,7 +4,7 @@ import { FormEvent, Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { login } from "@/lib/api/auth";
-import { ApiError } from "@/lib/api/client";
+import { formatApiErrorForUser } from "@/lib/api/client";
 import { useAuthStore } from "@/store/auth-store";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { PasswordField } from "@/components/auth/password-field";
@@ -42,11 +42,7 @@ function LoginForm() {
       setAuth(data.access_token, data.role, data.user_type, data.organization_id, data.permissions);
       router.push("/dashboard");
     } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.message);
-      } else {
-        setError("Unable to login. Please try again.");
-      }
+      setError(formatApiErrorForUser(err));
     } finally {
       setLoading(false);
     }
@@ -99,7 +95,7 @@ function LoginForm() {
           </Button>
 
           <p className="text-center text-[13px] text-gray-500 font-medium pt-2">
-            Don't have an account?{" "}
+            Don&apos;t have an account?{" "}
             <Link href="/signup" className="text-[#111827] hover:underline font-semibold transition-colors">
               Create an account
             </Link>

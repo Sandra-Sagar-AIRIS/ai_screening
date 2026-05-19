@@ -1,4 +1,25 @@
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+const DEFAULT_SERVER_API = "http://127.0.0.1:8000/api/v1";
+const DEFAULT_BROWSER_API = "/api/v1";
+
+/** REST base URL. Browser default uses same-origin `/api/v1` (proxied by Next in dev). */
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  (typeof window === "undefined" ? DEFAULT_SERVER_API : DEFAULT_BROWSER_API);
+
+/** WebSocket API base (always direct to backend when REST uses `/api/v1` proxy). */
+export function getWsApiBase(): string {
+  const explicit = process.env.NEXT_PUBLIC_WS_API_BASE_URL?.replace(/\/$/, "");
+  if (explicit) {
+    return explicit.replace(/^http/i, "ws");
+  }
+  const base = API_BASE_URL;
+  if (/^https?:\/\//i.test(base)) {
+    return base.replace(/^http/i, "ws");
+  }
+  const backend =
+    process.env.NEXT_PUBLIC_API_BACKEND_URL?.replace(/\/$/, "") ?? DEFAULT_SERVER_API;
+  return backend.replace(/^http/i, "ws");
+}
 
 // ---------------------------------------------------------------------------
 // Lightweight GET-request cache (prevents duplicate in-flight + re-render fetches)
@@ -131,6 +152,12 @@ function shouldSuppressApiErrorLog(path: string, status: number): boolean {
   if (status === 500 && /^\/candidate-management\/candidates\/[^/]+\/interviews(?:\?|$)/.test(path)) {
     return true;
   }
+  // LiveKit 503 means the feature isn't configured on this backend instance —
+  // this is an expected operational state, not a bug.  LiveKitRoom handles it
+  // gracefully by falling back to the companion panel.
+  if (status === 503 && /^\/interviews\/[^/]+\/livekit\/token(?:\?|$)/.test(path)) {
+    return true;
+  }
   return false;
 }
 
@@ -236,8 +263,9 @@ async function _fetchRaw<T>(path: string, options: RequestOptions): Promise<T> {
       throw new ApiError(message, 0, error);
     }
     const message =
-      "Cannot reach the API server. Verify backend is running and CORS/API base URL are correct.";
-    console.error(`[API Network Error] ${path}:`, error);
+      `Cannot reach the API at ${API_BASE_URL}${path}. ` +
+      "Start the backend (uvicorn on port 8000) and restart `npm run dev` if you changed .env.";
+    console.error(`[API Network Error] ${API_BASE_URL}${path}:`, error);
     throw new ApiError(message, 0, error);
   } finally {
     if (timeoutId !== undefined) {
@@ -254,11 +282,20 @@ async function _fetchRaw<T>(path: string, options: RequestOptions): Promise<T> {
       }
       window.location.replace("/login");
     }
+    // Read the body exactly once (streams can only be consumed once).
+    // Then try to parse as JSON; fall back to the raw string.
     let detail: unknown = null;
     try {
-      detail = await response.json();
+      const raw = await response.text();
+      if (raw) {
+        try {
+          detail = JSON.parse(raw);
+        } catch {
+          detail = raw;
+        }
+      }
     } catch {
-      detail = await response.text();
+      /* body unreadable — leave detail as null */
     }
     const message = toErrorMessage(detail, response.status);
     const expectedCandidateConflict =

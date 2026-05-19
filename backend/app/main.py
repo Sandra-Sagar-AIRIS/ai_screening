@@ -16,7 +16,9 @@ from app.routes.candidate import router as candidate_router
 from app.routes.client import router as client_router
 from app.routes.health import router as health_router
 from app.routes.interview import router as interview_router
+from app.routes.interview_copilot import router as interview_copilot_router
 from app.routes.ai_screening import router as ai_screening_router
+from app.websocket.copilot_ws import ws_router as copilot_ws_router
 from app.routes.invites import router as invites_router
 from app.routes.job import router as job_router
 from app.routes.me import router as me_router
@@ -27,6 +29,7 @@ from app.routes.application import router as application_router
 from app.routes.roles import router as roles_router
 from app.routes.users import router as users_router
 from app.routes.vendor import router as vendor_router
+from app.routes.dashboard import router as dashboard_router
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -207,10 +210,13 @@ app.include_router(pipeline_router, prefix="/api/v1")
 app.include_router(pipeline_singular_router, prefix="/api/v1")
 app.include_router(application_router, prefix="/api/v1")
 app.include_router(interview_router, prefix="/api/v1")
+app.include_router(interview_copilot_router, prefix="/api/v1")
+app.include_router(copilot_ws_router, prefix="/api/v1")
 app.include_router(ai_screening_router, prefix="/api/v1")
 app.include_router(invites_router, prefix="/api/v1/invites", tags=["invites"])
 app.include_router(permission_catalog_router, prefix="/api/v1")
 app.include_router(roles_router, prefix="/api/v1/roles", tags=["roles"])
 app.include_router(users_router, prefix="/api/v1/users", tags=["users"])
 app.include_router(vendor_router, prefix="/api/v1")
+app.include_router(dashboard_router, prefix="/api/v1")
 

@@ -42,6 +42,7 @@ _RECRUITER_DEFAULTS: tuple[str, ...] = (
     "interviews:feedback",
     "interviews:claim",
     "interviews:panel",
+    "interviews:copilot",
 )
 _CLIENT_DEFAULTS: tuple[str, ...] = (
     "jobs:read",

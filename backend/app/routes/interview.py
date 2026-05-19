@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import logging
+import traceback
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+_lk_log = logging.getLogger("airis.livekit")
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.dependencies import get_current_user, require_permission
 from app.core.permissions import (
     INTERVIEWS_CLAIM,
@@ -34,6 +40,7 @@ from app.schemas.interview import (
     WorkspaceResponse,
 )
 from app.services.interview_service import InterviewService
+from app.services.livekit_service import generate_token, get_room_name
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
 
@@ -382,3 +389,98 @@ def mark_no_show(
     svc = InterviewService(db)
     interview = svc.mark_no_show(interview_id, UUID(current_user.organization_id), current_user)
     return InterviewResponse.model_validate(interview)
+
+
+# ── LiveKit embedded meeting ──────────────────────────────────────────────
+
+class LiveKitTokenResponse(BaseModel):
+    token: str
+    ws_url: str
+    room_name: str
+    identity: str
+
+
+@router.post(
+    "/{interview_id}/livekit/token",
+    response_model=LiveKitTokenResponse,
+    summary="Generate a short-lived LiveKit access token for the embedded meeting room",
+)
+def get_livekit_token(
+    interview_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_READ))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> LiveKitTokenResponse:
+    """
+    Returns a signed LiveKit access token that grants the caller permission to
+    join the interview's dedicated LiveKit room.
+
+    Room name is deterministic: ``airis-interview-{interview_id}``.
+
+    Requires ``LIVEKIT_API_KEY``, ``LIVEKIT_API_SECRET``, and ``LIVEKIT_WS_URL``
+    in backend/.env.  Returns 503 if LiveKit is not configured.
+    """
+    settings = get_settings()
+    api_key = settings.livekit_api_key
+    api_secret = settings.livekit_api_secret
+    ws_url = settings.livekit_ws_url
+
+    missing = [
+        name
+        for name, val in [
+            ("LIVEKIT_API_KEY", api_key),
+            ("LIVEKIT_API_SECRET", api_secret),
+            ("LIVEKIT_WS_URL (or LIVEKIT_URL)", ws_url),
+        ]
+        if not val
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"LiveKit is not configured. Missing: {', '.join(missing)}. "
+                "Set these in backend/.env and restart the backend."
+            ),
+        )
+    if api_key is None or api_secret is None or ws_url is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LiveKit is not configured.",
+        )
+
+    # Verify the caller has access to this interview (org-scoped read is sufficient).
+    try:
+        svc = InterviewService(db)
+        svc.get_interview_by_id(interview_id, UUID(current_user.organization_id), current_user)
+    except HTTPException:
+        raise
+    except Exception:
+        _lk_log.error("[LiveKit] interview lookup failed:\n%s", traceback.format_exc())
+        raise
+
+    try:
+        room_name = get_room_name(interview_id)
+        identity = str(current_user.user_id)
+        display_name = (
+            getattr(current_user, "full_name", None)
+            or getattr(current_user, "name", None)
+            or getattr(current_user, "email", None)
+            or identity
+        )
+        token = generate_token(
+            api_key=api_key,
+            api_secret=api_secret,
+            room_name=room_name,
+            participant_identity=identity,
+            participant_name=display_name,
+        )
+    except Exception:
+        _lk_log.error("[LiveKit] token generation failed:\n%s", traceback.format_exc())
+        raise
+
+    return LiveKitTokenResponse(
+        token=token,
+        ws_url=ws_url,
+        room_name=room_name,
+        identity=identity,
+    )

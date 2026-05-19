@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -184,7 +184,7 @@ function CandidateCard({
           {semanticInsight ? (
             <div className="mt-4 p-3 rounded-xl bg-violet-50/40 border border-violet-100/30">
               <p className="line-clamp-2 text-[11px] leading-relaxed text-violet-600/90 italic" title={semanticInsight}>
-                "{semanticInsight}"
+                &ldquo;{semanticInsight}&rdquo;
               </p>
             </div>
           ) : aiEnrichmentStatus === "failed" ? (

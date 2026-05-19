@@ -133,7 +133,7 @@ export function CandidateContextPanel({
               <ScoreBar
                 key={key}
                 label={label}
-                value={(feedbackSummary as Record<string, number | null>)[key]}
+                value={(feedbackSummary as unknown as Record<string, number | null>)[key]}
               />
             ))}
             {feedbackSummary.avg_overall !== null && (

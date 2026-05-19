@@ -1,21 +1,32 @@
 /**
  * Meeting provider abstraction layer.
  *
- * Handles provider detection, embed URL transformation, and popup launch.
- * Designed to be extended with Daily.co, Twilio, Agora, or AIRIS-native
- * conferencing without touching call-site code.
+ * Defines provider metadata used by MeetingContainer to:
+ *   - display the correct brand name / colour
+ *   - decide whether to attempt iframe embedding
+ *   - transform a raw meeting_link into an embeddable URL
  *
- * Reality of iframe embedding:
- * - Google Meet: X-Frame-Options SAMEORIGIN → iframe blocked in cross-origin context → popup
- * - Microsoft Teams: X-Frame-Options DENY → iframe always blocked → popup
- * - Zoom web client (/wc/): no X-Frame-Options on some endpoints → iframe may work
- * - Generic/other: iframe attempted; fallback to popup on error
+ * NO popup logic lives here.  openMeetingPopup() has been removed entirely.
+ * MeetingContainer routes non-embeddable providers to the "external" mode
+ * which shows a plain <a href> link — no window.open, no popup windows.
+ *
+ * Provider embedding reality:
+ * ─────────────────────────────────────────────────────────────────────────
+ * google_meet  X-Frame-Options: SAMEORIGIN → can never be embedded cross-origin
+ * teams        X-Frame-Options: DENY       → can never be embedded
+ * zoom /wc/    No X-Frame-Options on some endpoints → iframe may work
+ * daily.co     Explicitly supports <iframe> embedding via prebuilt UI
+ * livekit      JS SDK — NOT an iframe, runs same-origin in React tree
+ * other        iframe attempted; falls back to external-link on block
+ * ─────────────────────────────────────────────────────────────────────────
  */
 
 export type MeetingProvider =
   | "google_meet"
   | "teams"
   | "zoom"
+  | "livekit"   // AIRIS-native embedded via LiveKit React SDK (not iframe)
+  | "daily"     // Daily.co — supports first-party <iframe> embedding
   | "other";
 
 export type ProviderConfig = {
@@ -25,60 +36,79 @@ export type ProviderConfig = {
   color: string;
   /** Light tint used for backgrounds. */
   bgColor: string;
-  /** Whether to attempt iframe embedding before falling back to popup. */
+  /**
+   * Whether to attempt iframe embedding.
+   * false → MeetingContainer shows external-link Companion Panel immediately.
+   * Note: "livekit" is also false here because it uses the JS SDK, not an iframe.
+   */
   canEmbed: boolean;
   /**
    * Transform the raw meeting_link into an embeddable URL.
    * Return null if no embed URL is possible.
    */
   getEmbedUrl: (url: string) => string | null;
-  popupWidth: number;
-  popupHeight: number;
 };
 
 const PROVIDER_CONFIGS: Record<MeetingProvider, ProviderConfig> = {
+  // ── AIRIS-native (fully embedded via JS SDK) ──────────────────────────
+  livekit: {
+    id: "livekit",
+    displayName: "AIRIS Meeting",
+    color: "#00b87a",
+    bgColor: "#e6f9f3",
+    // LiveKit uses the JS SDK — not an iframe.  canEmbed=false here so
+    // MeetingContainer doesn't try to iframe it; the "livekit" provider
+    // branch is handled separately before the iframe/external decision.
+    canEmbed: false,
+    getEmbedUrl: () => null,
+  },
+
+  // ── Future: Daily.co (first-party iframe support) ─────────────────────
+  daily: {
+    id: "daily",
+    displayName: "Daily.co",
+    color: "#1b4fff",
+    bgColor: "#e8eeff",
+    canEmbed: true,
+    getEmbedUrl: (url) => url,
+  },
+
+  // ── Third-party providers ─────────────────────────────────────────────
   google_meet: {
     id: "google_meet",
     displayName: "Google Meet",
     color: "#1a73e8",
     bgColor: "#e8f0fe",
-    // Google Meet sends X-Frame-Options: SAMEORIGIN; embedding from a
-    // different origin (airis.app) is blocked at the browser level.
+    // Google Meet sends X-Frame-Options: SAMEORIGIN; embedding from any
+    // cross-origin domain (including airis.app) is blocked at browser level.
+    // This is a hard security constraint — no workaround exists.
     canEmbed: false,
     getEmbedUrl: () => null,
-    popupWidth: 1280,
-    popupHeight: 800,
   },
   teams: {
     id: "teams",
     displayName: "Microsoft Teams",
     color: "#6264a7",
     bgColor: "#f0f0f9",
-    // Teams sends X-Frame-Options: DENY globally; no embed path exists
-    // without the Teams JavaScript SDK (requires tenant app registration).
+    // Teams sends X-Frame-Options: DENY globally.
     canEmbed: false,
     getEmbedUrl: () => null,
-    popupWidth: 1280,
-    popupHeight: 800,
   },
   zoom: {
     id: "zoom",
     displayName: "Zoom",
     color: "#2D8CFF",
     bgColor: "#e8f4ff",
-    // Zoom Web Client (/wc/) omits X-Frame-Options on some endpoints;
-    // embedding may work depending on account settings and browser policy.
+    // Zoom Web Client (/wc/) omits X-Frame-Options on some endpoints.
+    // Embedding may work depending on account settings; falls back to
+    // external-link panel if the browser blocks it.
     canEmbed: true,
     getEmbedUrl: (url) => {
-      // Already a web-client URL — use directly.
       if (/zoom\.us\/wc\//.test(url)) return url;
-      // Convert standard join URL → web client URL.
       const match = url.match(/zoom\.us\/j\/(\d+)/);
       if (match) return `https://zoom.us/wc/${match[1]}/join`;
       return null;
     },
-    popupWidth: 1280,
-    popupHeight: 800,
   },
   other: {
     id: "other",
@@ -87,56 +117,22 @@ const PROVIDER_CONFIGS: Record<MeetingProvider, ProviderConfig> = {
     bgColor: "#f1f5f9",
     canEmbed: true,
     getEmbedUrl: (url) => url,
-    popupWidth: 1280,
-    popupHeight: 800,
   },
 };
 
-/** Infer provider from meeting URL. */
+/** Infer the meeting provider from a URL. */
 export function detectProvider(url: string): MeetingProvider {
   if (!url) return "other";
   if (/meet\.google\.com/.test(url)) return "google_meet";
   if (/teams\.microsoft\.com|teams\.live\.com/.test(url)) return "teams";
   if (/zoom\.us/.test(url)) return "zoom";
+  // AIRIS-native LiveKit rooms (served under /room/ or containing livekit)
+  if (/\/room\/|livekit/.test(url)) return "livekit";
+  // Daily.co — *.daily.co domains
+  if (/\.daily\.co/.test(url)) return "daily";
   return "other";
 }
 
 export function getProviderConfig(provider: MeetingProvider): ProviderConfig {
   return PROVIDER_CONFIGS[provider];
-}
-
-/**
- * Open a meeting in a named popup window, centered on screen.
- * Reuses the same window handle if the window is still open (avoids orphan popups).
- */
-export function openMeetingPopup(
-  url: string,
-  provider: MeetingProvider,
-  existingWindow: Window | null = null,
-): Window | null {
-  // Reuse open popup rather than spawning a second one.
-  if (existingWindow && !existingWindow.closed) {
-    existingWindow.focus();
-    return existingWindow;
-  }
-
-  const { popupWidth, popupHeight } = PROVIDER_CONFIGS[provider];
-  const left = Math.round(window.screenX + (window.outerWidth - popupWidth) / 2);
-  const top = Math.round(window.screenY + (window.outerHeight - popupHeight) / 2);
-
-  return window.open(
-    url,
-    "airis_meeting_window",
-    [
-      `width=${popupWidth}`,
-      `height=${popupHeight}`,
-      `left=${left}`,
-      `top=${top}`,
-      "scrollbars=yes",
-      "resizable=yes",
-      "toolbar=no",
-      "menubar=no",
-      "location=yes",
-    ].join(","),
-  );
 }

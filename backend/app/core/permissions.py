@@ -26,6 +26,7 @@ INTERVIEWS_DELETE = "interviews:delete"
 INTERVIEWS_FEEDBACK = "interviews:feedback"
 INTERVIEWS_CLAIM = "interviews:claim"
 INTERVIEWS_PANEL = "interviews:panel"
+INTERVIEWS_COPILOT = "interviews:copilot"
 
 ORGANIZATION_MANAGE = "organization:manage"
 USERS_INVITE = "users:invite"
@@ -69,6 +70,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     INTERVIEWS_FEEDBACK,
     INTERVIEWS_CLAIM,
     INTERVIEWS_PANEL,
+    INTERVIEWS_COPILOT,
     ORGANIZATION_MANAGE,
     USERS_INVITE,
     USERS_UPDATE_ROLE,

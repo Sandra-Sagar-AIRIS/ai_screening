@@ -140,6 +140,7 @@ export default function InterviewWorkspacePage() {
           {/* Center — Meeting area (flex-1) */}
           <main className="flex-1 min-w-0 overflow-hidden bg-gray-50">
             <MeetingContainer
+              interviewId={interviewId}
               meetingUrl={interview.meeting_link}
               interviewStatus={interview.status}
               onMeetingStarted={handleMeetingStarted}
