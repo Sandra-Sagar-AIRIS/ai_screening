@@ -1,0 +1,6 @@
+{
+  "_comment": "PRD story numbers (1-54) to transition to Done after sync. Edit to match your org; empty list skips transitions.",
+  "story_numbers_done": [
+    14, 15, 16, 17, 27, 30, 47
+  ]
+}

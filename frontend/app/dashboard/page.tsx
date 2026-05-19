@@ -1,26 +1,10 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { formatApiErrorForUser } from "@/lib/api/client";
-import { getCandidates } from "@/lib/api/candidates";
-import { getJobs } from "@/lib/api/jobs";
-import { getPipelines } from "@/lib/api/pipeline";
+import { getDashboardSummary, DashboardSummary, DashboardActivityItem, DashboardRecentJob } from "@/lib/api/dashboard";
 import { useAuthStore } from "@/store/auth-store";
-import {
-  Users,
-  Briefcase,
-  Filter,
-  Trophy,
-  ChevronDown,
-  User,
-  Search,
-  Calendar,
-  Award,
-  FileText,
-  CheckCircle2,
-  MoreVertical
-} from "lucide-react";
-import { Candidate, Job, Pipeline } from "@/lib/api/types";
+import { Users, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function getRelativeTimeString(date: Date | number, lang = "en-US"): string {
@@ -34,59 +18,30 @@ function getRelativeTimeString(date: Date | number, lang = "en-US"): string {
   return rtf.format(Math.floor(deltaSeconds / divider), units[unitIndex]);
 }
 
-type ActivityItem = {
-  id: string;
-  type: 'candidate_stage' | 'job_created' | 'pipeline_created' | 'placement';
-  title: string;
-  subtitle: string;
-  timestamp: Date;
-};
-
-type DashboardData = {
-  candidates: Candidate[];
-  jobs: Job[];
-  pipelines: Pipeline[];
-};
-
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const permissions = useAuthStore((state) => state.permissions);
   const hydrated = useAuthStore((state) => state.hydrated);
 
-  const canReadCandidates = permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
-  const canReadJobs = permissions.includes("jobs:read") || permissions.includes("jobs:read_limited");
-  const canReadPipelines = permissions.includes("pipeline:read");
+  const hasAnyPermission =
+    permissions.includes("candidates:read") ||
+    permissions.includes("candidates:read_own") ||
+    permissions.includes("jobs:read") ||
+    permissions.includes("jobs:read_limited") ||
+    permissions.includes("pipeline:read");
 
   async function loadData(cancelledRef?: { cancelled: boolean }, isBackground = false) {
     if (!isBackground) setLoading(true);
     if (!isBackground) setError(null);
     try {
-      const [candidatesRes, jobsRes, pipelinesRes] = await Promise.allSettled([
-        canReadCandidates ? getCandidates(50, 0) : Promise.resolve([]),
-        canReadJobs ? getJobs(20, 0) : Promise.resolve([]),
-        canReadPipelines ? getPipelines(100, 0) : Promise.resolve([]),
-      ]);
-
+      const summary = await getDashboardSummary();
       if (cancelledRef?.cancelled) return;
-
-      const candidates = candidatesRes.status === "fulfilled" ? candidatesRes.value : [];
-      const jobs = jobsRes.status === "fulfilled" ? jobsRes.value : [];
-      const pipelines = pipelinesRes.status === "fulfilled" ? pipelinesRes.value : [];
-
-      setData({ candidates, jobs, pipelines });
-
-      if (
-        candidatesRes.status === "rejected" &&
-        jobsRes.status === "rejected" &&
-        pipelinesRes.status === "rejected"
-      ) {
-        setError("Unable to load dashboard.");
-      }
+      setData(summary);
     } catch (err: unknown) {
       if (!cancelledRef?.cancelled) {
-        setError(formatApiErrorForUser(err));
+        if (!isBackground) setError(formatApiErrorForUser(err));
       }
     } finally {
       if (!cancelledRef?.cancelled && !isBackground) {
@@ -101,100 +56,14 @@ export default function DashboardPage() {
     void loadData(cancelledRef, false);
     const interval = window.setInterval(() => {
       void loadData(cancelledRef, true);
-    }, 30000);
+    }, 30_000);
     return () => {
       cancelledRef.cancelled = true;
       window.clearInterval(interval);
     };
-  }, [hydrated, canReadCandidates, canReadJobs, canReadPipelines]);
+  }, [hydrated]);
 
-  const stats = useMemo(() => {
-    if (!data) return null;
-
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-
-    const activeJobs = data.jobs.filter(j => j.status === 'open');
-    const placements = data.pipelines.filter(p => p.stage === 'placed');
-    const inPipeline = data.pipelines.filter(p => p.status === 'active' && p.stage !== 'placed' && p.stage !== 'rejected');
-
-    const getTrend = (items: any[], dateField: string) => {
-      const recent = items.filter(item => new Date(item[dateField]) >= sevenDaysAgo).length;
-      const previous = items.filter(item => {
-        const d = new Date(item[dateField]);
-        return d >= fourteenDaysAgo && d < sevenDaysAgo;
-      }).length;
-      if (previous === 0) return recent > 0 ? 100 : 0;
-      return Math.round(((recent - previous) / previous) * 100);
-    };
-
-    const candidatesTrend = getTrend(data.candidates, 'created_at');
-    const jobsTrend = getTrend(data.jobs, 'created_at');
-    const pipelineTrend = getTrend(data.pipelines, 'created_at');
-    const placementsTrend = getTrend(placements, 'updated_at');
-
-    const pipelineStages = {
-      applied: data.pipelines.filter(p => p.stage === 'applied' && p.status === 'active').length,
-      screening: data.pipelines.filter(p => p.stage === 'screening' && p.status === 'active').length,
-      interview: data.pipelines.filter(p => p.stage === 'interview' && p.status === 'active').length,
-      assessment: 0,
-      offer: data.pipelines.filter(p => p.stage === 'offer' && p.status === 'active').length,
-      placed: placements.length,
-    };
-
-    const activities: ActivityItem[] = [];
-
-    data.pipelines.forEach(p => {
-      const candidate = data.candidates.find(c => c.id === p.candidate_id);
-      const job = data.jobs.find(j => j.id === p.job_id);
-      if (candidate && job) {
-        activities.push({
-          id: `p-${p.id}`,
-          type: p.stage === 'placed' ? 'placement' : 'candidate_stage',
-          title: `${candidate.first_name} ${candidate.last_name} → ${p.stage.charAt(0).toUpperCase() + p.stage.slice(1)}`,
-          subtitle: job.title,
-          timestamp: new Date(p.updated_at),
-        });
-      }
-    });
-
-    data.jobs.forEach(j => {
-      activities.push({
-        id: `j-${j.id}`,
-        type: 'job_created',
-        title: `New job created`,
-        subtitle: j.title,
-        timestamp: new Date(j.created_at),
-      });
-    });
-
-    activities.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-
-    // Sort jobs for recent jobs table
-    const recentJobsList = [...data.jobs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 3).map(job => ({
-      ...job,
-      candidateCount: data.pipelines.filter(p => p.job_id === job.id).length
-    }));
-
-    return {
-      totalCandidates: data.candidates.length,
-      candidatesTrend,
-      activeJobs: activeJobs.length,
-      jobsTrend,
-      inPipeline: inPipeline.length,
-      pipelineTrend,
-      placements: placements.length,
-      placementsTrend,
-      pipelineStages,
-      allActivities: activities,
-      recentJobsList,
-    };
-  }, [data]);
-
-  const showLimitedBanner = !canReadCandidates && !canReadJobs && !canReadPipelines;
-
-  if (showLimitedBanner) {
+  if (hydrated && !hasAnyPermission) {
     return (
       <section className="space-y-4">
         <div className="rounded-[24px] shadow-[0_2px_12px_rgba(0,0,0,0.03)] bg-white px-6 py-5 text-[14px] text-slate-800">
@@ -218,34 +87,15 @@ export default function DashboardPage() {
       {/* Main Left Column */}
       <div className="flex-1 space-y-8 min-w-0">
 
+        {/* KPI cards */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard
-            title="Total Candidates"
-            value={stats?.totalCandidates}
-            trend={stats?.candidatesTrend}
-            loading={loading}
-          />
-          <KpiCard
-            title="Active Jobs"
-            value={stats?.activeJobs}
-            trend={stats?.jobsTrend}
-            loading={loading}
-          />
-          <KpiCard
-            title="In Pipeline"
-            value={stats?.inPipeline}
-            trend={stats?.pipelineTrend}
-            loading={loading}
-          />
-          <KpiCard
-            title="Placements"
-            value={stats?.placements}
-            trend={stats?.placementsTrend}
-            loading={loading}
-          />
+          <KpiCard title="Total Candidates" value={data?.total_candidates} trend={data?.candidates_trend} loading={loading} />
+          <KpiCard title="Active Jobs"       value={data?.active_jobs}       trend={data?.jobs_trend}        loading={loading} />
+          <KpiCard title="In Pipeline"       value={data?.in_pipeline}       trend={data?.pipeline_trend}    loading={loading} />
+          <KpiCard title="Placements"        value={data?.placements}        trend={data?.placements_trend}  loading={loading} />
         </div>
 
-        {/* Hiring Pipeline */}
+        {/* Active Pipeline funnel */}
         <div className="space-y-4">
           <div className="flex items-center justify-between px-1">
             <h3 className="text-[16px] font-bold text-slate-900 tracking-tight">Active Pipeline</h3>
@@ -253,48 +103,19 @@ export default function DashboardPage() {
           </div>
 
           <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-6 relative overflow-hidden border border-slate-100/50">
-            {/* Dashed background connection line */}
             <div className="absolute top-[2.3rem] left-16 right-16 h-[1px] border-b border-dashed border-orange-200 z-0" />
-
             <div className="flex items-center justify-between relative z-10 w-full px-4">
-              <PipelineStage
-                title="Sourced"
-                value={stats?.pipelineStages.applied}
-                loading={loading}
-              />
-              <PipelineStage
-                title="Screening"
-                value={stats?.pipelineStages.screening}
-                loading={loading}
-              />
-              <PipelineStage
-                title="Interview"
-                value={stats?.pipelineStages.interview}
-                loading={loading}
-                highlight
-              />
-              <PipelineStage
-                title="Assessment"
-                value={stats?.pipelineStages.assessment}
-                loading={loading}
-                highlight
-              />
-              <PipelineStage
-                title="Offer"
-                value={stats?.pipelineStages.offer}
-                loading={loading}
-              />
-              <PipelineStage
-                title="Placed"
-                value={stats?.pipelineStages.placed}
-                loading={loading}
-                isSuccess
-              />
+              <PipelineStage title="Sourced"    value={data?.pipeline_stages.sourced}     loading={loading} />
+              <PipelineStage title="Screening"  value={data?.pipeline_stages.screening}   loading={loading} />
+              <PipelineStage title="Interview"  value={data?.pipeline_stages.interview}   loading={loading} highlight />
+              <PipelineStage title="Assessment" value={data?.pipeline_stages.assessment}  loading={loading} highlight />
+              <PipelineStage title="Offer"      value={data?.pipeline_stages.offer}       loading={loading} />
+              <PipelineStage title="Placed"     value={data?.pipeline_stages.placed}      loading={loading} isSuccess />
             </div>
           </div>
         </div>
 
-        {/* Recent Jobs Table */}
+        {/* Recent Jobs */}
         <div className="space-y-4">
           <div className="flex items-center justify-between px-1">
             <h3 className="text-[16px] font-bold text-slate-900 tracking-tight">Recent Jobs</h3>
@@ -311,49 +132,15 @@ export default function DashboardPage() {
               </div>
               <div className="divide-y divide-slate-100/60">
                 {loading ? (
-                  <div className="flex justify-center p-6"><span className="text-[12px] text-slate-400 font-medium">Loading jobs...</span></div>
-                ) : stats?.recentJobsList && stats.recentJobsList.length > 0 ? (
-                  stats.recentJobsList.map(job => {
-                    const isOpen = job.status === "open";
-                    return (
-                    <div key={job.id} className="grid grid-cols-12 px-5 py-4 items-center hover:bg-slate-50/80 transition-colors group cursor-pointer">
-                      <div className="col-span-6 flex flex-col gap-1.5 pr-4">
-                        <span className="text-[14px] font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors truncate">{job.title}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[12px] font-medium text-slate-500 truncate">{job.location || 'Remote'}</span>
-                          {job.employment_type && (
-                            <>
-                              <div className="w-1 h-1 rounded-full bg-slate-300" />
-                              <span className="text-[12px] font-medium text-slate-500 capitalize whitespace-nowrap">{job.employment_type.replace("_", " ")}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div className="col-span-2 flex items-center gap-2 text-slate-600">
-                        <Users className="w-4 h-4 text-slate-400" />
-                        <span className="text-[13px] font-bold">{(job as any).candidateCount}</span>
-                      </div>
-                      
-                      <div className="col-span-2">
-                        <span className={cn(
-                          "px-2.5 py-1 rounded-md text-[10px] font-bold inline-flex items-center gap-1.5 tracking-wider uppercase",
-                          isOpen ? "bg-emerald-50 text-emerald-600" : 
-                          job.status === "draft" ? "bg-slate-100 text-slate-500" : 
-                          "bg-blue-50 text-blue-600"
-                        )}>
-                          <div className={cn("w-1.5 h-1.5 rounded-full", isOpen ? "bg-emerald-500" : job.status === "draft" ? "bg-slate-400" : "bg-blue-500")} />
-                          {job.status}
-                        </span>
-                      </div>
-                      
-                      <div className="col-span-2 flex items-center justify-end pr-4 opacity-80 group-hover:opacity-100 transition-opacity">
-                        <span className="text-[12px] font-semibold text-slate-500 whitespace-nowrap">{getRelativeTimeString(new Date(job.created_at))}</span>
-                      </div>
-                    </div>
-                  )})
+                  <div className="flex justify-center p-6">
+                    <span className="text-[12px] text-slate-400 font-medium">Loading jobs...</span>
+                  </div>
+                ) : data?.recent_jobs && data.recent_jobs.length > 0 ? (
+                  data.recent_jobs.map((job) => <RecentJobRow key={job.id} job={job} />)
                 ) : (
-                  <div className="flex justify-center p-8"><span className="text-[13px] text-slate-400 font-medium">No recent jobs</span></div>
+                  <div className="flex justify-center p-8">
+                    <span className="text-[13px] text-slate-400 font-medium">No recent jobs</span>
+                  </div>
                 )}
               </div>
             </div>
@@ -372,15 +159,19 @@ export default function DashboardPage() {
         </div>
         <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white p-5 border border-slate-100/50 max-h-[340px] overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
           {loading ? (
-            <div className="flex justify-center p-6"><span className="text-[13px] text-slate-400 font-medium">Loading activity...</span></div>
-          ) : stats?.allActivities && stats.allActivities.length > 0 ? (
+            <div className="flex justify-center p-6">
+              <span className="text-[13px] text-slate-400 font-medium">Loading activity...</span>
+            </div>
+          ) : data?.activities && data.activities.length > 0 ? (
             <div className="space-y-6 pr-2">
-              {stats.allActivities.map((activity) => (
+              {data.activities.map((activity) => (
                 <ActivityRow key={activity.id} activity={activity} />
               ))}
             </div>
           ) : (
-            <div className="flex justify-center p-6"><span className="text-[13px] text-slate-400 font-medium">No recent activity</span></div>
+            <div className="flex justify-center p-6">
+              <span className="text-[13px] text-slate-400 font-medium">No recent activity</span>
+            </div>
           )}
         </div>
       </div>
@@ -389,11 +180,10 @@ export default function DashboardPage() {
   );
 }
 
+// ── Sub-components ────────────────────────────────────────────────────────────
+
 function KpiCard({
-  title,
-  value,
-  trend,
-  loading,
+  title, value, trend, loading,
 }: {
   title: string;
   value: number | undefined;
@@ -416,7 +206,7 @@ function KpiCard({
               <span className="text-slate-400">0%</span>
             ) : (
               <span className={isPositive ? "text-emerald-500" : "text-slate-400"}>
-                {isPositive ? '↑' : '↓'} {Math.abs(trend ?? 0)}%
+                {isPositive ? "↑" : "↓"} {Math.abs(trend ?? 0)}%
               </span>
             )}
           </div>
@@ -428,11 +218,7 @@ function KpiCard({
 }
 
 function PipelineStage({
-  title,
-  value,
-  loading,
-  highlight = false,
-  isSuccess = false,
+  title, value, loading, highlight = false, isSuccess = false,
 }: {
   title: string;
   value: number | undefined;
@@ -451,45 +237,82 @@ function PipelineStage({
         {display}
       </p>
       <div className="h-2 flex items-center justify-center">
-        {highlight && (
-          <div className="w-1.5 h-1.5 bg-purple-500 rounded-full"></div>
-        )}
-        {isSuccess && (
-          <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>
-        )}
+        {highlight && <div className="w-1.5 h-1.5 bg-purple-500 rounded-full" />}
+        {isSuccess && <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />}
       </div>
     </div>
   );
 }
 
-function ActivityRow({ activity }: { activity: ActivityItem }) {
-  let icon = <div className="w-2 h-2 rounded-full bg-slate-300"></div>;
+function RecentJobRow({ job }: { job: DashboardRecentJob }) {
+  const isOpen = job.status === "open";
+  return (
+    <div className="grid grid-cols-12 px-5 py-4 items-center hover:bg-slate-50/80 transition-colors group cursor-pointer">
+      <div className="col-span-6 flex flex-col gap-1.5 pr-4">
+        <span className="text-[14px] font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors truncate">{job.title}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] font-medium text-slate-500 truncate">{job.location || "Remote"}</span>
+          {job.employment_type && (
+            <>
+              <div className="w-1 h-1 rounded-full bg-slate-300" />
+              <span className="text-[12px] font-medium text-slate-500 capitalize whitespace-nowrap">
+                {job.employment_type.replace("_", " ")}
+              </span>
+            </>
+          )}
+        </div>
+      </div>
 
-  if (activity.type === 'job_created') {
-    icon = <div className="w-2 h-2 rounded-full bg-blue-500"></div>;
-  } else if (activity.type === 'candidate_stage') {
-    if (activity.title.includes('Assessment')) icon = <div className="w-2 h-2 rounded-full bg-pink-500"></div>;
-    else if (activity.title.includes('Interview')) icon = <div className="w-2 h-2 rounded-full bg-purple-500"></div>;
-    else if (activity.title.includes('Offer')) icon = <div className="w-2 h-2 rounded-full bg-blue-500"></div>;
-    else icon = <div className="w-2 h-2 rounded-full bg-[#FF5A1F]"></div>;
-  } else if (activity.type === 'placement') {
-    icon = <div className="w-2 h-2 rounded-full bg-emerald-500"></div>;
-  }
+      <div className="col-span-2 flex items-center gap-2 text-slate-600">
+        <Users className="w-4 h-4 text-slate-400" />
+        <span className="text-[13px] font-bold">{job.candidate_count}</span>
+      </div>
+
+      <div className="col-span-2">
+        <span className={cn(
+          "px-2.5 py-1 rounded-md text-[10px] font-bold inline-flex items-center gap-1.5 tracking-wider uppercase",
+          isOpen ? "bg-emerald-50 text-emerald-600" :
+          job.status === "draft" ? "bg-slate-100 text-slate-500" :
+          "bg-blue-50 text-blue-600"
+        )}>
+          <div className={cn(
+            "w-1.5 h-1.5 rounded-full",
+            isOpen ? "bg-emerald-500" : job.status === "draft" ? "bg-slate-400" : "bg-blue-500"
+          )} />
+          {job.status}
+        </span>
+      </div>
+
+      <div className="col-span-2 flex items-center justify-end pr-4 opacity-80 group-hover:opacity-100 transition-opacity">
+        <span className="text-[12px] font-semibold text-slate-500 whitespace-nowrap">
+          {getRelativeTimeString(new Date(job.created_at))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ActivityRow({ activity }: { activity: DashboardActivityItem }) {
+  let iconColor = "bg-slate-300";
+  if (activity.type === "job_created") iconColor = "bg-blue-500";
+  else if (activity.type === "placement") iconColor = "bg-emerald-500";
+  else if (activity.title.includes("Assessment")) iconColor = "bg-pink-500";
+  else if (activity.title.includes("Interview")) iconColor = "bg-purple-500";
+  else if (activity.title.includes("Offer")) iconColor = "bg-blue-500";
+  else iconColor = "bg-[#FF5A1F]";
 
   return (
     <div className="flex items-start gap-4 cursor-default group">
       <div className="pt-1.5 flex-shrink-0">
-        {icon}
+        <div className={cn("w-2 h-2 rounded-full", iconColor)} />
       </div>
       <div className="flex-1 min-w-0 flex flex-col gap-1.5">
         <p className="text-[14px] font-bold text-slate-900 tracking-tight truncate leading-tight group-hover:text-[#FF5A1F] transition-colors duration-300">
           {activity.title}
         </p>
-        <p className="text-[13px] font-medium text-slate-500 truncate">
-          {activity.subtitle}
-        </p>
+        <p className="text-[13px] font-medium text-slate-500 truncate">{activity.subtitle}</p>
         <p className="text-[12px] font-medium text-slate-400 mt-0.5">
-          {getRelativeTimeString(activity.timestamp)}
+          {getRelativeTimeString(new Date(activity.timestamp))}
         </p>
       </div>
     </div>

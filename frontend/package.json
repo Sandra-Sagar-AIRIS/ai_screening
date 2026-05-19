@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "clean": "node -e \"require('fs').rmSync('.next', {recursive:true, force:true})\"",
+    "dev": "npm run clean && next dev",
+    "build": "npm run clean && next build",
     "start": "next start",
     "lint": "next lint"
   },
@@ -12,6 +13,7 @@
     "@dnd-kit/core": "^6.3.1",
     "clsx": "^2.1.1",
     "docx-preview": "^0.3.7",
+    "livekit-client": "^2.19.0",
     "lucide-react": "^0.511.0",
     "next": "^15.3.0",
     "react": "^19.0.0",

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { ClipboardList, Settings2 } from "lucide-react";
+import { Bot, ClipboardList, Settings2 } from "lucide-react";
 import { NotesPanel } from "./NotesPanel";
 import { ControlsPanel } from "./ControlsPanel";
+import { CopilotPanel } from "@/components/interviews/copilot/CopilotPanel";
 import type { Interview, InterviewFeedback, InterviewNote, InterviewParticipant } from "@/lib/api/types";
 
-type Tab = "notes" | "controls";
+type Tab = "notes" | "controls" | "copilot";
 
 export function WorkspaceRightPanel({
   interviewId,
@@ -27,15 +28,27 @@ export function WorkspaceRightPanel({
   onScorecardOpen: () => void;
   onInterviewUpdated: (updated: Interview) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<Tab>("notes");
+  // Copilot is the primary tool during live interviews — open it first.
+  const [activeTab, setActiveTab] = useState<Tab>("copilot");
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tab bar */}
+      {/* Tab bar — order: Copilot | Notes | Controls */}
       <div className="flex shrink-0 border-b border-gray-200 bg-white">
         <button
+          onClick={() => setActiveTab("copilot")}
+          className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+            activeTab === "copilot"
+              ? "border-[#FF5A1F] text-[#FF5A1F]"
+              : "border-transparent text-gray-500 hover:text-gray-800"
+          }`}
+        >
+          <Bot className="w-3.5 h-3.5" />
+          Copilot
+        </button>
+        <button
           onClick={() => setActiveTab("notes")}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+          className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
             activeTab === "notes"
               ? "border-[#FF5A1F] text-[#FF5A1F]"
               : "border-transparent text-gray-500 hover:text-gray-800"
@@ -46,7 +59,7 @@ export function WorkspaceRightPanel({
         </button>
         <button
           onClick={() => setActiveTab("controls")}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+          className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
             activeTab === "controls"
               ? "border-[#FF5A1F] text-[#FF5A1F]"
               : "border-transparent text-gray-500 hover:text-gray-800"
@@ -61,6 +74,9 @@ export function WorkspaceRightPanel({
       <div className="flex-1 min-h-0 overflow-hidden">
         <div className={activeTab === "notes" ? "h-full p-4 overflow-y-auto" : "hidden"}>
           <NotesPanel interviewId={interviewId} initialNotes={initialNotes} />
+        </div>
+        <div className={activeTab === "copilot" ? "h-full overflow-hidden" : "hidden"}>
+          <CopilotPanel interviewId={interviewId} />
         </div>
         <div className={activeTab === "controls" ? "h-full p-4 overflow-y-auto" : "hidden"}>
           <ControlsPanel

@@ -241,7 +241,7 @@ function QuestionCard({
             <div className="space-y-2">
               <label className="text-xs font-medium text-gray-600">
                 Candidate Answer
-                <span className="text-gray-400 font-normal ml-1">(enter the candidate's response)</span>
+                <span className="text-gray-400 font-normal ml-1">(enter the candidate&apos;s response)</span>
               </label>
               <textarea
                 value={answerText}
@@ -255,7 +255,6 @@ function QuestionCard({
                   {saving ? "Saving…" : saved ? "✓ Saved" : "Auto-saves after typing"}
                 </span>
                 <Button
-                  size="sm"
                   variant="outline"
                   className="h-7 gap-1.5 text-xs"
                   onClick={handleManualSave}
@@ -565,7 +564,7 @@ export default function ScreeningDetailPage() {
     return (
       <div className="p-6">
         <p className="text-red-600">{error ?? "Screening not found"}</p>
-        <Button variant="link" onClick={() => router.push("/ai-screenings")}>← Back</Button>
+        <Button variant="ghost" onClick={() => router.push("/ai-screenings")}>← Back</Button>
       </div>
     );
   }
@@ -588,7 +587,7 @@ export default function ScreeningDetailPage() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/ai-screenings">
-              <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-gray-600">
+              <Button variant="ghost" className="h-8 gap-1.5 text-gray-600">
                 <ArrowLeft className="w-4 h-4" />
                 All Screenings
               </Button>
@@ -609,8 +608,7 @@ export default function ScreeningDetailPage() {
             </span>
             <Button
               variant="outline"
-              size="sm"
-              onClick={load}
+                            onClick={load}
               className="h-8 gap-1.5"
             >
               <RefreshCw className="w-3.5 h-3.5" />
@@ -693,8 +691,7 @@ export default function ScreeningDetailPage() {
                   </p>
                 </div>
                 <Button
-                  size="sm"
-                  variant="outline"
+                                    variant="outline"
                   className="border-red-300 text-red-600 hover:bg-red-50 shrink-0"
                   onClick={handleRegenerate}
                   disabled={actionLoading}
@@ -716,8 +713,7 @@ export default function ScreeningDetailPage() {
                 </div>
                 {canEvaluate && (
                   <Button
-                    size="sm"
-                    className="bg-orange-600 hover:bg-orange-700 text-white gap-1.5 h-8"
+                                        className="bg-orange-600 hover:bg-orange-700 text-white gap-1.5 h-8"
                     onClick={handleEvaluate}
                     disabled={actionLoading}
                   >
@@ -758,8 +754,7 @@ export default function ScreeningDetailPage() {
                   {!isComplete && (
                     <Button
                       variant="outline"
-                      size="sm"
-                      className="h-7 gap-1.5 text-xs"
+                                            className="h-7 gap-1.5 text-xs"
                       onClick={handleRegenerate}
                       disabled={actionLoading || isTransient}
                     >
@@ -886,8 +881,7 @@ export default function ScreeningDetailPage() {
                       <Button
                         key={stage}
                         variant="outline"
-                        size="sm"
-                        className={`h-8 text-xs font-medium ${color} ${pipeline.stage === stage ? "opacity-40 cursor-not-allowed" : ""}`}
+                                                className={`h-8 text-xs font-medium ${color} ${pipeline.stage === stage ? "opacity-40 cursor-not-allowed" : ""}`}
                         disabled={movingStage || pipeline.stage === stage}
                         onClick={() => handleMoveStage(stage)}
                       >

@@ -700,3 +700,89 @@ export type StartScreeningPayload = {
   move_pipeline_stage?: boolean;
   pipeline_id?: string | null;
 };
+
+// ── AI Interview Copilot domain ───────────────────────────────────────
+
+export type CopilotSessionStatus = "active" | "completed" | "summarized";
+export type SuggestionType =
+  | "follow_up"
+  | "clarification"
+  | "skill_gap"
+  | "deep_dive"
+  | "closing";
+export type TranscriptSpeaker = "interviewer" | "candidate" | "unknown";
+
+export type CopilotSession = {
+  id: string;
+  organization_id: string;
+  interview_id: string;
+  status: CopilotSessionStatus;
+  summary: Record<string, unknown> | null;
+  skills_covered: Record<string, boolean> | null;
+  prompt_tokens_used: number;
+  completion_tokens_used: number;
+  created_at: string;
+  updated_at: string;
+  summarized_at: string | null;
+};
+
+export type TranscriptSegment = {
+  id: string;
+  session_id: string;
+  interview_id: string;
+  speaker: TranscriptSpeaker;
+  content: string;
+  offset_ms: number | null;
+  duration_ms: number | null;
+  source: string;
+  created_at: string;
+};
+
+export type TranscriptSegmentPayload = {
+  speaker?: TranscriptSpeaker;
+  content: string;
+  offset_ms?: number | null;
+  duration_ms?: number | null;
+  source?: string;
+};
+
+export type AISuggestion = {
+  id: string;
+  session_id: string;
+  interview_id: string;
+  suggestion_type: SuggestionType;
+  question_text: string;
+  rationale: string | null;
+  target_skills: string[] | null;
+  difficulty: "easy" | "medium" | "hard" | null;
+  used: boolean;
+  used_at: string | null;
+  dismissed: boolean;
+  created_at: string;
+};
+
+export type SuggestRequestPayload = {
+  context_hint?: string | null;
+  suggestion_types?: SuggestionType[] | null;
+  count?: number;
+};
+
+export type SuggestionMarkPayload = {
+  used?: boolean;
+  dismissed?: boolean;
+};
+
+export type CopilotWsEventType =
+  | "transcript_added"
+  | "suggestion_ready"
+  | "summary_ready"
+  | "session_updated"
+  | "error"
+  | "ping"
+  | "pong";
+
+export type CopilotWsEvent = {
+  type: CopilotWsEventType;
+  data: Record<string, unknown>;
+  ts: string;
+};

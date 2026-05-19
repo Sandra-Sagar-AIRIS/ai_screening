@@ -201,6 +201,43 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OPENAI_TIMEOUT_SECONDS", "openai_timeout_seconds"),
     )
 
+    # ── LiveKit embedded video conferencing ──────────────────────────────────
+    # LiveKit Cloud: https://cloud.livekit.io  (free tier available)
+    # Self-hosted:   set LIVEKIT_WS_URL to wss://your-server
+    livekit_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LIVEKIT_API_KEY", "livekit_api_key"),
+    )
+    livekit_api_secret: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LIVEKIT_API_SECRET", "livekit_api_secret"),
+    )
+    # WebSocket URL for the LiveKit server, e.g. wss://your-project.livekit.cloud
+    # Accepts both LIVEKIT_WS_URL (canonical) and LIVEKIT_URL (common shorthand).
+    livekit_ws_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "LIVEKIT_WS_URL",
+            "LIVEKIT_URL",
+            "livekit_ws_url",
+            "livekit_url",
+        ),
+    )
+
+    # AI Interview Copilot feature flag and settings
+    copilot_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("COPILOT_ENABLED", "copilot_enabled"),
+    )
+    copilot_model: str = Field(
+        default="gpt-4.1-mini",
+        validation_alias=AliasChoices("COPILOT_MODEL", "copilot_model"),
+    )
+    assemblyai_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ASSEMBLYAI_API_KEY", "assemblyai_api_key"),
+    )
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
@@ -219,6 +256,20 @@ class Settings(BaseSettings):
                     "postgresql+psycopg://",
                     1,
                 )
+
+            # Supabase session-mode pooler (port 5432) caps at 15 concurrent
+            # connections — SQLAlchemy's own pool exhausts that quota instantly.
+            # Automatically switch to transaction-mode pooler (port 6543) so
+            # pgBouncer multiplexes many clients over a small set of real PG
+            # connections.  NullPool is set in db/session.py when this rewrite
+            # fires, so SQLAlchemy never holds connections between requests.
+            if "pooler.supabase.com:5432" in self.database_url:
+                self.database_url = self.database_url.replace(
+                    "pooler.supabase.com:5432",
+                    "pooler.supabase.com:6543",
+                    1,
+                )
+
             return self
 
         if self.supabase_url:
