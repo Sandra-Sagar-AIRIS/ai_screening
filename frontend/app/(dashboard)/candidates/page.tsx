@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { ApiError } from "@/lib/api/client";
 import {
@@ -14,14 +14,17 @@ import {
   createBulkUploadJob,
   createCandidate,
   getBulkUploadJobStatus,
-  getCandidates,
+  getCandidatesPage,
+  isDefaultCandidatesListFilters,
+  readCachedCandidatesListPage,
+  writeCachedCandidatesListPage,
   type CandidateManagementParseResult,
   type BulkUploadJobStatus,
   type CandidateInteraction,
   updateCandidate,
   uploadResumeForReview,
 } from "@/lib/api/candidates";
-import { getJobs, submitCandidateToJob } from "@/lib/api/jobs";
+import { getJobsForSelect, submitCandidateToJob } from "@/lib/api/jobs";
 import { getPipelines } from "@/lib/api/pipeline";
 import type { Candidate, Job, OrganizationUser, Pipeline } from "@/lib/api/types";
 import { getUsers } from "@/lib/api/users";
@@ -30,7 +33,7 @@ import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Users, UserPlus, Search, Calendar, Eye, FileText, ArchiveRestore, MoreVertical, Trash2 } from "lucide-react";
+import { Users, UserPlus, Search, Calendar, Eye, FileText, ArchiveRestore, MoreVertical, Trash2, ChevronDown } from "lucide-react";
 
 type AddMode = "manual" | "resume" | "csv";
 
@@ -52,13 +55,31 @@ type SlotDraft = {
   note: string;
 };
 
+type CandidateCreatedAtSort = "newest" | "oldest";
+
+const CREATED_AT_SORT_OPTIONS: { value: CandidateCreatedAtSort; label: string }[] = [
+  { value: "newest", label: "Newest" },
+  { value: "oldest", label: "Oldest" },
+];
+
+function compareCandidatesByCreatedAt(a: Candidate, b: Candidate, sort: CandidateCreatedAtSort): number {
+  const aTime = new Date(a.created_at).getTime();
+  const bTime = new Date(b.created_at).getTime();
+  if (Number.isNaN(aTime) || Number.isNaN(bTime)) {
+    return 0;
+  }
+  return sort === "newest" ? bTime - aTime : aTime - bTime;
+}
+
 export default function CandidatesPage() {
   const router = useRouter();
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>(
+    () => readCachedCandidatesListPage()?.candidates ?? []
+  );
   const [jobs, setJobs] = useState<Job[]>([]);
   const [users, setUsers] = useState<OrganizationUser[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(() => readCachedCandidatesListPage() === null);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [creating, setCreating] = useState(false);
@@ -86,6 +107,8 @@ export default function CandidatesPage() {
   const [timezone, setTimezone] = useState("Asia/Kolkata");
   const [slots, setSlots] = useState<SlotDraft[]>([{ startAt: "", note: "" }]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const searchDebounceBootstrappedRef = useRef(false);
   const [locationFilter, setLocationFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "archived" | "deleted">("all");
   const [stageFilter, setStageFilter] = useState<
@@ -93,8 +116,7 @@ export default function CandidatesPage() {
   >("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | "manual" | "resume_upload" | "bulk_upload" | "referral" | "agency">("all");
   const [experienceFilter, setExperienceFilter] = useState("");
-  const [sortBy, setSortBy] = useState<"updated_at" | "first_name" | "years_experience">("updated_at");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [createdAtSort, setCreatedAtSort] = useState<CandidateCreatedAtSort>("newest");
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [bulkRecruiterId, setBulkRecruiterId] = useState("");
@@ -112,6 +134,11 @@ export default function CandidatesPage() {
   const [noteLoading, setNoteLoading] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(
+    () => readCachedCandidatesListPage()?.total_count ?? 0
+  );
+  const [loadingMore, setLoadingMore] = useState(false);
+  const CANDIDATES_PAGE_SIZE = 50;
 
 
 
@@ -120,42 +147,104 @@ export default function CandidatesPage() {
     console.info("[candidate-module]", eventName, payload ?? {});
   }
 
-  const loadCandidates = useCallback(async (opts?: { query?: string; location?: string }) => {
-    setLoading(true);
-    try {
-      // Run candidates + pipelines in parallel — neither depends on the other.
-      const [candidatesResult, pipelinesResult] = await Promise.allSettled([
-        getCandidates(50, 0, {
-          query: opts?.query || undefined,
-          location: opts?.location || undefined,
-          status: statusFilter === "all" ? undefined : statusFilter,
-          source: sourceFilter === "all" ? undefined : sourceFilter,
-          min_years_experience: experienceFilter.trim() ? Number(experienceFilter) : undefined,
-          job_id: selectedJobId || undefined,
-        }),
-        getPipelines(200, 0),
-      ]);
+  const listFilters = useCallback(
+    (opts?: { query?: string; location?: string }) => ({
+      query: opts?.query || undefined,
+      location: opts?.location || undefined,
+      status: statusFilter === "all" ? undefined : statusFilter,
+      source: sourceFilter === "all" ? undefined : sourceFilter,
+      min_years_experience: experienceFilter.trim() ? Number(experienceFilter) : undefined,
+      job_id: selectedJobId || undefined,
+    }),
+    [experienceFilter, selectedJobId, sourceFilter, statusFilter]
+  );
 
-      if (candidatesResult.status === "fulfilled") {
-        setCandidates(candidatesResult.value);
-        setError(null);
-      } else {
-        const err = candidatesResult.reason;
-        setError(err instanceof ApiError ? err.message : "Unable to load candidates");
-      }
-      setPipelines(pipelinesResult.status === "fulfilled" ? pipelinesResult.value : []);
-    } finally {
-      setLoading(false);
+  const loadPipelinesForList = useCallback(async () => {
+    try {
+      const pipelineData = await getPipelines(100, 0);
+      setPipelines(pipelineData);
+    } catch {
+      setPipelines([]);
     }
-  }, [experienceFilter, selectedJobId, sourceFilter, stageFilter, statusFilter]);
+  }, []);
+
+  const loadCandidates = useCallback(async (opts?: { query?: string; location?: string; silent?: boolean }) => {
+    const filters = listFilters(opts);
+    const canUseSessionCache = isDefaultCandidatesListFilters(filters);
+    const hasSearch = Boolean(opts?.query?.trim() || opts?.location?.trim());
+
+    if (!opts?.silent && hasSearch) {
+      setSearching(true);
+    }
+
+    if (canUseSessionCache) {
+      const cached = readCachedCandidatesListPage();
+      if (cached) {
+        setCandidates(cached.candidates);
+        setTotalCount(cached.total_count);
+        setListLoading(false);
+      } else {
+        setListLoading(true);
+      }
+    } else {
+      setListLoading(true);
+    }
+
+    void loadPipelinesForList();
+
+    try {
+      const page = await getCandidatesPage(CANDIDATES_PAGE_SIZE, 0, filters);
+      setCandidates(page.candidates);
+      setTotalCount(page.total_count);
+      if (canUseSessionCache) {
+        writeCachedCandidatesListPage(page);
+      }
+      setError(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Unable to load candidates");
+    } finally {
+      setListLoading(false);
+      setSearching(false);
+    }
+  }, [listFilters, loadPipelinesForList]);
+
+  const loadCandidatesRef = useRef(loadCandidates);
+  loadCandidatesRef.current = loadCandidates;
+
+  const loadMoreCandidates = useCallback(async () => {
+    if (loadingMore || candidates.length >= totalCount) {
+      return;
+    }
+    setLoadingMore(true);
+    try {
+      const page = await getCandidatesPage(CANDIDATES_PAGE_SIZE, candidates.length, listFilters({
+        query: searchQuery.trim() || undefined,
+        location: locationFilter.trim() || undefined,
+      }));
+      setCandidates((prev) => {
+        const seen = new Set(prev.map((item) => item.id));
+        const merged = [...prev];
+        for (const item of page.candidates) {
+          if (!seen.has(item.id)) {
+            seen.add(item.id);
+            merged.push(item);
+          }
+        }
+        return merged;
+      });
+      setTotalCount(page.total_count);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Unable to load more candidates");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [candidates.length, listFilters, loadingMore, locationFilter, searchQuery, totalCount]);
 
   async function loadJobs() {
     setLoadingJobs(true);
     try {
-      const data = await getJobs(200, 0);
+      const data = await getJobsForSelect(100, 0);
       setJobs(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load jobs");
     } finally {
       setLoadingJobs(false);
     }
@@ -227,6 +316,7 @@ export default function CandidatesPage() {
       setPipelines([]);
       setJobs([]);
       setUsers([]);
+      setListLoading(false);
       setError("Forbidden: insufficient permissions.");
       return;
     }
@@ -234,10 +324,30 @@ export default function CandidatesPage() {
     if (jobIdFromQuery) {
       setSelectedJobId(jobIdFromQuery);
     }
-    void loadCandidates();
+    void loadCandidatesRef.current();
     void loadJobs();
     void loadUsers();
-  }, [canReadCandidates, loadCandidates, searchParams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount / query change only; filter apply calls loadCandidates explicitly
+  }, [canReadCandidates, searchParams]);
+
+  const SEARCH_DEBOUNCE_MS = 300;
+
+  useEffect(() => {
+    if (!canReadCandidates) {
+      return;
+    }
+    if (!searchDebounceBootstrappedRef.current) {
+      searchDebounceBootstrappedRef.current = true;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void loadCandidatesRef.current({
+        query: searchQuery.trim() || undefined,
+        location: locationFilter.trim() || undefined,
+      });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [canReadCandidates, searchQuery, locationFilter]);
 
   async function handleCreateCandidate() {
     if (!requireJobSelection()) return;
@@ -495,25 +605,6 @@ export default function CandidatesPage() {
       ? candidates.filter((candidate) => candidate.source === "bulk_upload" || candidate.source === "import") 
       : [...candidates];
     
-    // Global search filtering (local)
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      data = data.filter((c) => {
-        const pipeline = pipelineByCandidate.get(c.id);
-        const job = jobs.find((j) => j.id === pipeline?.job_id);
-        const jobTitle = job?.title?.toLowerCase() || "";
-        
-        return (
-          c.first_name.toLowerCase().includes(q) ||
-          c.last_name.toLowerCase().includes(q) ||
-          (c.email || "").toLowerCase().includes(q) ||
-          (c.location || "").toLowerCase().includes(q) ||
-          (c.role || "").toLowerCase().includes(q) ||
-          jobTitle.includes(q)
-        );
-      });
-    }
-
     if (locationFilter.trim()) {
       const loc = locationFilter.trim().toLowerCase();
       data = data.filter((c) => (c.location || "").toLowerCase().includes(loc));
@@ -544,24 +635,13 @@ export default function CandidatesPage() {
       });
     }
 
-    data.sort((a, b) => {
-      let result = 0;
-      if (sortBy === "first_name") {
-        result = `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
-      } else if (sortBy === "years_experience") {
-        result = (a.years_experience ?? -1) - (b.years_experience ?? -1);
-      } else {
-        result = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
-      }
-      return sortDirection === "asc" ? result : -result;
-    });
+    const sort = createdAtSort === "oldest" ? "oldest" : "newest";
+    data.sort((a, b) => compareCandidatesByCreatedAt(a, b, sort));
     return data;
   }, [
     candidates,
-    sortBy,
-    sortDirection,
+    createdAtSort,
     viewImportedOnly,
-    searchQuery,
     locationFilter,
     statusFilter,
     sourceFilter,
@@ -575,6 +655,7 @@ export default function CandidatesPage() {
     await loadCandidates({
       query: searchQuery.trim() || undefined,
       location: locationFilter.trim() || undefined,
+      silent: false,
     });
   }
 
@@ -585,8 +666,7 @@ export default function CandidatesPage() {
     setStageFilter("all");
     setSourceFilter("all");
     setExperienceFilter("");
-    setSortBy("updated_at");
-    setSortDirection("desc");
+    setCreatedAtSort("newest");
     setSelectedJobId("");
     void loadCandidates();
   }
@@ -863,7 +943,13 @@ export default function CandidatesPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && void handleSearchApply()}
+                aria-busy={searching}
               />
+              {searching ? (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-slate-400">
+                  Searching…
+                </span>
+              ) : null}
             </div>
             <button 
               className={`flex items-center gap-2 px-4 h-11 rounded-2xl border transition-all text-[13px] font-semibold ${showFilters ? 'bg-slate-50 border-slate-300 text-slate-900 shadow-inner' : 'bg-white border-slate-200/80 text-slate-600 hover:text-slate-900 hover:bg-slate-50 shadow-[0_2px_8px_rgba(0,0,0,0.02)]'}`}
@@ -874,6 +960,31 @@ export default function CandidatesPage() {
               </svg>
               Filters
             </button>
+            <div className="relative shrink-0">
+              <label className="sr-only" htmlFor="candidate-created-at-sort">
+                Sort candidates by creation date
+              </label>
+              <select
+                id="candidate-created-at-sort"
+                className="appearance-none flex items-center gap-2 pl-4 pr-9 h-11 rounded-2xl border border-slate-200/80 bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-50 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all text-[13px] font-semibold cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#FF5A1F]/15 focus:border-[#FF5A1F]/30"
+                value={createdAtSort}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === "newest" || value === "oldest") {
+                    setCreatedAtSort(value);
+                    return;
+                  }
+                  setCreatedAtSort("newest");
+                }}
+              >
+                {CREATED_AT_SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    Sort: {option.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
+            </div>
           </div>
           {canCreate && (
             <Link href="/candidates/create">
@@ -950,30 +1061,7 @@ export default function CandidatesPage() {
                     onChange={(e) => setExperienceFilter(e.target.value)}
                   />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Sort By</label>
-                  <select
-                    className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm bg-white"
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as any)}
-                  >
-                    <option value="updated_at">Last Edited Date</option>
-                    <option value="first_name">Name</option>
-                    <option value="years_experience">Experience</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold uppercase text-slate-500 ml-1">Order</label>
-                  <select
-                    className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm bg-white"
-                    value={sortDirection}
-                    onChange={(e) => setSortDirection(e.target.value as any)}
-                  >
-                    <option value="desc">Descending</option>
-                    <option value="asc">Ascending</option>
-                  </select>
-                </div>
-                <div className="flex items-end gap-2">
+                <div className="flex items-end gap-2 md:col-span-2">
                   <Button className="flex-1 bg-indigo-600 hover:bg-indigo-700" onClick={handleSearchApply}>Apply Filters</Button>
                   <Button variant="outline" onClick={handleResetFilters}>Reset</Button>
                 </div>
@@ -1019,9 +1107,15 @@ export default function CandidatesPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedCandidates.length === 0 ? (
+                {listLoading && candidates.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-20 text-center text-slate-400">
+                    <td colSpan={9} className="py-20 text-center text-slate-400">
+                      <p className="text-lg font-medium">Loading candidates...</p>
+                    </td>
+                  </tr>
+                ) : sortedCandidates.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-20 text-center text-slate-400">
                       <p className="text-lg font-medium">No candidates found</p>
                       <p className="text-sm">Try adjusting your filters or search query</p>
                     </td>
@@ -1207,6 +1301,13 @@ export default function CandidatesPage() {
           </div>
         </div>
       </div>
+      {candidates.length < totalCount ? (
+        <div className="flex items-center justify-center py-3">
+          <Button variant="outline" disabled={loadingMore} onClick={() => void loadMoreCandidates()}>
+            {loadingMore ? "Loading..." : `Load more (${candidates.length} of ${totalCount})`}
+          </Button>
+        </div>
+      ) : null}
       {submitModalCandidateId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl">

@@ -5,9 +5,10 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Select, and_, delete, func, or_, select, update
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import Select, and_, delete, exists, func, or_, select, update
+from sqlalchemy.orm import Session, defer, noload, selectinload
 
+from app.candidate_management.search import build_candidate_text_search_filter
 from app.candidate_management.models import (
     BulkUploadItem,
     BulkUploadItemStatus,
@@ -24,6 +25,7 @@ from app.candidate_management.models import (
 
 @dataclass(slots=True)
 class CandidateSearchFilters:
+    text_query: str | None = None
     skills: list[str] | None = None
     location: str | None = None
     min_years_experience: int | None = None
@@ -32,7 +34,18 @@ class CandidateSearchFilters:
     stage: str | None = None
     source: CandidateSource | None = None
     job_id: UUID | None = None
+    candidate_ids: list[UUID] | None = None
     include_deleted: bool = False
+
+
+def _list_query_options(*, load_skills: bool) -> list[Any]:
+    """Keep list queries light: omit parsed_resume_data and skills unless needed."""
+    options: list[Any] = [defer(Candidate.parsed_resume_data)]
+    if load_skills:
+        options.append(selectinload(Candidate.skills))
+    else:
+        options.append(noload(Candidate.skills))
+    return options
 
 
 class CandidateRepository:
@@ -57,6 +70,7 @@ class CandidateRepository:
         candidate_ids: list[UUID],
         include_deleted: bool = False,
         with_skills: bool = True,
+        list_mode: bool = False,
         for_update: bool = False,
     ) -> list[Candidate]:
         if not candidate_ids:
@@ -68,7 +82,9 @@ class CandidateRepository:
         )
         if not include_deleted:
             stmt = stmt.where(Candidate.deleted_at.is_(None))
-        if with_skills:
+        if list_mode:
+            stmt = stmt.options(*_list_query_options(load_skills=with_skills))
+        elif with_skills:
             stmt = stmt.options(selectinload(Candidate.skills))
         if for_update:
             stmt = stmt.with_for_update()
@@ -105,16 +121,20 @@ class CandidateRepository:
         limit: int,
         offset: int,
         filters: CandidateSearchFilters | None = None,
+        list_mode: bool = True,
     ) -> list[Candidate]:
         filters = filters or CandidateSearchFilters()
-        stmt: Select[tuple[Candidate]] = (
-            select(Candidate)
-            .options(selectinload(Candidate.skills))
-            .where(
-                Candidate.org_id == org_id,
-                Candidate.workspace_id == workspace_id,
-            )
-            .order_by(Candidate.created_at.desc())
+        load_skills = bool(filters.skills)
+        stmt: Select[tuple[Candidate]] = select(Candidate).where(
+            Candidate.org_id == org_id,
+            Candidate.workspace_id == workspace_id,
+        )
+        if list_mode:
+            stmt = stmt.options(*_list_query_options(load_skills=load_skills))
+        else:
+            stmt = stmt.options(selectinload(Candidate.skills))
+        stmt = (
+            stmt.order_by(Candidate.created_at.desc())
             .offset(offset)
             .limit(limit)
         )
@@ -560,6 +580,12 @@ class CandidateRepository:
             stmt = stmt.where(Candidate.source == filters.source)
         if filters.job_id is not None:
             stmt = stmt.where(Candidate.job_id == filters.job_id)
+        if filters.candidate_ids:
+            stmt = stmt.where(Candidate.id.in_(filters.candidate_ids))
+
+        text_filter = build_candidate_text_search_filter(filters.text_query)
+        if text_filter is not None:
+            stmt = stmt.where(text_filter)
 
         conditions = []
         if filters.location:
@@ -572,14 +598,17 @@ class CandidateRepository:
         if filters.skills:
             normalized = [skill.strip().lower() for skill in filters.skills if skill.strip()]
             if normalized:
-                stmt = stmt.join(
-                    CandidateSkill,
-                    and_(
+                skill_match = (
+                    select(1)
+                    .select_from(CandidateSkill)
+                    .where(
                         CandidateSkill.candidate_id == Candidate.id,
                         CandidateSkill.org_id == Candidate.org_id,
                         CandidateSkill.workspace_id == Candidate.workspace_id,
-                    ),
-                ).where(CandidateSkill.normalized_name.in_(normalized))
+                        CandidateSkill.normalized_name.in_(normalized),
+                    )
+                )
+                stmt = stmt.where(exists(skill_match))
 
         if conditions:
             stmt = stmt.where(*conditions)

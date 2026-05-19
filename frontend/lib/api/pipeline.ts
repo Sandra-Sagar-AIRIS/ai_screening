@@ -1,5 +1,56 @@
 import { API_BASE_URL, ApiError } from "@/lib/api/client";
-import type { Pipeline } from "@/lib/api/types";
+import type { AIScreeningListItem, Candidate, Pipeline } from "@/lib/api/types";
+
+export type PipelineBoardAtsEntry = {
+  score: number;
+  recommendation: string;
+  recruiter_summary?: string | null;
+  ai_enrichment_status?: string | null;
+};
+
+export type PipelineBoardCache = {
+  pipelines: Pipeline[];
+  candidates: Candidate[];
+  atsByCandidateId: Record<string, PipelineBoardAtsEntry>;
+  screeningsByCandidateId: Record<string, AIScreeningListItem>;
+};
+
+const PIPELINE_BOARD_CACHE_PREFIX = "airis_pipeline_board_v1:";
+const PIPELINE_BOARD_CACHE_TTL_MS = 5 * 60_000;
+
+export function readPipelineBoardCache(jobId: string): PipelineBoardCache | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.sessionStorage.getItem(`${PIPELINE_BOARD_CACHE_PREFIX}${jobId}`);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as { savedAt: number; data: PipelineBoardCache };
+    if (Date.now() - parsed.savedAt > PIPELINE_BOARD_CACHE_TTL_MS) {
+      window.sessionStorage.removeItem(`${PIPELINE_BOARD_CACHE_PREFIX}${jobId}`);
+      return null;
+    }
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+export function writePipelineBoardCache(jobId: string, data: PipelineBoardCache): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(
+      `${PIPELINE_BOARD_CACHE_PREFIX}${jobId}`,
+      JSON.stringify({ savedAt: Date.now(), data })
+    );
+  } catch {
+    // Ignore quota errors.
+  }
+}
 
 type PipelineCreatePayload = {
   candidate_id: string;

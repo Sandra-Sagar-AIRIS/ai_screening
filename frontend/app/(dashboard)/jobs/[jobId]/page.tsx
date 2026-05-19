@@ -129,7 +129,8 @@ export default function JobDetailPage() {
   const jobIdParam = rawJobId?.trim() || null;
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  /** True only while the core job record is loading (first paint / navigation). */
+  const [profileLoading, setProfileLoading] = useState(true);
 
   const [submissions, setSubmissions] = useState<JobSubmission[]>([]);
   const [submissionsTotal, setSubmissionsTotal] = useState(0);
@@ -234,7 +235,7 @@ export default function JobDetailPage() {
       });
       
       setShowEdit(false);
-      loadData(); // reload job data
+      void loadData({ silent: true }); // reload job without full-page skeleton
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Unable to update job.");
     } finally { 
@@ -258,18 +259,7 @@ export default function JobDetailPage() {
       setAtsTotal(atsPage.total_count ?? 0);
       // Refresh scored-ID set when listing from the first page (or sort changes), so banner ≠ paginated slice only.
       if (atsOffset === 0) {
-        const atsIdPages = await getJobMatchesAts(jobIdParam, {
-          limit: 200,
-          offset: 0,
-          sort_by: atsSortBy,
-        });
-        if (seq !== atsRequestSeqRef.current) return;
-        const ids = new Set<string>();
-        for (const m of atsIdPages.matches ?? []) {
-          const nid = normalizeCandidateId(m.candidate_id);
-          if (nid) ids.add(nid);
-        }
-        setAtsScoredCandidateIdSet(ids);
+        void refreshAtsScoredCandidateIds(jobIdParam, seq);
       }
     } catch (err) {
       if (seq !== atsRequestSeqRef.current) return;
@@ -288,36 +278,71 @@ export default function JobDetailPage() {
     }
   }
 
-  async function loadData() {
+  async function refreshAtsScoredCandidateIds(jobId: string, seq: number) {
+    try {
+      const atsIdPages = await getJobMatchesAts(jobId, {
+        limit: 200,
+        offset: 0,
+        sort_by: atsSortBy,
+      });
+      if (seq !== atsRequestSeqRef.current) return;
+      const ids = new Set<string>();
+      for (const m of atsIdPages.matches ?? []) {
+        const nid = normalizeCandidateId(m.candidate_id);
+        if (nid) ids.add(nid);
+      }
+      setAtsScoredCandidateIdSet(ids);
+    } catch {
+      // Banner hint is optional; paginated ATS table already loaded.
+    }
+  }
+
+  async function loadSupplementary(loadTarget: string) {
+    setPipelineError(null);
+    try {
+      const [candidatesOutcome, pipelinesOutcome] = await Promise.allSettled([
+        getJobCandidates(loadTarget),
+        getPipelines(50, 0, loadTarget),
+      ]);
+      if (latestJobIdRequested.current !== loadTarget) return;
+
+      if (candidatesOutcome.status === "fulfilled") {
+        setJobCandidates(candidatesOutcome.value);
+      } else {
+        setJobCandidates([]);
+      }
+
+      if (pipelinesOutcome.status === "fulfilled") {
+        setPipelines(pipelinesOutcome.value);
+      } else {
+        setPipelines([]);
+        const pipelineErr = pipelinesOutcome.reason;
+        setPipelineError(
+          pipelineErr instanceof Error ? pipelineErr.message : "Unable to load pipeline summary."
+        );
+      }
+    } catch {
+      if (latestJobIdRequested.current === loadTarget) {
+        setJobCandidates([]);
+        setPipelines([]);
+      }
+    }
+  }
+
+  async function loadData(options?: { silent?: boolean }) {
     if (!jobIdParam) return;
     const loadTarget = jobIdParam;
-    setLoading(true);
+    if (!options?.silent) {
+      setProfileLoading(true);
+    }
     setError(null);
-    setPipelineError(null);
-    setJob(null);
     try {
       const data = await getJobById(loadTarget);
       if (latestJobIdRequested.current !== loadTarget) return;
       setJob(data);
-      try {
-        const candidates = await getJobCandidates(loadTarget);
-        if (latestJobIdRequested.current !== loadTarget) return;
-        setJobCandidates(candidates);
-      } catch {
-        if (latestJobIdRequested.current !== loadTarget) return;
-        setJobCandidates([]);
-      }
-      try {
-        const pipelineData = await getPipelines(200, 0, loadTarget);
-        if (latestJobIdRequested.current !== loadTarget) return;
-        setPipelines(pipelineData);
-      } catch (pipelineErr) {
-        if (latestJobIdRequested.current !== loadTarget) return;
-        setPipelines([]);
-        setPipelineError(pipelineErr instanceof Error ? pipelineErr.message : "Unable to load pipeline summary.");
-      }
     } catch (err) {
       if (latestJobIdRequested.current !== loadTarget) return;
+      setJob(null);
       if (err instanceof ApiError) {
         if (err.status === 404) {
           setError(
@@ -331,9 +356,10 @@ export default function JobDetailPage() {
       }
     } finally {
       if (latestJobIdRequested.current === loadTarget) {
-        setLoading(false);
+        setProfileLoading(false);
       }
     }
+    void loadSupplementary(loadTarget);
   }
 
   const ALLOWED_STATUS_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
@@ -371,11 +397,16 @@ export default function JobDetailPage() {
 
   useEffect(() => {
     if (!jobIdParam) {
-      setLoading(false);
+      setProfileLoading(false);
       setError("Invalid job link.");
       setJob(null);
       return;
     }
+    setJob(null);
+    setJobCandidates([]);
+    setPipelines([]);
+    setAtsMatches([]);
+    setAtsScoredCandidateIdSet(new Set());
     void loadData();
   }, [jobIdParam]);
 
@@ -483,7 +514,7 @@ export default function JobDetailPage() {
     [jobIdParam, job?.jd_original_available, job?.jd_file_name],
   );
 
-  if (loading) {
+  if (profileLoading && !job) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
         <div className="border-b border-gray-100 pb-4">

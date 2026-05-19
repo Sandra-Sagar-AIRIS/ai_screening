@@ -27,14 +27,15 @@ def slugify_role_name(name: str) -> str:
 
 def ensure_default_organization_roles(db: Session, organization_id: UUID) -> None:
     """Create built-in organization_roles rows if missing (idempotent)."""
-    for display_name, key in DEFAULT_ORG_ROLES:
-        exists = db.scalar(
-            select(OrganizationRole.id).where(
-                OrganizationRole.organization_id == organization_id,
-                OrganizationRole.key == key,
-            )
+    # Fetch existing role keys for this org in one go
+    existing_keys = set(db.scalars(
+        select(OrganizationRole.key).where(
+            OrganizationRole.organization_id == organization_id,
         )
-        if exists is None:
+    ).all())
+    
+    for display_name, key in DEFAULT_ORG_ROLES:
+        if key not in existing_keys:
             db.add(
                 OrganizationRole(
                     organization_id=organization_id,

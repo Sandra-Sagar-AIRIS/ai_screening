@@ -179,6 +179,7 @@ class JobService:
         job: Job,
         *,
         _skills_map: "dict[UUID, tuple[list[str], list[str]]] | None" = None,
+        list_mode: bool = False,
     ) -> JobResponse:
         """Helper to construct JobResponse including skills.
 
@@ -219,7 +220,7 @@ class JobService:
             organization_id=job.organization_id,
             client_id=job.client_id,
             title=job.title or "",
-            description=job.description,
+            description=None if list_mode else job.description,
             status=safe_status,
             paused_reason=job.paused_reason,
             location=job.location,
@@ -235,7 +236,7 @@ class JobService:
             required_skills=required_skills or [],
             preferred_skills=preferred_skills or [],
             key_responsibilities=key_responsibilities,
-            raw_jd_text=job.raw_jd_text,
+            raw_jd_text=None if list_mode else job.raw_jd_text,
             parsing_source=job.parsing_source,
             parsing_status=job.parsing_status,
             enrichment_status=getattr(job, "enrichment_status", None),
@@ -462,7 +463,13 @@ class JobService:
         status: JobStatus | None = None,
         client_id: UUID | None = None,
     ) -> list[JobResponse]:
-        stmt: Select[tuple[Job]] = select(Job).where(Job.organization_id == organization_id)
+        from sqlalchemy.orm import defer
+
+        stmt: Select[tuple[Job]] = (
+            select(Job)
+            .options(defer(Job.raw_jd_text), defer(Job.description))
+            .where(Job.organization_id == organization_id)
+        )
         if status is not None:
             stmt = stmt.where(Job.status == status.value)
         elif (current_user.role or "").lower() == "recruiter":
@@ -488,7 +495,7 @@ class JobService:
         results: list[JobResponse] = []
         for job in jobs:
             try:
-                results.append(self._get_job_response(job, _skills_map=skills_map))
+                results.append(self._get_job_response(job, _skills_map=skills_map, list_mode=True))
             except Exception as e:
                 logger.warning("list_jobs.skip_bad_job", extra={"job_id": str(job.id), "error": str(e)})
         return results

@@ -83,23 +83,19 @@ def seed_default_role_permissions(db: Session, organization_id: UUID) -> None:
     role_map = {r.key: r.id for r in roles}
 
     # 2. Get existing permissions
-    existing_pairs = set(
-        db.execute(
+    existing_pairs = {
+        (row.role_id, row.permission)
+        for row in db.execute(
             select(RolePermission.role_id, RolePermission.permission).where(RolePermission.organization_id == organization_id)
         ).all()
-    )
+    }
 
     inserted_count = 0
     for role_key, permission in iter_default_role_permission_pairs():
-        role_id = get_role_id_by_key(db, organization_id, role_key)
-        if role_id is None:
-            continue
-        if (role_id, permission) in existing_pairs:
-            continue
-        
         role_id = role_map.get(role_key)
         if not role_id:
-            # Fallback: if role doesn't exist, we skip it (or we could create it, but usually roles should exist)
+            continue
+        if (role_id, permission) in existing_pairs:
             continue
 
         db.add(

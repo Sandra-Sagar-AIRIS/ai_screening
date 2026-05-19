@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { formatApiErrorForUser } from "@/lib/api/client";
-import { getDashboardSummary, DashboardSummary, DashboardActivityItem, DashboardRecentJob } from "@/lib/api/dashboard";
+import {
+  getDashboardSummary,
+  readCachedDashboardSummary,
+  writeCachedDashboardSummary,
+  DashboardSummary,
+  DashboardActivityItem,
+  DashboardRecentJob,
+} from "@/lib/api/dashboard";
 import { useAuthStore } from "@/store/auth-store";
 import { Users, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,11 +26,12 @@ function getRelativeTimeString(date: Date | number, lang = "en-US"): string {
 }
 
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<DashboardSummary | null>(() => readCachedDashboardSummary());
+  const [loading, setLoading] = useState(() => readCachedDashboardSummary() === null);
   const [error, setError] = useState<string | null>(null);
   const permissions = useAuthStore((state) => state.permissions);
   const hydrated = useAuthStore((state) => state.hydrated);
+  const token = useAuthStore((state) => state.token);
 
   const hasAnyPermission =
     permissions.includes("candidates:read") ||
@@ -33,25 +41,31 @@ export default function DashboardPage() {
     permissions.includes("pipeline:read");
 
   async function loadData(cancelledRef?: { cancelled: boolean }, isBackground = false) {
-    if (!isBackground) setLoading(true);
-    if (!isBackground) setError(null);
+    const hasCachedUi = !isBackground && (data !== null || readCachedDashboardSummary() !== null);
+    if (!isBackground) {
+      setLoading(!hasCachedUi);
+      setError(null);
+    }
     try {
       const summary = await getDashboardSummary();
       if (cancelledRef?.cancelled) return;
       setData(summary);
+      writeCachedDashboardSummary(summary);
     } catch (err: unknown) {
-      if (!cancelledRef?.cancelled) {
-        if (!isBackground) setError(formatApiErrorForUser(err));
+      if (!cancelledRef?.cancelled && !isBackground && !hasCachedUi) {
+        setError(formatApiErrorForUser(err));
       }
     } finally {
-      if (!cancelledRef?.cancelled && !isBackground) {
-        setLoading(false);
+      if (!cancelledRef?.cancelled) {
+        if (!isBackground) {
+          setLoading(false);
+        }
       }
     }
   }
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !token) return;
     const cancelledRef = { cancelled: false };
     void loadData(cancelledRef, false);
     const interval = window.setInterval(() => {
@@ -61,7 +75,8 @@ export default function DashboardPage() {
       cancelledRef.cancelled = true;
       window.clearInterval(interval);
     };
-  }, [hydrated]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load when auth is ready; data cache handled inside loadData
+  }, [hydrated, token]);
 
   if (hydrated && !hasAnyPermission) {
     return (

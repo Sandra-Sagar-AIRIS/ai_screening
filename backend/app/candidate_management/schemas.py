@@ -111,7 +111,7 @@ class CandidateCreate(BaseModel):
     @field_validator("email", mode="before")
     @classmethod
     def sanitize_email(cls, value: str | None) -> str | None:
-        if value is not None and not str(value).strip():
+        if value is not None and not value.strip():
             return None
         return value
 
@@ -150,7 +150,7 @@ class CandidateUpdate(BaseModel):
     @field_validator("email", mode="before")
     @classmethod
     def sanitize_email(cls, value: str | None) -> str | None:
-        if value is not None and not str(value).strip():
+        if value is not None and not value.strip():
             return None
         return value
 
@@ -211,7 +211,7 @@ class CandidateResponse(BaseModel):
     @field_validator("email", mode="before")
     @classmethod
     def sanitize_email(cls, value: str | None) -> str | None:
-        if value is not None and not str(value).strip():
+        if value is not None and not value.strip():
             return None
         return value
 
@@ -372,7 +372,7 @@ class BulkUploadItemStatusResponse(BaseModel):
     @field_validator("extracted_email", mode="before")
     @classmethod
     def sanitize_email(cls, value: str | None) -> str | None:
-        if value is not None and not str(value).strip():
+        if value is not None and not value.strip():
             return None
         return value
 

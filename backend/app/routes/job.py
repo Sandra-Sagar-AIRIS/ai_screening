@@ -467,7 +467,7 @@ def preview_job_jd_document(
     }
 
 
-@router.get("")
+@router.get("", response_model=list[JobResponse])
 def list_jobs(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[CurrentUser, Depends(require_permission(JOBS_READ))],
@@ -476,10 +476,10 @@ def list_jobs(
     offset: Annotated[int, Query(ge=0)] = 0,
     status_filter: Annotated[JobStatus | None, Query(alias="status")] = None,
     client_id: Annotated[UUID | None, Query()] = None,
-) -> JSONResponse:
+) -> list[JobResponse]:
     service = JobService(db)
     try:
-        jobs = service.list_jobs(
+        return service.list_jobs(
             UUID(current_user.organization_id),
             current_user,
             limit=limit,
@@ -487,7 +487,8 @@ def list_jobs(
             status=status_filter,
             client_id=client_id,
         )
-        return JSONResponse(content=jsonable_encoder(jobs))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("list_jobs.unhandled", extra={"org": current_user.organization_id})
         raise HTTPException(status_code=500, detail=str(exc) or "Failed to list jobs") from exc

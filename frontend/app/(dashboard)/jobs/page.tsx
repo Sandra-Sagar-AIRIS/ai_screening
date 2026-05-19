@@ -3,7 +3,17 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "@/lib/api/client";
-import { createJob, getJobs, updateJob, deleteJob, parseJD, uploadJobJdDocument, type JobParseResult } from "@/lib/api/jobs";
+import {
+  createJob,
+  getJobs,
+  updateJob,
+  deleteJob,
+  parseJD,
+  uploadJobJdDocument,
+  readCachedJobsList,
+  writeCachedJobsList,
+  type JobParseResult,
+} from "@/lib/api/jobs";
 import { JOBS_CREATE_PERMISSION, JOBS_UPDATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import { isAdminRole } from "@/lib/dashboard-nav";
 import type { Job, JobStatus } from "@/lib/api/types";
@@ -437,7 +447,8 @@ function JDPreviewModal({
 
 
 export default function JobsPage() {
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobs] = useState<Job[]>(() => readCachedJobsList() ?? []);
+  const [listLoading, setListLoading] = useState(() => readCachedJobsList() === null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -445,17 +456,10 @@ export default function JobsPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const permissions = useAuthStore((state) => state.permissions);
   const role = useAuthStore((state) => state.role);
-  const token = useAuthStore((state) => state.token);
-  const refreshPermissions = useAuthStore((state) => state.refreshPermissions);
   const canCreateJobs =
     hasPermission(permissions, JOBS_CREATE_PERMISSION) ||
     hasPermission(permissions, JOBS_UPDATE_PERMISSION) ||
     isAdminRole(role);
-
-  useEffect(() => {
-    if (!token) return;
-    void refreshPermissions();
-  }, [token, refreshPermissions]);
 
   const [creating, setCreating] = useState(false);
   const [clientId, setClientId] = useState("");
@@ -479,18 +483,33 @@ export default function JobsPage() {
   const [jdImport, setJdImport] = useState<{ result: JobParseResult; sourceFile: File | null } | null>(null);
 
 
-  const refreshJobs = useCallback(async () => {
-    setIsRefreshing(true);
+  const refreshJobs = useCallback(async (options?: { silent?: boolean }) => {
+    const hasCached = jobs.length > 0 || readCachedJobsList() !== null;
+    if (!options?.silent) {
+      setIsRefreshing(true);
+      if (!hasCached) {
+        setListLoading(true);
+      }
+    }
     try {
       const data = await getJobs(50, 0);
       setJobs(data);
+      writeCachedJobsList(data);
       setError(null);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load jobs.");
+      if (!options?.silent) {
+        setError(err instanceof ApiError ? err.message : "Failed to load jobs.");
+      }
     } finally {
-      setIsRefreshing(false);
+      setListLoading(false);
+      if (!options?.silent) {
+        setIsRefreshing(false);
+      }
     }
-  }, []);
+  }, [jobs.length]);
+
+  const refreshJobsRef = useRef(refreshJobs);
+  refreshJobsRef.current = refreshJobs;
 
   const needsEnrichmentPoll = jobs.some((j) => j.enrichment_status === "enriching");
 
@@ -505,12 +524,19 @@ export default function JobsPage() {
   }
 
   useEffect(() => {
-    void refreshJobs();
+    void refreshJobsRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial load once on mount
+  }, []);
+
+  useEffect(() => {
+    if (!needsEnrichmentPoll) {
+      return;
+    }
     const interval = globalThis.setInterval(() => {
-      void refreshJobs();
-    }, needsEnrichmentPoll ? 8000 : 30000);
+      void refreshJobsRef.current({ silent: true });
+    }, 8000);
     return () => globalThis.clearInterval(interval);
-  }, [needsEnrichmentPoll, refreshJobs]);
+  }, [needsEnrichmentPoll]);
 
   useEffect(() => {
     if (!notice) return;
@@ -722,7 +748,11 @@ export default function JobsPage() {
                 </Link>
               </div>
             ))}
-            {!filteredJobs.length ? (
+            {listLoading && jobs.length === 0 ? (
+              <div className="rounded-xl bg-slate-50 p-8 text-center text-sm font-medium text-slate-500 md:col-span-2 xl:col-span-3">
+                Loading jobs...
+              </div>
+            ) : !filteredJobs.length ? (
               <div className="rounded-xl bg-slate-50 p-8 text-center text-sm font-medium text-slate-500 md:col-span-2 xl:col-span-3">
                 No jobs found for the current search or filters.
               </div>

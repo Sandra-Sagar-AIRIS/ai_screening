@@ -277,25 +277,34 @@ export type BulkUploadJobStatus = {
 
 type CandidateStatusFilter = "active" | "archived" | "deleted";
 
-export async function getCandidates(
-  limit = 50,
-  offset = 0,
-  filters?: {
-    query?: string;
-    location?: string;
-    min_years_experience?: number;
-    max_years_experience?: number;
-    status?: CandidateStatusFilter;
-    stage?: CandidateStageFilter;
-    source?: CandidateSourceFilter;
-    job_id?: string;
-  }
-) {
+export type CandidatesListFilters = {
+  query?: string;
+  location?: string;
+  min_years_experience?: number;
+  max_years_experience?: number;
+  status?: CandidateStatusFilter;
+  stage?: CandidateStageFilter;
+  source?: CandidateSourceFilter;
+  job_id?: string;
+  candidate_ids?: string[];
+};
+
+export type CandidatesPageResult = {
+  candidates: Candidate[];
+  total_count: number;
+  limit: number;
+  offset: number;
+};
+
+function buildCandidatesListParams(limit: number, offset: number, filters?: CandidatesListFilters) {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
   });
-  if (filters?.query) params.set("query", filters.query);
+  if (filters?.query) {
+    params.set("query", filters.query);
+    params.set("search_mode", "fast");
+  }
   if (filters?.location) params.set("location", filters.location);
   if (filters?.min_years_experience !== undefined) {
     params.set("min_years_experience", String(filters.min_years_experience));
@@ -309,26 +318,132 @@ export async function getCandidates(
   if (filters?.stage) params.set("stage", filters.stage);
   if (filters?.source) params.set("source", filters.source);
   if (filters?.job_id) params.set("job_id", filters.job_id);
+  if (filters?.candidate_ids?.length) {
+    for (const id of filters.candidate_ids) {
+      params.append("candidate_ids", id);
+    }
+  }
+  return params;
+}
 
-  // Mixed deployments can have newly-created candidates only in candidate-management.
-  // Prefer candidate-management list and gracefully fall back to legacy API.
+const CANDIDATES_LIST_SESSION_KEY = "airis_candidates_list_page_v1";
+const CANDIDATES_LIST_SESSION_TTL_MS = 5 * 60_000;
+
+export function isDefaultCandidatesListFilters(filters?: CandidatesListFilters): boolean {
+  if (!filters) {
+    return true;
+  }
+  return (
+    !filters.query &&
+    !filters.location &&
+    !filters.status &&
+    !filters.stage &&
+    !filters.source &&
+    filters.min_years_experience === undefined &&
+    filters.max_years_experience === undefined &&
+    !filters.job_id &&
+    !filters.candidate_ids?.length
+  );
+}
+
+export function readCachedCandidatesListPage(): CandidatesPageResult | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.sessionStorage.getItem(CANDIDATES_LIST_SESSION_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as { savedAt: number; page: CandidatesPageResult };
+    if (Date.now() - parsed.savedAt > CANDIDATES_LIST_SESSION_TTL_MS) {
+      window.sessionStorage.removeItem(CANDIDATES_LIST_SESSION_KEY);
+      return null;
+    }
+    return parsed.page;
+  } catch {
+    return null;
+  }
+}
+
+export function writeCachedCandidatesListPage(page: CandidatesPageResult): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(
+      CANDIDATES_LIST_SESSION_KEY,
+      JSON.stringify({ savedAt: Date.now(), page })
+    );
+  } catch {
+    // Ignore quota errors.
+  }
+}
+
+export async function getCandidatesPage(
+  limit = 50,
+  offset = 0,
+  filters?: CandidatesListFilters
+): Promise<CandidatesPageResult> {
+  const params = buildCandidatesListParams(limit, offset, filters);
+  const path = `/candidate-management/candidates?${params.toString()}`;
+
+  const cacheTtlMs = filters?.query?.trim() ? 15_000 : 60_000;
+
   try {
     const response = await apiRequest<CandidateManagementEnvelope<CandidateManagementListData>>(
-      `/candidate-management/candidates?${params.toString()}`,
+      path,
       {
         headers: {
           ...getWorkspaceHeader(),
         },
-      }
+      },
+      cacheTtlMs
     );
-    return response.data.candidates.map(mapCandidateManagementCandidate);
+    return {
+      candidates: response.data.candidates.map(mapCandidateManagementCandidate),
+      total_count: response.data.total_count,
+      limit: response.data.limit,
+      offset: response.data.offset,
+    };
   } catch {
     if (shouldUseCandidateManagementApi()) {
       throw new Error("Unable to load candidates from candidate-management API.");
     }
   }
+
   const legacy = await apiRequest<Candidate[]>(`/candidates?limit=${limit}&offset=${offset}`);
-  return legacy.map(mapLegacyCandidate);
+  const mapped = legacy.map(mapLegacyCandidate);
+  return {
+    candidates: mapped,
+    total_count: mapped.length < limit ? offset + mapped.length : offset + limit + 1,
+    limit,
+    offset,
+  };
+}
+
+export async function getCandidatesByIds(candidateIds: string[], filters?: Pick<CandidatesListFilters, "status">) {
+  const uniqueIds = [...new Set(candidateIds.filter(Boolean))];
+  if (uniqueIds.length === 0) {
+    return [] as Candidate[];
+  }
+
+  const chunkSize = 100;
+  const all: Candidate[] = [];
+  for (let index = 0; index < uniqueIds.length; index += chunkSize) {
+    const chunk = uniqueIds.slice(index, index + chunkSize);
+    const page = await getCandidatesPage(chunk.length, 0, {
+      ...filters,
+      candidate_ids: chunk,
+    });
+    all.push(...page.candidates);
+  }
+  return all;
+}
+
+export async function getCandidates(limit = 50, offset = 0, filters?: CandidatesListFilters) {
+  const page = await getCandidatesPage(limit, offset, filters);
+  return page.candidates;
 }
 
 export async function getCandidateById(candidateId: string) {
@@ -363,31 +478,7 @@ export async function getCandidateById(candidateId: string) {
   }
 
   const legacy = await apiRequest<Candidate>(`/candidates/${candidateId}`);
-  const mappedLegacy = mapLegacyCandidate(legacy);
-  // In mixed deployments, legacy candidates API can omit resume fields while
-  // candidate-management still stores them. Best-effort enrich detail payload.
-  try {
-    const token = typeof window !== "undefined" ? window.localStorage.getItem("airis_access_token") : null;
-    const response = await fetch(`${API_BASE_URL}/candidate-management/candidates/${candidateId}`, {
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...getWorkspaceHeader(),
-      },
-    });
-    if (!response.ok) {
-      return mappedLegacy;
-    }
-    const cm = (await response.json()) as CandidateManagementEnvelope<CandidateManagementCandidate>;
-    const mappedCM = mapCandidateManagementCandidate(cm.data);
-    return {
-      ...mappedLegacy,
-      resume_s3_key: mappedCM.resume_s3_key ?? mappedLegacy.resume_s3_key ?? null,
-      resume_file_name: mappedCM.resume_file_name ?? mappedLegacy.resume_file_name ?? null,
-    };
-  } catch {
-    return mappedLegacy;
-  }
+  return mapLegacyCandidate(legacy);
 }
 
 export async function createCandidate(payload: CreateCandidatePayload) {
@@ -435,7 +526,7 @@ export async function uploadResume(file: File) {
   formData.append("file", file);
   const token = typeof window !== "undefined" ? window.localStorage.getItem("airis_access_token") : null;
   const response = await fetch(
-    `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1"}/candidate-management/candidates/upload-resume-file`,
+    `${API_BASE_URL}/candidate-management/candidates/upload-resume-file`,
     {
       method: "POST",
       headers: {
@@ -461,7 +552,7 @@ export async function uploadResumeForReview(file: File) {
   formData.append("file", file);
   const token = typeof window !== "undefined" ? window.localStorage.getItem("airis_access_token") : null;
   const response = await fetch(
-    `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1"}/candidate-management/candidates/parse-resume-file`,
+    `${API_BASE_URL}/candidate-management/candidates/parse-resume-file`,
     {
       method: "POST",
       headers: {

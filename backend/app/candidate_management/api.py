@@ -537,6 +537,9 @@ async def upload_resume_file(
             updated_at=legacy_candidate.updated_at,
             deleted_at=None,
             skills=[],
+            stage="applied",
+            job_id=None,
+            recruiter_id=None,
         )
     return _success(
         ResumeUploadResponse(
@@ -600,6 +603,9 @@ def get_candidate(
                     updated_at=legacy_candidate.updated_at,
                     deleted_at=None,
                     skills=[],
+                    stage="applied",
+                    job_id=None,
+                    recruiter_id=None,
                 )
                 return _success(candidate_resp)
             except HTTPException as e2:
@@ -746,10 +752,15 @@ def list_candidates(
     min_years_experience: Annotated[int | None, Query(ge=0)] = None,
     max_years_experience: Annotated[int | None, Query(ge=0)] = None,
     query: str | None = None,
+    search_mode: Annotated[
+        str,
+        Query(description="fast (default, indexed DB search) or semantic (AI-ranked, slower)"),
+    ] = "fast",
     status_filter: Annotated[CandidateStatusSchema | None, Query(alias="status")] = None,
     stage: str | None = None,
     source: str | None = None,
     job_id: UUID | None = None,
+    candidate_ids: Annotated[list[UUID] | None, Query()] = None,
 ) -> ApiResponse[dict[str, Any]]:
     service = _service(db)
     candidates, total = service.search_candidates(
@@ -757,6 +768,7 @@ def list_candidates(
         workspace_id=workspace_id,
         params=SearchParams(
             query=query,
+            search_mode=search_mode,
             skills=skills,
             location=location,
             min_years_experience=min_years_experience,
@@ -765,13 +777,17 @@ def list_candidates(
             stage=stage,
             source=source,
             job_id=job_id,
+            candidate_ids=candidate_ids,
             limit=limit,
             offset=offset,
         ),
     )
     return _success(
         {
-            "candidates": [CandidateResponse.model_validate(item) for item in candidates],
+            "candidates": [
+                CandidateResponse.model_validate(service.candidate_to_response_dict(item, list_mode=True))
+                for item in candidates
+            ],
             "total_count": total,
             "limit": limit,
             "offset": offset,
@@ -1235,7 +1251,7 @@ def communication_send_email(
         user_id=UUID(current_user.user_id),
         candidate_id=candidate_id,
         provider=payload.provider,
-        to_email=str(payload.to_email),
+        to_email=payload.to_email,
         subject=payload.subject,
         body=payload.body,
         save_as_draft=payload.save_as_draft,

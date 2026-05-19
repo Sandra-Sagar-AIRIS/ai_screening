@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -18,10 +18,16 @@ import {
 import { Brain, GripVertical, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/client";
-import { getCandidates } from "@/lib/api/candidates";
-import { getJobs } from "@/lib/api/jobs";
+import { getCandidatesByIds } from "@/lib/api/candidates";
+import { getJobsForSelect, readCachedJobsList } from "@/lib/api/jobs";
 import { getJobMatchesAts, rescoreJobAts } from "@/lib/api/ats";
-import { getPipelines, updatePipeline } from "@/lib/api/pipeline";
+import {
+  getPipelines,
+  readPipelineBoardCache,
+  updatePipeline,
+  writePipelineBoardCache,
+  type PipelineBoardAtsEntry,
+} from "@/lib/api/pipeline";
 import { listScreenings } from "@/lib/api/ai_screening";
 import { PIPELINE_UPDATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import type { AIScreeningListItem, Candidate, Job, Pipeline } from "@/lib/api/types";
@@ -51,6 +57,38 @@ const STAGE_ACCENT: Record<BoardStage, string> = {
   offered: "bg-amber-400",
   hired: "bg-cyan-400",
 };
+
+const PIPELINE_SELECTED_JOB_KEY = "airis_pipeline_selected_job_v1";
+const PIPELINE_POLL_MS = 60_000;
+
+function buildAtsMap(
+  matches: Array<{
+    candidate_id: string | number;
+    fit_score: number;
+    recommendation?: string | null;
+    recruiter_summary?: string | null;
+    ai_enrichment_status?: string | null;
+  }>
+): Record<string, PipelineBoardAtsEntry> {
+  const next: Record<string, PipelineBoardAtsEntry> = {};
+  for (const item of matches) {
+    const rawId = typeof item.candidate_id === "string" ? item.candidate_id : String(item.candidate_id);
+    const cid = normalizeCandidateId(rawId);
+    if (!cid) continue;
+    const summary = item.recruiter_summary?.trim();
+    next[cid] = {
+      score: item.fit_score,
+      recommendation: item.recommendation?.trim() ?? "",
+      recruiter_summary: summary
+        ? summary.length > 160
+          ? `${summary.slice(0, 157)}…`
+          : summary
+        : null,
+      ai_enrichment_status: item.ai_enrichment_status,
+    };
+  }
+  return next;
+}
 
 function toBoardStage(stage: Pipeline["stage"]): BoardStage {
   if (stage === "offer") return "offered";
@@ -326,7 +364,9 @@ export default function PipelinePage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [boardLoading, setBoardLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [candidatesHydrated, setCandidatesHydrated] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const permissions = useAuthStore((state) => state.permissions);
   const [movingPipelineId, setMovingPipelineId] = useState<string | null>(null);
@@ -337,20 +377,11 @@ export default function PipelinePage() {
     pipeline: Pipeline;
     candidate: Candidate;
   } | null>(null);
-  const [atsByCandidateId, setAtsByCandidateId] = useState<
-    Record<
-      string,
-      {
-        score: number;
-        recommendation: string;
-        recruiter_summary?: string | null;
-        ai_enrichment_status?: string | null;
-      }
-    >
-  >({});
+  const [atsByCandidateId, setAtsByCandidateId] = useState<Record<string, PipelineBoardAtsEntry>>({});
   const [sortMode, setSortMode] = useState<"ats_desc" | "newest" | "updated">("ats_desc");
   const boardScrollRef = useRef<HTMLDivElement | null>(null);
   const pipelineLoadSeqRef = useRef(0);
+  const restoredJobRef = useRef(false);
   const rescoreRequestedJobIdsRef = useRef<Set<string>>(new Set());
   const canUpdatePipeline = hasPermission(permissions, PIPELINE_UPDATE_PERMISSION);
   const canReadCandidates = permissions.includes("candidates:read") || permissions.includes("candidates:read_own");
@@ -370,30 +401,21 @@ export default function PipelinePage() {
   );
 
   useEffect(() => {
-    async function fetchActiveCandidates() {
-      const pageSize = 200; // backend enforces le=200 on /candidates limit
-      let offset = 0;
-      const all: Candidate[] = [];
-      while (true) {
-        const batch = await getCandidates(pageSize, offset, { status: "active" });
-        all.push(...batch);
-        if (batch.length < pageSize) {
-          break;
-        }
-        offset += pageSize;
-      }
-      return all;
+    if (selectedJobId && typeof window !== "undefined") {
+      window.sessionStorage.setItem(PIPELINE_SELECTED_JOB_KEY, selectedJobId);
     }
+  }, [selectedJobId]);
 
+  useEffect(() => {
+    const cached = readCachedJobsList();
+    if (cached?.length) {
+      setJobs(cached.filter((job) => job.status === "open"));
+    }
     async function loadInitialData() {
       try {
-        const [candidateData, jobData] = await Promise.all([
-          canReadCandidates ? fetchActiveCandidates() : Promise.resolve([]),
-          getJobs(200, 0),
-        ]);
-        setCandidates(candidateData);
-        // Candidate matching / pipeline excludes paused and terminal jobs.
-        setJobs(jobData.filter((job) => job.status === "open"));
+        const jobData = await getJobsForSelect(100, 0);
+        const openJobs = jobData.filter((job) => job.status === "open");
+        setJobs(openJobs);
       } catch (err) {
         if (err instanceof ApiError) {
           setError(err.message);
@@ -403,60 +425,100 @@ export default function PipelinePage() {
       }
     }
     void loadInitialData();
-  }, [canReadCandidates]);
+  }, []);
 
-  async function loadPipelines(jobId: string) {
+  useEffect(() => {
+    if (restoredJobRef.current || jobs.length === 0 || selectedJobId) {
+      return;
+    }
+    const saved =
+      typeof window !== "undefined" ? window.sessionStorage.getItem(PIPELINE_SELECTED_JOB_KEY) : null;
+    if (saved && jobs.some((job) => job.id === saved)) {
+      restoredJobRef.current = true;
+      setSelectedJobId(saved);
+      void loadPipelines(saved);
+    }
+  }, [jobs, selectedJobId]);
+
+  async function loadPipelines(jobId: string, options?: { silent?: boolean }) {
     const seq = ++pipelineLoadSeqRef.current;
-    setLoading(true);
+    const silent = options?.silent ?? false;
+    const cached = readPipelineBoardCache(jobId);
+
+    if (cached && !silent) {
+      setPipelines(cached.pipelines);
+      setCandidates(cached.candidates);
+      setAtsByCandidateId(cached.atsByCandidateId);
+      setScreeningsByCandidateId(cached.screeningsByCandidateId);
+      setCandidatesHydrated(true);
+      setBoardLoading(false);
+    } else if (!silent) {
+      if (!cached) {
+        setPipelines([]);
+        setCandidates([]);
+        setAtsByCandidateId({});
+        setScreeningsByCandidateId({});
+      }
+      setBoardLoading(!cached);
+    }
+
+    if (silent) {
+      setRefreshing(true);
+    }
     setError(null);
+
     try {
-      const [pipelineData, atsMatches] = await Promise.all([
-        getPipelines(200, 0, jobId),
+      const pipelineData = await getPipelines(100, 0, jobId);
+      if (seq !== pipelineLoadSeqRef.current) return;
+
+      setPipelines(pipelineData);
+      setBoardLoading(false);
+
+      const candidateIds = [...new Set(pipelineData.map((pipeline) => pipeline.candidate_id))];
+      if (!silent) {
+        setCandidatesHydrated(false);
+      }
+
+      const screeningsPromise = listScreenings({ job_id: jobId, limit: 100 })
+        .then((screenings) => {
+          if (seq !== pipelineLoadSeqRef.current) return;
+          const byCandidate: Record<string, AIScreeningListItem> = {};
+          for (const s of screenings) {
+            const cid = typeof s.candidate_id === "string" ? s.candidate_id : String(s.candidate_id);
+            if (!byCandidate[cid]) {
+              byCandidate[cid] = s;
+            }
+          }
+          setScreeningsByCandidateId(byCandidate);
+          return byCandidate;
+        })
+        .catch(() => undefined);
+
+      const [candidateResult, atsResult] = await Promise.allSettled([
+        canReadCandidates && candidateIds.length > 0
+          ? getCandidatesByIds(candidateIds, { status: "active" })
+          : Promise.resolve([] as Candidate[]),
         getJobMatchesAts(jobId, { limit: 200, offset: 0, sort_by: "score_desc" }),
       ]);
-      if (seq !== pipelineLoadSeqRef.current) return;
-      console.info("[pipeline-board] fetched", { jobId, count: pipelineData.length });
-      setPipelines(pipelineData);
-      const nextAtsByCandidate: Record<
-        string,
-        {
-          score: number;
-          recommendation: string;
-          recruiter_summary?: string | null;
-          ai_enrichment_status?: string | null;
-        }
-      > = {};
-      for (const item of atsMatches.matches) {
-        const rawId = typeof item.candidate_id === "string" ? item.candidate_id : String(item.candidate_id);
-        const cid = normalizeCandidateId(rawId);
-        if (!cid) continue;
-        const summary = item.recruiter_summary?.trim();
-        nextAtsByCandidate[cid] = {
-          score: item.fit_score,
-          recommendation: item.recommendation?.trim() ?? "",
-          recruiter_summary: summary
-            ? summary.length > 160
-              ? `${summary.slice(0, 157)}…`
-              : summary
-            : null,
-          ai_enrichment_status: item.ai_enrichment_status,
-        };
-      }
-      setAtsByCandidateId(nextAtsByCandidate);
 
-      // Load AI screenings for this job so we can show badges on pipeline cards.
-      // Non-critical: failures are swallowed so the board remains usable.
-      void listScreenings({ job_id: jobId, limit: 200 }).then((screenings) => {
-        const byCandidate: Record<string, AIScreeningListItem> = {};
-        // Latest screening per candidate (list is sorted newest-first from backend)
-        for (const s of screenings) {
-          const cid = typeof s.candidate_id === "string" ? s.candidate_id : String(s.candidate_id);
-          if (!byCandidate[cid]) {
-            byCandidate[cid] = s;
-          }
-        }
-        setScreeningsByCandidateId(byCandidate);
-      }).catch(() => { /* non-critical */ });
+      if (seq !== pipelineLoadSeqRef.current) return;
+
+      const candidateData =
+        candidateResult.status === "fulfilled" ? candidateResult.value : [];
+      const atsMatches = atsResult.status === "fulfilled" ? atsResult.value : { matches: [] as never[] };
+      const nextAtsByCandidate = buildAtsMap(atsMatches.matches);
+
+      setCandidates(canReadCandidates ? candidateData : []);
+      setAtsByCandidateId(nextAtsByCandidate);
+      setCandidatesHydrated(true);
+
+      const screeningsByCandidate = (await screeningsPromise) ?? {};
+      writePipelineBoardCache(jobId, {
+        pipelines: pipelineData,
+        candidates: canReadCandidates ? candidateData : [],
+        atsByCandidateId: nextAtsByCandidate,
+        screeningsByCandidateId: screeningsByCandidate,
+      });
 
       const hasUnscoredCandidates = pipelineData.some(
         (pipeline) => !nextAtsByCandidate[normalizeCandidateId(pipeline.candidate_id)]
@@ -476,7 +538,8 @@ export default function PipelinePage() {
       }
     } finally {
       if (seq === pipelineLoadSeqRef.current) {
-        setLoading(false);
+        setBoardLoading(false);
+        setRefreshing(false);
       }
     }
   }
@@ -486,8 +549,8 @@ export default function PipelinePage() {
       return;
     }
     const interval = window.setInterval(() => {
-      void loadPipelines(selectedJobId);
-    }, 25000);
+      void loadPipelines(selectedJobId, { silent: true });
+    }, PIPELINE_POLL_MS);
     return () => window.clearInterval(interval);
   }, [selectedJobId]);
 
@@ -499,8 +562,8 @@ export default function PipelinePage() {
       acc[stage] = pipelines
         .filter((pipeline) => toBoardStage(pipeline.stage) === stage)
         .map((pipeline) => ({ pipeline, candidate: candidateMap.get(normalizeCandidateId(pipeline.candidate_id)) }))
-        // Hide orphan pipeline cards so "Unknown candidate" rows don't pollute the board.
-        .filter((item) => Boolean(item.candidate))
+        // After candidate fetch, hide orphan rows; show pipelines immediately while hydrating.
+        .filter((item) => !candidatesHydrated || Boolean(item.candidate))
         .sort((a, b) => {
           if (sortMode === "newest") {
             return new Date(b.pipeline.created_at).getTime() - new Date(a.pipeline.created_at).getTime();
@@ -515,7 +578,7 @@ export default function PipelinePage() {
         });
       return acc;
     }, {} as Record<BoardStage, Array<{ pipeline: Pipeline; candidate: Candidate | undefined }>>);
-  }, [candidates, pipelines, atsByCandidateId, sortMode]);
+  }, [candidates, pipelines, atsByCandidateId, sortMode, candidatesHydrated]);
 
   const pipelineById = useMemo(() => new Map(pipelines.map((pipeline) => [pipeline.id, pipeline])), [pipelines]);
   const candidateById = useMemo(
@@ -592,6 +655,9 @@ export default function PipelinePage() {
                 setSelectedJobId(nextJobId);
                 if (!nextJobId) {
                   setPipelines([]);
+                  setCandidates([]);
+                  setAtsByCandidateId({});
+                  setScreeningsByCandidateId({});
                   return;
                 }
                 void loadPipelines(nextJobId);
@@ -619,10 +685,10 @@ export default function PipelinePage() {
             <Button
               variant="outline"
               className="h-8 px-3 text-xs"
-              disabled={!selectedJobId || loading}
+              disabled={!selectedJobId || (boardLoading && pipelines.length === 0)}
               onClick={() => {
                 if (!selectedJobId) return;
-                void loadPipelines(selectedJobId);
+                void loadPipelines(selectedJobId, { silent: pipelines.length > 0 });
               }}
             >
               Refresh
@@ -634,14 +700,14 @@ export default function PipelinePage() {
           <Button
             variant="outline"
             className="h-10 w-10 !p-0 rounded-full border-slate-200/80 bg-white shadow-sm hover:bg-slate-50 transition-all text-slate-500 hover:text-slate-800"
-            disabled={!selectedJobId || loading}
+            disabled={!selectedJobId || (boardLoading && pipelines.length === 0)}
             onClick={() => {
               if (!selectedJobId) return;
-              void loadPipelines(selectedJobId);
+              void loadPipelines(selectedJobId, { silent: pipelines.length > 0 });
             }}
             title="Refresh Pipeline"
           >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-4 w-4 ${refreshing || (boardLoading && pipelines.length === 0) ? "animate-spin" : ""}`} />
             <span className="sr-only">Refresh</span>
           </Button>
         </div>
@@ -655,8 +721,10 @@ export default function PipelinePage() {
           </div>
         </div>
       ) : null}
-      {selectedJobId && loading ? <p className="text-sm font-medium text-slate-500 mt-6">Loading pipeline...</p> : null}
-      {selectedJobId && !loading && pipelines.length === 0 ? (
+      {selectedJobId && boardLoading && pipelines.length === 0 ? (
+        <p className="text-sm font-medium text-slate-500 mt-6">Loading pipeline...</p>
+      ) : null}
+      {selectedJobId && !boardLoading && pipelines.length === 0 ? (
         <div className="rounded-[20px] shadow-[0_2px_12px_rgba(0,0,0,0.02)] bg-white border border-slate-100/50 mt-6">
           <div className="py-20 flex flex-col items-center justify-center text-slate-400">
             <svg className="w-12 h-12 mb-4 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
@@ -664,7 +732,7 @@ export default function PipelinePage() {
           </div>
         </div>
       ) : null}
-      {selectedJobId && !loading && pipelines.length > 0 ? (
+      {selectedJobId && pipelines.length > 0 ? (
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
@@ -704,7 +772,7 @@ export default function PipelinePage() {
                           }
                           aiEnrichmentStatus={ats?.ai_enrichment_status}
                           awaitingAtsMatch={!ats}
-                          boardLoading={loading}
+                          boardLoading={!candidatesHydrated}
                           isTopMatch={(ats?.score ?? -1) >= 85}
                           canDrag={canUpdatePipeline && movingPipelineId === null}
                           isMoving={movingPipelineId === pipeline.id}
@@ -738,7 +806,7 @@ export default function PipelinePage() {
                       }
                       aiEnrichmentStatus={ats?.ai_enrichment_status}
                       awaitingAtsMatch={!ats}
-                      boardLoading={loading}
+                      boardLoading={!candidatesHydrated}
                       isTopMatch={(ats?.score ?? -1) >= 85}
                       isMoving={false}
                     />
@@ -762,7 +830,7 @@ export default function PipelinePage() {
           onStarted={(screeningId) => {
             setStartScreeningTarget(null);
             // Refresh pipeline + screenings so the board shows updated stage + badge
-            void loadPipelines(selectedJobId);
+            void loadPipelines(selectedJobId, { silent: true });
             // Navigate to screening workspace
             window.open(`/ai-screenings/${screeningId}`, "_blank");
           }}

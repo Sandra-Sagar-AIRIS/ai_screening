@@ -26,6 +26,7 @@ from app.candidate_management.models import (
     InteractionType,
 )
 from app.candidate_management.repository import CandidateRepository, CandidateSearchFilters
+from app.candidate_management.search import normalize_search_query
 from app.candidate_management.schemas import (
     CandidateAssignRecruiterRequest,
     CandidateBulkAssignRecruiterRequest,
@@ -61,6 +62,7 @@ class TaskEnqueuerPort(Protocol):
 @dataclass(slots=True)
 class SearchParams:
     query: str | None = None
+    search_mode: str = "fast"
     skills: list[str] | None = None
     location: str | None = None
     min_years_experience: int | None = None
@@ -69,6 +71,7 @@ class SearchParams:
     stage: str | None = None
     source: str | None = None
     job_id: UUID | None = None
+    candidate_ids: list[UUID] | None = None
     limit: int = 50
     offset: int = 0
 
@@ -379,18 +382,16 @@ class CandidateManagementService:
         source: str | None = None,
         job_id: UUID | None = None,
     ) -> tuple[list[Candidate], int]:
-        status_value = CandidateStatus(status) if status else None
-        source_value = CandidateSource(source) if source else None
-        filters = CandidateSearchFilters(
+        filters = self._build_search_filters(
             skills=skills,
             location=location,
             min_years_experience=min_years_experience,
             max_years_experience=max_years_experience,
-            status=status_value,
+            status=status,
             stage=stage,
-            source=source_value,
+            source=source,
             job_id=job_id,
-            include_deleted=status_value == CandidateStatus.DELETED,
+            candidate_ids=None,
         )
         candidates = self.repository.list_candidates(
             org_id=org_id,
@@ -398,6 +399,7 @@ class CandidateManagementService:
             limit=limit,
             offset=offset,
             filters=filters,
+            list_mode=True,
         )
         total = self.repository.count_candidates(org_id=org_id, workspace_id=workspace_id, filters=filters)
         return candidates, total
@@ -902,9 +904,68 @@ class CandidateManagementService:
         workspace_id: UUID,
         params: SearchParams,
     ) -> tuple[list[Candidate], int]:
-        if params.query and self.ai_service is not None:
+        text_query = normalize_search_query(params.query)
+        use_semantic = (params.search_mode or "fast").strip().lower() == "semantic"
+
+        if params.candidate_ids:
+            filters = self._build_search_filters(
+                text_query=text_query,
+                skills=params.skills,
+                location=params.location,
+                min_years_experience=params.min_years_experience,
+                max_years_experience=params.max_years_experience,
+                status=params.status,
+                stage=params.stage,
+                source=params.source,
+                job_id=params.job_id,
+                candidate_ids=params.candidate_ids,
+            )
+            candidates = self.repository.list_candidates(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                limit=params.limit,
+                offset=params.offset,
+                filters=filters,
+                list_mode=True,
+            )
+            total = self.repository.count_candidates(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                filters=filters,
+            )
+            return candidates, total
+
+        if text_query and not use_semantic:
+            filters = self._build_search_filters(
+                text_query=text_query,
+                skills=params.skills,
+                location=params.location,
+                min_years_experience=params.min_years_experience,
+                max_years_experience=params.max_years_experience,
+                status=params.status,
+                stage=params.stage,
+                source=params.source,
+                job_id=params.job_id,
+                candidate_ids=None,
+            )
+            candidates = self.repository.list_candidates(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                limit=params.limit,
+                offset=params.offset,
+                filters=filters,
+                list_mode=True,
+            )
+            total = self.repository.count_candidates(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                filters=filters,
+            )
+            return candidates, total
+
+        if text_query and use_semantic and self.ai_service is not None:
             ranked_ids = self.ai_service.smart_search(
-                query=params.query,
+                query=text_query,
                 org_id=org_id,
                 workspace_id=workspace_id,
                 limit=max(params.limit + params.offset, params.limit),
@@ -912,19 +973,17 @@ class CandidateManagementService:
             if not ranked_ids:
                 return [], 0
 
-            hydrated: list[Candidate] = []
             include_del = (params.status == CandidateStatus.DELETED.value) if params.status else False
-            for candidate_id in ranked_ids:
-                candidate = self.repository.get_candidate_by_id(
-                    org_id=org_id,
-                    workspace_id=workspace_id,
-                    candidate_id=candidate_id,
-                    include_deleted=include_del,
-                    with_skills=True,
-                )
-                if candidate is None:
-                    continue
-                hydrated.append(candidate)
+            loaded = self.repository.list_candidates_by_ids(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                candidate_ids=ranked_ids,
+                include_deleted=include_del,
+                with_skills=bool(params.skills),
+                list_mode=True,
+            )
+            by_id = {candidate.id: candidate for candidate in loaded}
+            hydrated = [by_id[candidate_id] for candidate_id in ranked_ids if candidate_id in by_id]
 
             filtered = self._apply_post_filters(
                 hydrated,
@@ -939,6 +998,34 @@ class CandidateManagementService:
             )
             total = len(filtered)
             return filtered[params.offset : params.offset + params.limit], total
+
+        if text_query:
+            filters = self._build_search_filters(
+                text_query=text_query,
+                skills=params.skills,
+                location=params.location,
+                min_years_experience=params.min_years_experience,
+                max_years_experience=params.max_years_experience,
+                status=params.status,
+                stage=params.stage,
+                source=params.source,
+                job_id=params.job_id,
+                candidate_ids=None,
+            )
+            candidates = self.repository.list_candidates(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                limit=params.limit,
+                offset=params.offset,
+                filters=filters,
+                list_mode=True,
+            )
+            total = self.repository.count_candidates(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                filters=filters,
+            )
+            return candidates, total
 
         candidates, total = self.list_candidates(
             org_id=org_id,
@@ -955,6 +1042,43 @@ class CandidateManagementService:
             job_id=params.job_id,
         )
         return candidates, total
+
+    def candidate_to_response_dict(self, candidate: Candidate, *, list_mode: bool = False) -> dict[str, Any]:
+        """Build API-safe dict; list_mode avoids loading heavy JSONB fields."""
+        data = self._normalize_candidate(candidate)
+        if list_mode:
+            data["parsed_resume_data"] = None
+        return data
+
+    def _build_search_filters(
+        self,
+        *,
+        text_query: str | None = None,
+        skills: list[str] | None,
+        location: str | None,
+        min_years_experience: int | None,
+        max_years_experience: int | None,
+        status: str | None,
+        stage: str | None,
+        source: str | None,
+        job_id: UUID | None,
+        candidate_ids: list[UUID] | None,
+    ) -> CandidateSearchFilters:
+        status_value = CandidateStatus(status) if status else None
+        source_value = CandidateSource(source) if source else None
+        return CandidateSearchFilters(
+            text_query=text_query,
+            skills=skills,
+            location=location,
+            min_years_experience=min_years_experience,
+            max_years_experience=max_years_experience,
+            status=status_value,
+            stage=stage,
+            source=source_value,
+            job_id=job_id,
+            candidate_ids=candidate_ids,
+            include_deleted=status_value == CandidateStatus.DELETED,
+        )
 
     # -------------------------------
     # Merge
