@@ -50,7 +50,6 @@ export default function DashboardPage() {
       const summary = await getDashboardSummary();
       if (cancelledRef?.cancelled) return;
       setData(summary);
-      writeCachedDashboardSummary(summary);
     } catch (err: unknown) {
       if (!cancelledRef?.cancelled) {
         if (!isBackground) setError(formatApiErrorForUser(err));
