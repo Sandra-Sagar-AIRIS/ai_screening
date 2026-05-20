@@ -38,7 +38,18 @@
       "Bash(python3 -c ' *)",
       "mcp__809f0415-9ce5-40bb-bfc7-e31f9d765ed7__editJiraIssue",
       "mcp__809f0415-9ce5-40bb-bfc7-e31f9d765ed7__createJiraIssue",
+<<<<<<< HEAD
+      "mcp__809f0415-9ce5-40bb-bfc7-e31f9d765ed7__transitionJiraIssue",
+      "mcp__809f0415-9ce5-40bb-bfc7-e31f9d765ed7__searchJiraIssuesUsingJql",
+      "Bash(python -m pytest tests/test_pipeline_list.py tests/test_pipeline_status.py -v --tb=short)",
+      "mcp__809f0415-9ce5-40bb-bfc7-e31f9d765ed7__getJiraIssue",
+      "mcp__809f0415-9ce5-40bb-bfc7-e31f9d765ed7__getTransitionsForJiraIssue",
+      "Bash(python -m pytest tests/test_pipe007_pipeline_analytics.py -v)",
+      "Bash(python -m pytest tests/test_pipe008_offer_management.py -v --tb=short)",
+      "mcp__809f0415-9ce5-40bb-bfc7-e31f9d765ed7__addCommentToJiraIssue"
+=======
       "mcp__809f0415-9ce5-40bb-bfc7-e31f9d765ed7__transitionJiraIssue"
+>>>>>>> 989cb5c73927dfcfdf1916ac3457aa987ed16329
     ]
   }
 }

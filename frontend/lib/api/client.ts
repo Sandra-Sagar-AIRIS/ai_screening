@@ -1,15 +1,24 @@
-/** Resolve API base URL (browser uses same-origin proxy in dev when env is a relative path). */
-export function getApiBaseUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
-  const proxyOrigin = (process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8000").replace(/\/$/, "");
-  if (configured) {
-    if (configured.startsWith("/") && typeof window === "undefined") {
-      return `${proxyOrigin}${configured}`;
-    }
-    return configured;
+const DEFAULT_SERVER_API = "http://127.0.0.1:8000/api/v1";
+const DEFAULT_BROWSER_API = "/api/v1";
+
+/** REST base URL. Browser default uses same-origin `/api/v1` (proxied by Next in dev). */
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  (typeof window === "undefined" ? DEFAULT_SERVER_API : DEFAULT_BROWSER_API);
+
+/** WebSocket API base (always direct to backend when REST uses `/api/v1` proxy). */
+export function getWsApiBase(): string {
+  const explicit = process.env.NEXT_PUBLIC_WS_API_BASE_URL?.replace(/\/$/, "");
+  if (explicit) {
+    return explicit.replace(/^http/i, "ws");
   }
-  if (typeof window !== "undefined") return "/api/v1";
-  return `${proxyOrigin}/api/v1`;
+  const base = API_BASE_URL;
+  if (/^https?:\/\//i.test(base)) {
+    return base.replace(/^http/i, "ws");
+  }
+  const backend =
+    process.env.NEXT_PUBLIC_API_BACKEND_URL?.replace(/\/$/, "") ?? DEFAULT_SERVER_API;
+  return backend.replace(/^http/i, "ws");
 }
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -261,9 +270,9 @@ async function _fetchRaw<T>(path: string, options: RequestOptions): Promise<T> {
       throw new ApiError(message, 0, error);
     }
     const message =
-      `Cannot reach the API at ${getApiBaseUrl()}${path}. ` +
+      `Cannot reach the API at ${API_BASE_URL}${path}. ` +
       "Start the backend (uvicorn on port 8000) and restart `npm run dev` if you changed .env.";
-    console.error(`[API Network Error] ${getApiBaseUrl()}${path}:`, error);
+    console.error(`[API Network Error] ${API_BASE_URL}${path}:`, error);
     throw new ApiError(message, 0, error);
   } finally {
     if (timeoutId !== undefined) {

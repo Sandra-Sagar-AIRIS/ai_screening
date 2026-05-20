@@ -48,6 +48,20 @@ class JobSubmission(Base):
     submission_status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=sa.text("'pending'"))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # PIPE-005: Submission Tracking
+    # vendor_id — profile ID of the vendor who submitted (for vendor-isolation queries).
+    # Nullable for internal/recruiter submissions; backfilled = submitted_by for existing rows.
+    vendor_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # outcome — client decision on the submission.
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False, server_default=sa.text("'pending'"))
+    # client_feedback — free-text feedback recorded by recruiter/client.
+    client_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

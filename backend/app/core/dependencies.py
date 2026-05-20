@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 import logging
-import time
-from pathlib import Path
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -31,24 +28,9 @@ def _auth_sessions_relation_missing(exc: BaseException) -> bool:
     """True when DB has no auth_sessions table (migration not applied)."""
     msg = (str(getattr(exc, "orig", None) or exc)).lower()
     return "auth_sessions" in msg and ("does not exist" in msg or "undefinedtable" in msg.replace(" ", ""))
-_DEBUG_LOG_PATH = Path(__file__).resolve().parents[2] / "debug-f65d2f.log"
 
-
-def _debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    payload = {
-        "sessionId": "f65d2f",
-        "runId": "pre-fix",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
-    except Exception:
-        pass
+_REQUEST_USER_ATTR = "airis_current_user"
+_REQUEST_PERMISSIONS_ATTR = "airis_effective_permissions"
 
 ROLE_ALIASES: dict[str, tuple[str, ...]] = {
     "client_viewer": ("client_viewer", "client"),
@@ -144,22 +126,20 @@ def get_current_user(
 
     Replace with JWT verification once auth module is integrated.
     """
+    cached = getattr(request.state, _REQUEST_USER_ATTR, None)
+    if cached is not None:
+        return cached
+
     state_user = getattr(request.state, "user", None)
     if state_user is not None:
-        # region agent log
-        _debug_log(
-            "H1",
-            "backend/app/core/dependencies.py:get_current_user:state_user",
-            "Resolved auth from request.state.user",
-            {"has_role": bool(getattr(state_user, "role", None)), "has_org": bool(getattr(state_user, "organization_id", None))},
-        )
-        # endregion
-        return CurrentUser(
+        user = CurrentUser(
             user_id=str(state_user.user_id),
             organization_id=str(state_user.organization_id),
             role=_parse_role(getattr(state_user, "role", None)),
             type=_parse_user_type(getattr(state_user, "type", None)),
         )
+        setattr(request.state, _REQUEST_USER_ATTR, user)
+        return user
 
     if credentials is not None:
         settings = get_settings()
@@ -185,18 +165,6 @@ def get_current_user(
         profile = db.scalar(select(Profile).where(Profile.id == user_uuid))
         if profile is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authenticated user not found.")
-        # region agent log
-        _debug_log(
-            "H1",
-            "backend/app/core/dependencies.py:get_current_user:jwt_profile",
-            "Resolved auth from JWT and DB profile",
-            {
-                "has_profile": True,
-                "profile_has_role": bool(profile.role),
-                "profile_has_role_id": bool(getattr(profile, "role_id", None)),
-            },
-        )
-        # endregion
 
         if x_organization_id and x_organization_id != str(profile.organization_id):
             raise HTTPException(
@@ -243,12 +211,14 @@ def get_current_user(
 
         # Authorization uses DB truth: JWT `sub` only identifies the profile; stale/missing claims
         # on role/type would otherwise yield empty permission lookups or wrong client/internal behavior.
-        return CurrentUser(
+        user = CurrentUser(
             user_id=str(profile.id),
             organization_id=str(profile.organization_id),
             role=_parse_role(profile.role),
             type=_parse_user_type(profile.type),
         )
+        setattr(request.state, _REQUEST_USER_ATTR, user)
+        return user
 
     if not x_user_id or not x_organization_id:
         raise HTTPException(
@@ -256,20 +226,27 @@ def get_current_user(
             detail="Missing authenticated user context.",
         )
 
-    # region agent log
-    _debug_log(
-        "H1",
-        "backend/app/core/dependencies.py:get_current_user:header_fallback",
-        "Resolved auth from X-* fallback headers",
-        {"has_user_id": bool(x_user_id), "has_org_id": bool(x_organization_id), "has_role": bool(x_user_role)},
-    )
-    # endregion
-    return CurrentUser(
+    user = CurrentUser(
         user_id=x_user_id,
         organization_id=x_organization_id,
         role=_parse_role(x_user_role),
         type=_parse_user_type(x_user_type),
     )
+    setattr(request.state, _REQUEST_USER_ATTR, user)
+    return user
+
+
+def _effective_permissions_for_request(
+    request: Request,
+    db: Session,
+    user_id: str,
+) -> frozenset[str]:
+    cached = getattr(request.state, _REQUEST_PERMISSIONS_ATTR, None)
+    if cached is not None:
+        return cached
+    perms = frozenset(PermissionService(db).get_user_permissions(user_id))
+    setattr(request.state, _REQUEST_PERMISSIONS_ATTR, perms)
+    return perms
 
 
 def require_roles(allowed_roles: set[str]):
@@ -293,20 +270,13 @@ def require_recruiter_or_admin(current_user: CurrentUser = Depends(get_current_u
 
 def require_permission(permission: str):
     def _dependency(
+        request: Request,
         current_user: CurrentUser = Depends(get_current_user),
         db: Session = Depends(get_db),
     ) -> CurrentUser:
-        permission_service = PermissionService(db)
-        allowed = permission_service.can_user(current_user.user_id, current_user.organization_id, permission)
-        # region agent log
-        _debug_log(
-            "H2",
-            "backend/app/core/dependencies.py:require_permission",
-            "Permission gate evaluated",
-            {"permission": permission, "allowed": allowed, "role": current_user.role or ""},
-        )
-        # endregion
-        if not allowed:
+        normalized = permission.strip().lower()
+        effective = _effective_permissions_for_request(request, db, current_user.user_id)
+        if normalized not in effective:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: insufficient permissions.")
         return current_user
 
@@ -320,14 +290,16 @@ def require_any_permissions(*permissions: str):
     Useful for legacy endpoints where we need to support both "read all" and "read own".
     """
 
-    permissions_normalized = tuple(p for p in permissions if p)
+    permissions_normalized = tuple(p.strip().lower() for p in permissions if p)
+
     def _dependency(
+        request: Request,
         current_user: CurrentUser = Depends(get_current_user),
         db: Session = Depends(get_db),
     ) -> CurrentUser:
-        permission_service = PermissionService(db)
+        effective = _effective_permissions_for_request(request, db, current_user.user_id)
         for permission in permissions_normalized:
-            if permission_service.can_user(current_user.user_id, current_user.organization_id, permission):
+            if permission in effective:
                 return current_user
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: insufficient permissions.")
 

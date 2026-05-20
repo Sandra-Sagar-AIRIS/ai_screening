@@ -148,8 +148,11 @@ export async function getCandidateMatchesAts(candidateId: string, params?: { lim
   return result;
 }
 
-export async function rescoreCandidateAts(candidateId: string) {
-  return apiRequest<AtsCandidateRescoreResponse>(`/candidates/${candidateId}/rescore`, { method: "POST" });
+export async function rescoreCandidateAts(candidateId: string, jobId?: string) {
+  const url = jobId
+    ? `/candidates/${candidateId}/rescore?job_id=${encodeURIComponent(jobId)}`
+    : `/candidates/${candidateId}/rescore`;
+  return apiRequest<AtsCandidateRescoreResponse>(url, { method: "POST" });
 }
 
 export async function getAtsPairStatus(candidateId: string, jobId: string) {

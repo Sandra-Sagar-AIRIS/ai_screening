@@ -2,14 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatApiErrorForUser } from "@/lib/api/client";
-import {
-  getDashboardSummary,
-  readCachedDashboardSummary,
-  writeCachedDashboardSummary,
-  DashboardSummary,
-  DashboardActivityItem,
-  DashboardRecentJob,
-} from "@/lib/api/dashboard";
+import { getDashboardSummary, DashboardSummary, DashboardActivityItem, DashboardRecentJob } from "@/lib/api/dashboard";
 import { useAuthStore } from "@/store/auth-store";
 import { Users, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -26,8 +19,8 @@ function getRelativeTimeString(date: Date | number, lang = "en-US"): string {
 }
 
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardSummary | null>(() => readCachedDashboardSummary());
-  const [loading, setLoading] = useState(() => readCachedDashboardSummary() === null);
+  const [data, setData] = useState<DashboardSummary | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const permissions = useAuthStore((state) => state.permissions);
   const hydrated = useAuthStore((state) => state.hydrated);
@@ -50,10 +43,9 @@ export default function DashboardPage() {
       const summary = await getDashboardSummary();
       if (cancelledRef?.cancelled) return;
       setData(summary);
-      writeCachedDashboardSummary(summary);
     } catch (err: unknown) {
-      if (!cancelledRef?.cancelled && !isBackground && !hasCachedUi) {
-        setError(formatApiErrorForUser(err));
+      if (!cancelledRef?.cancelled) {
+        if (!isBackground) setError(formatApiErrorForUser(err));
       }
     } finally {
       if (!cancelledRef?.cancelled) {
@@ -75,8 +67,7 @@ export default function DashboardPage() {
       cancelledRef.cancelled = true;
       window.clearInterval(interval);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load when auth is ready; data cache handled inside loadData
-  }, [hydrated, token]);
+  }, [hydrated]);
 
   if (hydrated && !hasAnyPermission) {
     return (

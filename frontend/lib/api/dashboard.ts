@@ -86,3 +86,4 @@ export function writeCachedDashboardSummary(data: DashboardSummary): void {
     // Quota or private mode — ignore.
   }
 }
+}

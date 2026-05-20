@@ -27,10 +27,12 @@ from app.core.permissions import (
     JOBS_UPDATE,
     PIPELINE_READ,
     SUBMISSIONS_CREATE,
+    SUBMISSIONS_READ_OWN,
 )
 from app.db.session import get_db
 from app.schemas.auth import CurrentUser
 from app.schemas.job import (
+    ClientFeedbackUpdate,
     JobCreate,
     JobParseResponse,
     JobResponse,
@@ -44,6 +46,7 @@ from app.schemas.job import (
     JobMatchTriggerResponse,
     JobMatchesResponse,
     JobUpdate,
+    SubmissionOutcomeUpdate,
 )
 from app.schemas.candidate import CandidateCreate, CandidateResponse
 from app.models.job_vendor import JobVendor
@@ -824,6 +827,63 @@ def update_job_submission_status(
     """Task 7: Update submission status."""
     service = JobService(db)
     return service.update_submission_status(
+        job_id=job_id,
+        submission_id=submission_id,
+        organization_id=UUID(current_user.organization_id),
+        current_user=current_user,
+        payload=payload,
+    )
+
+
+@router.post(
+    "/{job_id}/submissions/{submission_id}/outcome",
+    response_model=JobSubmissionResponse,
+    summary="Set submission outcome and client feedback (PIPE-005)",
+)
+def update_submission_outcome(
+    job_id: UUID,
+    submission_id: UUID,
+    payload: SubmissionOutcomeUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(JOBS_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> JobSubmissionResponse:
+    """
+    POST /jobs/{job_id}/submissions/{submission_id}/outcome — PIPE-005
+
+    Set the client outcome (accepted/rejected/pending) and optional free-text feedback.
+    Vendors cannot call this endpoint. Status update is reflected in real-time via vendor polling.
+    """
+    service = JobService(db)
+    return service.update_submission_outcome(
+        job_id=job_id,
+        submission_id=submission_id,
+        organization_id=UUID(current_user.organization_id),
+        current_user=current_user,
+        payload=payload,
+    )
+
+
+@router.patch(
+    "/{job_id}/submissions/{submission_id}/feedback",
+    response_model=JobSubmissionResponse,
+    summary="Update client feedback on a submission (PIPE-005)",
+)
+def update_submission_feedback(
+    job_id: UUID,
+    submission_id: UUID,
+    payload: ClientFeedbackUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(JOBS_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> JobSubmissionResponse:
+    """
+    PATCH /jobs/{job_id}/submissions/{submission_id}/feedback — PIPE-005
+
+    Update client feedback text independently of outcome.
+    """
+    service = JobService(db)
+    return service.update_client_feedback(
         job_id=job_id,
         submission_id=submission_id,
         organization_id=UUID(current_user.organization_id),

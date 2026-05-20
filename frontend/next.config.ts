@@ -5,8 +5,8 @@ import type { NextConfig } from "next";
 /** Directory containing this config (the `frontend` app root). */
 const appRoot = path.dirname(fileURLToPath(import.meta.url));
 
-const apiProxyTarget =
-  process.env.API_PROXY_TARGET?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
+const apiBackend =
+  process.env.API_BACKEND_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -35,15 +35,11 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  // Dev: browser calls same-origin /api/v1 → Next proxies to FastAPI (avoids cross-port connection issues).
   async rewrites() {
-    if (process.env.NODE_ENV === "production" && !process.env.API_PROXY_TARGET) {
-      return [];
-    }
     return [
       {
         source: "/api/v1/:path*",
-        destination: `${apiProxyTarget}/api/v1/:path*`,
+        destination: `${apiBackend}/api/v1/:path*`,
       },
     ];
   },

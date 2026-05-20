@@ -107,12 +107,18 @@ def rescore_candidate_matches(
         bool,
         Query(description="Run full deterministic+semantic pipeline in-request (slow; for debugging)."),
     ] = False,
+    job_id: Annotated[
+        UUID | None,
+        Query(description="Scope rescore to a single candidate-job pair. Omit to rescore all pipeline jobs."),
+    ] = None,
 ) -> AtsCandidateRescoreResponse:
     org_id = UUID(current_user.organization_id)
     service = JobService(db)
     if sync:
         try:
-            pairs = service.rescore_candidate_full_sync(organization_id=org_id, candidate_id=candidate_id)
+            pairs = service.rescore_candidate_full_sync(
+                organization_id=org_id, candidate_id=candidate_id, job_id=job_id
+            )
             db.commit()
         except Exception as exc:
             db.rollback()
@@ -132,7 +138,9 @@ def rescore_candidate_matches(
             mode="full_sync",
         )
     try:
-        pairs = service.rescore_candidate_fast(organization_id=org_id, candidate_id=candidate_id)
+        pairs = service.rescore_candidate_fast(
+            organization_id=org_id, candidate_id=candidate_id, job_id=job_id
+        )
         db.commit()
     except Exception as exc:
         db.rollback()

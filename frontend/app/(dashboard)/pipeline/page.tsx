@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -400,6 +400,8 @@ export default function PipelinePage() {
     useSensor(KeyboardSensor)
   );
 
+export default function PipelineLegacyRedirect() {
+  const router = useRouter();
   useEffect(() => {
     if (selectedJobId && typeof window !== "undefined") {
       window.sessionStorage.setItem(PIPELINE_SELECTED_JOB_KEY, selectedJobId);
