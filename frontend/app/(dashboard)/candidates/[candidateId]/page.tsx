@@ -43,7 +43,9 @@ import { listScreenings, retryScreening } from "@/lib/api/ai_screening";
 import type { AIScreeningListItem } from "@/lib/api/types";
 import { StartScreeningModal } from "@/components/pipeline/StartScreeningModal";
 import { getJobs, submitCandidateToJob } from "@/lib/api/jobs";
-import { getPipelines, updatePipeline } from "@/lib/api/pipeline";
+import { getPipelines, transitionPipelineStage } from "@/lib/api/pipeline";
+import { PipelineStageHistoryPanel } from "@/components/pipeline/PipelineStageHistoryPanel";
+import { RejectCandidateModal } from "@/components/pipeline/RejectCandidateModal";
 import {
   atsAwaitingSemanticEnrichment,
   getCandidateMatchesAts,
@@ -140,6 +142,7 @@ export default function CandidateDetailPage() {
   const [submitJobId, setSubmitJobId] = useState("");
   const [submittingToJob, setSubmittingToJob] = useState(false);
   const [updatingPipelineId, setUpdatingPipelineId] = useState<string | null>(null);
+  const [rejectTargetPipeline, setRejectTargetPipeline] = useState<Pipeline | null>(null);
   const [atsMatches, setAtsMatches] = useState<CandidateMatchEntry[]>([]);
   const [atsLoading, setAtsLoading] = useState(false);
   const [atsRescoreBusy, setAtsRescoreBusy] = useState(false);
@@ -823,28 +826,38 @@ export default function CandidateDetailPage() {
     }
   }
 
-  async function handleQuickStageUpdate(pipelineId: string, nextStage: Pipeline["stage"]) {
+  // PIPE-002: primary "advance" transition — moves to the next logical stage.
+  // The server validates the transition; invalid moves return 422 with a clear message.
+  async function handleAdvanceStage(pipelineId: string, nextStage: Pipeline["stage"]) {
     if (!candidate) return;
     setUpdatingPipelineId(pipelineId);
     try {
-      await updatePipeline(pipelineId, { stage: nextStage });
+      await transitionPipelineStage(pipelineId, { stage: nextStage });
       const linkedPipelines = await getPipelines(200, 0, undefined, candidate.id);
       setPipelines(linkedPipelines);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to update pipeline stage.");
+      setError(err instanceof Error ? err.message : "Unable to advance pipeline stage.");
     } finally {
       setUpdatingPipelineId(null);
     }
   }
 
-  async function handleRescoreAts() {
+  // PIPE-002: called after RejectCandidateModal confirms the rejection.
+  async function handleRejectSuccess(updated: Pipeline) {
+    setPipelines((prev) =>
+      prev.map((p) => (p.id === updated.id ? updated : p))
+    );
+    setRejectTargetPipeline(null);
+  }
+
+  async function handleRescoreAts(scopedJobId?: string) {
     if (!params.candidateId) return;
     const loadSeq = candidateLoadSeqRef.current;
     if (atsSemanticInFlight || atsRescoreBusy) return;
     setAtsRescoreBusy(true);
     setError(null);
     try {
-      const meta = await rescoreCandidateAts(params.candidateId);
+      const meta = await rescoreCandidateAts(params.candidateId, scopedJobId);
       try {
         const snap = await getCandidateMatchesAts(params.candidateId, { limit: 50, offset: 0 });
         if (loadSeq === candidateLoadSeqRef.current) {
@@ -857,12 +870,15 @@ export default function CandidateDetailPage() {
         }
       }
       if (loadSeq === candidateLoadSeqRef.current && meta.semantic_enrichment === "queued") {
-        const pairJobIds = Array.from(
-          new Set([
-            ...snapJobIdsFromMatches(atsMatches),
-            ...pipelines.map((p) => p.job_id),
-          ])
-        );
+        // Poll only the specific job pair when scoped; otherwise poll all pairs.
+        const pairJobIds = scopedJobId
+          ? [scopedJobId]
+          : Array.from(
+              new Set([
+                ...snapJobIdsFromMatches(atsMatches),
+                ...pipelines.map((p) => p.job_id),
+              ])
+            );
         if (pairJobIds.length > 0) {
           await pollAtsPairStatusesUntilSettled(
             pairJobIds.map((jobId) => ({ candidate_id: params.candidateId, job_id: jobId })),
@@ -1300,7 +1316,7 @@ export default function CandidateDetailPage() {
                   emptyDescription="This candidate was added manually or the file is missing."
                 />
 
-                {/* Applied Jobs */}
+                {/* Applied Jobs — PIPE-002 stage management */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                   <div className="border-b border-gray-100 bg-gray-50/50 p-5">
                     <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
@@ -1314,52 +1330,117 @@ export default function CandidateDetailPage() {
                         <p className="text-sm text-gray-500">No jobs applied yet.</p>
                       </div>
                     ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm">
-                          <thead className="bg-gray-50/50 border-b border-gray-100">
-                            <tr>
-                              <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider">Job Title</th>
-                              <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider">Current Stage</th>
-                              <th className="px-6 py-3 font-medium text-gray-500 uppercase text-xs tracking-wider text-right">Last Updated</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {sortedPipelines.map((pipeline) => (
-                              <tr key={pipeline.id} className="hover:bg-gray-50/50 transition-colors">
-                                <td className="px-6 py-4 font-medium text-gray-900">
-                                  {jobs.find((job) => job.id === pipeline.job_id)?.title ?? pipeline.job_id}
-                                </td>
-                                <td className="px-6 py-4">
-                                  <select
-                                    className={cn(
-                                      "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider outline-none border transition-colors",
-                                      pipeline.stage === "placed" ? "bg-green-50 border-green-200 text-green-700" :
-                                        pipeline.stage === "offer" ? "bg-indigo-50 border-indigo-200 text-indigo-700" :
-                                          pipeline.stage === "interview" ? "bg-blue-50 border-blue-200 text-blue-700" :
-                                            "bg-gray-50 border-gray-200 text-gray-700 hover:border-gray-300 focus:border-[#FF5A1F] focus:ring-1 focus:ring-[#FF5A1F]"
-                                    )}
-                                    value={pipeline.stage}
-                                    onChange={(event) => void handleQuickStageUpdate(pipeline.id, event.target.value as Pipeline["stage"])}
-                                    disabled={updatingPipelineId === pipeline.id}
+                      <div className="divide-y divide-gray-100">
+                        {sortedPipelines.map((pipeline) => {
+                          const isTerminal = pipeline.stage === "placed" || pipeline.stage === "rejected";
+                          const isBusy = updatingPipelineId === pipeline.id;
+                          const NEXT_STAGE: Record<string, Pipeline["stage"]> = {
+                            applied: "screening",
+                            screening: "interview",
+                            ai_screening: "interview",
+                            interview: "offer",
+                            offer: "placed",
+                          };
+                          const NEXT_LABEL: Record<string, string> = {
+                            applied: "Move to Screening",
+                            screening: "Move to Interview",
+                            ai_screening: "Move to Interview",
+                            interview: "Move to Offer",
+                            offer: "Mark Hired",
+                          };
+                          const STAGE_BADGE: Record<string, string> = {
+                            applied: "bg-violet-50 border-violet-200 text-violet-700",
+                            screening: "bg-sky-50 border-sky-200 text-sky-700",
+                            ai_screening: "bg-orange-50 border-orange-200 text-orange-700",
+                            interview: "bg-blue-50 border-blue-200 text-blue-700",
+                            offer: "bg-indigo-50 border-indigo-200 text-indigo-700",
+                            placed: "bg-green-50 border-green-200 text-green-700",
+                            rejected: "bg-red-50 border-red-200 text-red-700",
+                          };
+                          const STAGE_DISPLAY: Record<string, string> = {
+                            applied: "Applied",
+                            screening: "Screening",
+                            ai_screening: "AI Screening",
+                            interview: "Interview",
+                            offer: "Offered",
+                            placed: "Hired ✓",
+                            rejected: "Rejected",
+                          };
+                          const nextStage = NEXT_STAGE[pipeline.stage];
+                          const nextLabel = NEXT_LABEL[pipeline.stage];
+                          return (
+                            <div key={pipeline.id} className="p-5 space-y-3">
+                              {/* Row: job title + stage badge */}
+                              <div className="flex items-center justify-between gap-3 flex-wrap">
+                                <span className="font-medium text-sm text-gray-900">
+                                  {jobs.find((job) => job.id === pipeline.job_id)?.title ?? "Unknown Job"}
+                                </span>
+                                <span className={cn(
+                                  "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider border",
+                                  STAGE_BADGE[pipeline.stage] ?? "bg-gray-50 border-gray-200 text-gray-700"
+                                )}>
+                                  {STAGE_DISPLAY[pipeline.stage] ?? pipeline.stage}
+                                </span>
+                              </div>
+
+                              {/* Row: advance + reject actions */}
+                              {!isTerminal && (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {nextStage && nextLabel && (
+                                    <button
+                                      type="button"
+                                      disabled={isBusy}
+                                      onClick={() => void handleAdvanceStage(pipeline.id, nextStage)}
+                                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#FF5A1F] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#E54E1A] disabled:opacity-50 transition-colors"
+                                    >
+                                      {isBusy ? (
+                                        <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>
+                                      ) : (
+                                        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5-5 5M6 7l5 5-5 5" /></svg>
+                                      )}
+                                      {isBusy ? "Updating…" : nextLabel}
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() => setRejectTargetPipeline(pipeline)}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50 transition-colors"
                                   >
-                                    <option value="applied">Applied</option>
-                                    <option value="screening">Screening</option>
-                                    <option value="interview">Interview</option>
-                                    <option value="offer">Offered</option>
-                                    <option value="placed">Hired</option>
-                                  </select>
-                                </td>
-                                <td className="px-6 py-4 text-xs text-gray-500 text-right">
-                                  {new Date(pipeline.updated_at).toLocaleDateString()}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                    Reject
+                                  </button>
+                                  <span className="ml-auto text-xs text-gray-400">
+                                    Updated {new Date(pipeline.updated_at).toLocaleDateString()}
+                                  </span>
+                                </div>
+                              )}
+
+                              {isTerminal && (
+                                <p className="text-xs text-gray-400">
+                                  Updated {new Date(pipeline.updated_at).toLocaleDateString()}
+                                </p>
+                              )}
+
+                              {/* Stage history panel (PIPE-002) */}
+                              <PipelineStageHistoryPanel pipelineId={pipeline.id} />
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
                 </div>
+
+                {/* Rejection modal */}
+                {rejectTargetPipeline && (
+                  <RejectCandidateModal
+                    pipeline={rejectTargetPipeline}
+                    candidateName={candidate ? `${candidate.first_name} ${candidate.last_name}` : undefined}
+                    onSuccess={handleRejectSuccess}
+                    onCancel={() => setRejectTargetPipeline(null)}
+                  />
+                )}
               </div>
             )}
 
@@ -1401,7 +1482,7 @@ export default function CandidateDetailPage() {
                       jobTitle={jobs.find((job) => job.id === match.job_id)?.title ?? match.job_id}
                       executiveSummary={candidate.experience_summary}
                       isLoading={false}
-                      onRescore={() => void handleRescoreAts()}
+                      onRescore={() => void handleRescoreAts(match.job_id)}
                       rescoreBusy={atsRescoreBusy || atsSemanticInFlight}
                       data={{
                         fit_score: match.fit_score,

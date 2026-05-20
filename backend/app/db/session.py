@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from urllib.parse import urlparse
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
@@ -31,22 +32,25 @@ settings = get_settings()
 # For local Postgres the defaults work fine.
 
 _db_url = settings.database_url or ""
-_use_pgbouncer = "pooler.supabase.com" in _db_url
+_parsed_db = urlparse(_db_url)
+# Transaction-mode pooler (:6543) requires NullPool + no prepared statements.
+# Session-mode pooler (:5432) can use a small app-side pool (much faster per request).
+_use_transaction_pooler = (
+    "pooler.supabase.com" in _db_url and _parsed_db.port == 6543
+)
 
 _engine_kwargs: dict = {
     "future": True,
     "hide_parameters": True,
 }
 
-if _use_pgbouncer:
-    # No SQLAlchemy-side connection pool; pgBouncer manages the real pool.
+if _use_transaction_pooler:
     _engine_kwargs["poolclass"] = NullPool
-    # Disable psycopg server-side prepared statements (incompatible with
-    # pgBouncer transaction mode — causes DuplicatePreparedStatement errors).
     _engine_kwargs["connect_args"] = {"prepare_threshold": None}
 else:
-    # Local dev: keep pool_pre_ping so stale connections are detected quickly.
     _engine_kwargs["pool_pre_ping"] = True
+    _engine_kwargs["pool_size"] = 5
+    _engine_kwargs["max_overflow"] = 10
 
 engine = create_engine(_db_url, **_engine_kwargs)
 

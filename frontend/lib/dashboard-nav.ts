@@ -12,6 +12,7 @@ export const NAV_PERMISSION_CODES = {
   PIPELINE_READ: "pipeline:read",
   USERS_INVITE: "users:invite",
   INTERVIEWS_READ: "interviews:read",
+  SUBMISSIONS_READ_OWN: "submissions:read_own",
 } as const;
 
 export type SidebarNavItem = {
@@ -46,9 +47,34 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     showInSidebar: false,
   },
   {
+    name: "My Submissions",
+    path: "/vendor/submissions",
+    anyOfPermissions: [NAV_PERMISSION_CODES.SUBMISSIONS_READ_OWN],
+  },
+  {
+    // Unified pipeline workspace (table + kanban toggle at /pipelines).
     name: "Pipeline",
+    path: "/pipelines",
+    anyOfPermissions: [NAV_PERMISSION_CODES.PIPELINE_READ],
+  },
+  {
+    // Legacy /pipeline route redirects to /pipelines?view=kanban — keep RBAC entry for access guard.
+    name: "Pipeline (legacy)",
     path: "/pipeline",
     anyOfPermissions: [NAV_PERMISSION_CODES.PIPELINE_READ],
+    showInSidebar: false,
+  },
+  {
+    name: "Pipeline Analytics",
+    path: "/pipeline-analytics",
+    anyOfPermissions: [NAV_PERMISSION_CODES.PIPELINE_READ],
+  },
+  // Pipeline detail pages (/pipelines/{id}) — same RBAC as Pipeline workspace.
+  {
+    name: "Pipeline Detail",
+    path: "/pipelines",
+    anyOfPermissions: [NAV_PERMISSION_CODES.PIPELINE_READ],
+    showInSidebar: false,
   },
   {
     name: "Invites",

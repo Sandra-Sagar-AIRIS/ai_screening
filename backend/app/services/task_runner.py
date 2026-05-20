@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 logger = logging.getLogger(__name__)
 _FALLBACK_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="airis-task-fallback")
+_SHUTDOWN = False
+
+
+def _celery_dispatch_enabled() -> bool:
+    """When false, skip Celery and run the in-process fallback immediately (dev without Redis)."""
+    return os.getenv("CELERY_DISPATCH_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+
+
+def shutdown_task_runner(*, wait: bool = False) -> None:
+    """Stop background dispatch threads so uvicorn can exit promptly."""
+    global _SHUTDOWN
+    _SHUTDOWN = True
+    _FALLBACK_EXECUTOR.shutdown(wait=wait, cancel_futures=True)
 
 
 def _run_fallback_safely(*, fallback: Callable[..., Any], kwargs: dict[str, Any]) -> None:
@@ -29,7 +43,9 @@ def _dispatch_in_worker(task: Any | None, fallback: Callable[..., Any], kwargs: 
     Celery's ``.delay()`` can block for a long time when the broker is slow or
     unreachable; never call it on the request thread.
     """
-    if task is not None and hasattr(task, "delay"):
+    if _SHUTDOWN:
+        return
+    if task is not None and hasattr(task, "delay") and _celery_dispatch_enabled():
         try:
             task.delay(**kwargs)
             return
@@ -42,6 +58,8 @@ def _dispatch_in_worker(task: Any | None, fallback: Callable[..., Any], kwargs: 
                     "kwargs_keys": sorted(kwargs.keys()),
                 },
             )
+    if _SHUTDOWN:
+        return
     _run_fallback_safely(fallback=fallback, kwargs=kwargs)
 
 
@@ -56,5 +74,7 @@ def dispatch_task(
     Celery enqueue and in-process fallback both run on a small thread pool so
     FastAPI can return immediately after the DB commit.
     """
+    if _SHUTDOWN:
+        return
     _FALLBACK_EXECUTOR.submit(_dispatch_in_worker, task, fallback, kwargs)
 

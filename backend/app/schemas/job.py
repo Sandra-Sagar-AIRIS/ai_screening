@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class JobParseResponse(BaseModel):
@@ -42,6 +42,42 @@ class JobSubmissionStatus(StrEnum):
     INTERVIEWING = "interviewing"
     OFFERED = "offered"
     HIRED = "hired"
+
+
+# ── PIPE-005: Submission Tracking enums ───────────────────────────────────────
+
+class SubmissionOutcome(StrEnum):
+    """Client decision on a submission."""
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class VendorSubmissionStatus(StrEnum):
+    """Vendor-facing submission status — derived from outcome + submission_status."""
+    SUBMITTED = "submitted"
+    UNDER_REVIEW = "under_review"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+def derive_vendor_status(
+    submission_status: str,
+    outcome: str,
+) -> VendorSubmissionStatus:
+    """Compute the vendor-visible status from the recruiter-side fields."""
+    if outcome == SubmissionOutcome.ACCEPTED:
+        return VendorSubmissionStatus.ACCEPTED
+    if outcome == SubmissionOutcome.REJECTED:
+        return VendorSubmissionStatus.REJECTED
+    # outcome == pending
+    if submission_status in (
+        JobSubmissionStatus.SHORTLISTED,
+        JobSubmissionStatus.INTERVIEWING,
+        JobSubmissionStatus.OFFERED,
+    ):
+        return VendorSubmissionStatus.UNDER_REVIEW
+    return VendorSubmissionStatus.SUBMITTED
 
 
 class JobCreate(BaseModel):
@@ -111,6 +147,20 @@ class JobSubmissionStatusUpdate(BaseModel):
     status: JobSubmissionStatus
 
 
+class SubmissionOutcomeUpdate(BaseModel):
+    """PIPE-005: Update outcome + optional client feedback."""
+    outcome: SubmissionOutcome
+    client_feedback: str | None = Field(
+        default=None,
+        description="Free-text feedback from the client.",
+    )
+
+
+class ClientFeedbackUpdate(BaseModel):
+    """PIPE-005: Update client feedback independently of outcome."""
+    client_feedback: str = Field(..., min_length=1)
+
+
 class JobSubmissionResponse(BaseModel):
     id: UUID
     job_id: UUID
@@ -119,8 +169,53 @@ class JobSubmissionResponse(BaseModel):
     submitted_at: datetime
     submitted_by: UUID
     notes: str | None
+    # PIPE-005 fields
+    vendor_id: UUID | None = None
+    outcome: SubmissionOutcome = SubmissionOutcome.PENDING
+    client_feedback: str | None = None
+    vendor_status: VendorSubmissionStatus | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def _compute_vendor_status(self) -> "JobSubmissionResponse":
+        """Derive vendor_status after all fields are populated."""
+        self.vendor_status = derive_vendor_status(
+            str(self.submission_status),
+            str(self.outcome),
+        )
+        return self
+
+
+class VendorSubmissionResponse(BaseModel):
+    """PIPE-005: Vendor-facing submission row (no cross-vendor data exposed)."""
+    id: UUID
+    job_id: UUID
+    candidate_id: UUID
+    submitted_at: datetime
+    outcome: SubmissionOutcome = SubmissionOutcome.PENDING
+    vendor_status: VendorSubmissionStatus | None = None
+    client_feedback: str | None = None  # shown only when outcome is final
+    notes: str | None = None
+    # Internal: read from ORM to derive vendor_status, excluded from serialised output.
+    submission_status: JobSubmissionStatus = Field(
+        default=JobSubmissionStatus.PENDING,
+        exclude=True,
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def _compute_vendor_fields(self) -> "VendorSubmissionResponse":
+        """Derive vendor_status and gate client_feedback after all fields are read."""
+        self.vendor_status = derive_vendor_status(
+            str(self.submission_status),
+            str(self.outcome),
+        )
+        # Only expose client feedback when a final outcome has been set.
+        if self.outcome == SubmissionOutcome.PENDING:
+            self.client_feedback = None
+        return self
 
 
 class HybridScoreBreakdown(BaseModel):

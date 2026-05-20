@@ -1,23 +1,46 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.candidate import Candidate
-from app.models.pipeline import Pipeline
+from app.models.pipeline import Pipeline, PipelineStageHistory, PipelineStatusHistory
 from app.models.job import Job
 from app.core.config import get_settings
 from app.schemas.auth import CurrentUser
-from app.schemas.pipeline import PipelineCreate, PipelineStage, PipelineStatus, PipelineUpdate
+from app.schemas.pipeline import (
+    PipelineCreate,
+    PipelineSortBy,
+    PipelineSortDir,
+    PipelineStage,
+    PipelineStageTransitionRequest,
+    PipelineStatus,
+    PipelineStatusChangeRequest,
+    PipelineUpdate,
+    WithdrawPipelineRequest,
+)
 from app.services.access_scope_service import AccessScopeService
 from app.services.candidate_service import CandidateService
 
 logger = logging.getLogger(__name__)
+
+# ── PIPE-002: Valid stage transitions ─────────────────────────────────────────
+# Terminal stages (placed, rejected) have no outgoing transitions.
+VALID_TRANSITIONS: dict[str, frozenset[str]] = {
+    PipelineStage.APPLIED.value:      frozenset({PipelineStage.SCREENING.value, PipelineStage.REJECTED.value}),
+    PipelineStage.SCREENING.value:    frozenset({PipelineStage.INTERVIEW.value, PipelineStage.REJECTED.value}),
+    PipelineStage.AI_SCREENING.value: frozenset({PipelineStage.INTERVIEW.value, PipelineStage.REJECTED.value}),
+    PipelineStage.INTERVIEW.value:    frozenset({PipelineStage.OFFER.value, PipelineStage.REJECTED.value}),
+    PipelineStage.OFFER.value:        frozenset({PipelineStage.PLACED.value, PipelineStage.REJECTED.value}),
+    PipelineStage.PLACED.value:       frozenset(),
+    PipelineStage.REJECTED.value:     frozenset(),
+}
 
 
 class PipelineService:
@@ -84,6 +107,30 @@ class PipelineService:
         self.db.refresh(pipeline)
         return pipeline
 
+    def _build_pipeline_filter_stmt(
+        self,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        *,
+        job_id: UUID | None = None,
+        candidate_id: UUID | None = None,
+        stage: PipelineStage | None = None,
+        pipeline_status: PipelineStatus | None = None,
+    ) -> Select:
+        """Return a base SELECT statement with all org-scope and filter predicates applied."""
+        stmt: Select = select(Pipeline).where(Pipeline.organization_id == organization_id)
+        if job_id is not None:
+            stmt = stmt.where(Pipeline.job_id == job_id)
+        if candidate_id is not None:
+            stmt = stmt.where(Pipeline.candidate_id == candidate_id)
+        if stage is not None:
+            stmt = stmt.where(Pipeline.stage == stage.value)
+        if pipeline_status is not None:
+            stmt = stmt.where(Pipeline.status == pipeline_status.value)
+        if self._scope.is_scoped_user(current_user):
+            stmt = stmt.where(Pipeline.job_id.in_(self._scope.allowed_job_ids_subquery(current_user)))
+        return stmt
+
     def list_pipelines(
         self,
         organization_id: UUID,
@@ -94,17 +141,21 @@ class PipelineService:
         job_id: UUID | None = None,
         candidate_id: UUID | None = None,
         stage: PipelineStage | None = None,
+        pipeline_status: PipelineStatus | None = None,
+        sort_by: PipelineSortBy = PipelineSortBy.CREATED_AT,
+        sort_dir: PipelineSortDir = PipelineSortDir.DESC,
     ) -> list[Pipeline]:
-        stmt: Select[tuple[Pipeline]] = select(Pipeline).where(Pipeline.organization_id == organization_id)
-        if job_id is not None:
-            stmt = stmt.where(Pipeline.job_id == job_id)
-        if candidate_id is not None:
-            stmt = stmt.where(Pipeline.candidate_id == candidate_id)
-        if stage is not None:
-            stmt = stmt.where(Pipeline.stage == stage.value)
-        if self._scope.is_scoped_user(current_user):
-            stmt = stmt.where(Pipeline.job_id.in_(self._scope.allowed_job_ids_subquery(current_user)))
-        stmt = stmt.order_by(Pipeline.created_at.desc()).offset(offset).limit(limit)
+        stmt = self._build_pipeline_filter_stmt(
+            organization_id,
+            current_user,
+            job_id=job_id,
+            candidate_id=candidate_id,
+            stage=stage,
+            pipeline_status=pipeline_status,
+        )
+        order_col = Pipeline.stage_updated_at if sort_by == PipelineSortBy.STAGE_UPDATED_AT else Pipeline.created_at
+        stmt = stmt.order_by(order_col.asc() if sort_dir == PipelineSortDir.ASC else order_col.desc())
+        stmt = stmt.offset(offset).limit(limit)
         pipelines = list(self.db.scalars(stmt))
         logger.info(
             "Pipeline list fetched",
@@ -116,6 +167,87 @@ class PipelineService:
             },
         )
         return pipelines
+
+    def list_pipelines_paginated(
+        self,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        job_id: UUID | None = None,
+        candidate_id: UUID | None = None,
+        stage: PipelineStage | None = None,
+        pipeline_status: PipelineStatus | None = None,
+        sort_by: PipelineSortBy = PipelineSortBy.CREATED_AT,
+        sort_dir: PipelineSortDir = PipelineSortDir.DESC,
+    ) -> tuple[list[Pipeline], int, dict[str, int]]:
+        """
+        PIPE-004: Return (pipelines, total_count, stage_counts).
+
+        - `total_count` is the full count matching all filters (before pagination).
+        - `stage_counts` is a per-stage breakdown across ALL filters EXCEPT the
+          stage filter itself, giving callers visibility into the full distribution.
+          Both queries run as single SQL statements — no N+1.
+        """
+        # ── 1. Filtered page ──────────────────────────────────────────────────
+        paginated_stmt = self._build_pipeline_filter_stmt(
+            organization_id,
+            current_user,
+            job_id=job_id,
+            candidate_id=candidate_id,
+            stage=stage,
+            pipeline_status=pipeline_status,
+        )
+        order_col = Pipeline.stage_updated_at if sort_by == PipelineSortBy.STAGE_UPDATED_AT else Pipeline.created_at
+        paginated_stmt = paginated_stmt.order_by(
+            order_col.asc() if sort_dir == PipelineSortDir.ASC else order_col.desc()
+        ).offset(offset).limit(limit)
+        pipelines = list(self.db.scalars(paginated_stmt))
+
+        # ── 2. Total count (same filters, no pagination) ──────────────────────
+        count_stmt = self._build_pipeline_filter_stmt(
+            organization_id,
+            current_user,
+            job_id=job_id,
+            candidate_id=candidate_id,
+            stage=stage,
+            pipeline_status=pipeline_status,
+        )
+        total: int = self.db.scalar(
+            select(func.count()).select_from(count_stmt.subquery())
+        ) or 0
+
+        # ── 3. Stage counts (all filters EXCEPT stage for full facet view) ────
+        stage_count_base = self._build_pipeline_filter_stmt(
+            organization_id,
+            current_user,
+            job_id=job_id,
+            candidate_id=candidate_id,
+            stage=None,            # intentionally omit stage filter
+            pipeline_status=pipeline_status,
+        )
+        # Use the subquery's own columns — referencing Pipeline.stage / Pipeline.id
+        # directly after .select_from(subquery) creates a cross-join in SQLAlchemy.
+        sub = stage_count_base.subquery()
+        stage_count_stmt = (
+            select(sub.c.stage, func.count(sub.c.id).label("cnt"))
+            .group_by(sub.c.stage)
+        )
+        stage_counts: dict[str, int] = {
+            row.stage: row.cnt for row in self.db.execute(stage_count_stmt)
+        }
+
+        logger.info(
+            "Pipeline paginated list fetched",
+            extra={
+                "organization_id": str(organization_id),
+                "total": total,
+                "returned": len(pipelines),
+                "stage_counts": stage_counts,
+            },
+        )
+        return pipelines, total, stage_counts
 
     def list_pipeline_candidates_for_job(
         self,
@@ -227,3 +359,342 @@ class PipelineService:
             select(Pipeline).order_by(Pipeline.created_at.desc()).offset(offset).limit(limit)
         )
         return list(self.db.scalars(stmt))
+
+    # ── PIPE-002: Controlled stage transition ─────────────────────────────────
+
+    def transition_stage(
+        self,
+        pipeline_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        payload: PipelineStageTransitionRequest,
+    ) -> Pipeline:
+        """
+        Validate and apply a stage transition.
+
+        Raises:
+            422 — if the requested transition is not valid from the current stage.
+            422 — if rejecting without a sufficient reason (enforced by Pydantic schema).
+            404 — if the pipeline is not found.
+        """
+        pipeline = self.get_pipeline_by_id(pipeline_id, organization_id, current_user)
+
+        current_stage = pipeline.stage
+        new_stage = payload.stage.value
+        allowed_targets = VALID_TRANSITIONS.get(current_stage, frozenset())
+
+        if new_stage not in allowed_targets:
+            allowed_display = ", ".join(sorted(allowed_targets)) if allowed_targets else "none (terminal stage)"
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Cannot transition from '{current_stage}' to '{new_stage}'. "
+                    f"Allowed transitions: {allowed_display}."
+                ),
+            )
+
+        # Record history before mutating the pipeline row.
+        history = PipelineStageHistory(
+            pipeline_id=pipeline.id,
+            organization_id=organization_id,
+            previous_stage=current_stage,
+            new_stage=new_stage,
+            actor_user_id=UUID(current_user.user_id) if current_user.user_id else None,
+            reason=payload.reason,
+            transitioned_at=datetime.now(UTC),
+        )
+        self.db.add(history)
+
+        # Apply stage change; auto-close terminal stages.
+        # PIPE-004: record when the stage was last updated for sort-by-stage-updated.
+        pipeline.stage = new_stage
+        pipeline.stage_updated_at = datetime.now(UTC)
+        if new_stage in (PipelineStage.PLACED.value, PipelineStage.REJECTED.value):
+            pipeline.status = PipelineStatus.CLOSED.value
+
+        self.db.add(pipeline)
+        self.db.commit()
+        self.db.refresh(pipeline)
+
+        # COMM-005: best-effort notification — commit already happened so this
+        # must NEVER raise; any exception is swallowed and logged.
+        try:
+            _notify_stage_change(
+                db=self.db,
+                pipeline=pipeline,
+                previous_stage=current_stage,
+                new_stage=new_stage,
+                actor_user_id=UUID(current_user.user_id) if current_user.user_id else None,
+                reason=payload.reason,
+            )
+        except Exception:
+            logger.warning(
+                "pipeline.notify_stage_change.failed pipeline_id=%s — suppressed",
+                pipeline_id,
+                exc_info=True,
+            )
+
+        logger.info(
+            "pipeline.stage_transition pipeline_id=%s %s→%s actor=%s",
+            pipeline_id,
+            current_stage,
+            new_stage,
+            current_user.user_id,
+        )
+        return pipeline
+
+    def get_stage_history(
+        self,
+        pipeline_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> list[PipelineStageHistory]:
+        """Return the full ordered stage-transition history for a pipeline."""
+        # Access check — raises 404 if not found / not accessible.
+        self.get_pipeline_by_id(pipeline_id, organization_id, current_user)
+
+        return list(
+            self.db.scalars(
+                select(PipelineStageHistory)
+                .where(
+                    PipelineStageHistory.pipeline_id == pipeline_id,
+                    PipelineStageHistory.organization_id == organization_id,
+                )
+                .order_by(PipelineStageHistory.transitioned_at)
+            ).all()
+        )
+
+    # ── PIPE-003: Status tracking ─────────────────────────────────────────────
+
+    def change_pipeline_status(
+        self,
+        pipeline_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        payload: PipelineStatusChangeRequest,
+    ) -> Pipeline:
+        """
+        PIPE-003: Apply a deliberate status change with full audit trail.
+
+        Raises:
+            409  — if the requested status equals the current status (no-op).
+            403  — if a non-admin attempts to reopen a closed/placed pipeline.
+        """
+        pipeline = self.get_pipeline_by_id(pipeline_id, organization_id, current_user)
+
+        current_status = pipeline.status
+        new_status = payload.status.value
+
+        if current_status == new_status:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Pipeline status is already '{current_status}'.",
+            )
+
+        # Prevent re-opening a closed pipeline unless the caller is an admin.
+        if current_status == PipelineStatus.CLOSED.value and not _is_admin(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can reopen a closed pipeline.",
+            )
+
+        now = datetime.now(UTC)
+        history = PipelineStatusHistory(
+            pipeline_id=pipeline.id,
+            organization_id=organization_id,
+            previous_status=current_status,
+            new_status=new_status,
+            actor_user_id=UUID(current_user.user_id) if current_user.user_id else None,
+            reason=payload.reason,
+            changed_at=now,
+        )
+        self.db.add(history)
+
+        pipeline.status = new_status
+        pipeline.status_changed_at = now
+        self.db.add(pipeline)
+        self.db.commit()
+        self.db.refresh(pipeline)
+
+        # COMM-005: best-effort notification — commit already happened.
+        try:
+            _notify_status_change(
+                db=self.db,
+                pipeline=pipeline,
+                previous_status=current_status,
+                new_status=new_status,
+                actor_user_id=UUID(current_user.user_id) if current_user.user_id else None,
+                reason=payload.reason,
+            )
+        except Exception:
+            logger.warning(
+                "pipeline.notify_status_change.failed pipeline_id=%s — suppressed",
+                pipeline_id,
+                exc_info=True,
+            )
+
+        logger.info(
+            "pipeline.status_change pipeline_id=%s %s→%s actor=%s",
+            pipeline_id,
+            current_status,
+            new_status,
+            current_user.user_id,
+        )
+        return pipeline
+
+    def withdraw_pipeline(
+        self,
+        pipeline_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        payload: WithdrawPipelineRequest,
+    ) -> Pipeline:
+        """
+        PIPE-003: Withdraw a pipeline (candidate-requested removal).
+
+        Delegates to change_pipeline_status with status=WITHDRAWN.
+        Exposed as a dedicated endpoint so callers don't need to know
+        the internal PipelineStatus enum.
+        """
+        return self.change_pipeline_status(
+            pipeline_id,
+            organization_id,
+            current_user,
+            PipelineStatusChangeRequest(
+                status=PipelineStatus.WITHDRAWN,
+                reason=payload.reason,
+            ),
+        )
+
+    def get_status_history(
+        self,
+        pipeline_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> list[PipelineStatusHistory]:
+        """Return the full ordered status-change history for a pipeline (PIPE-003)."""
+        self.get_pipeline_by_id(pipeline_id, organization_id, current_user)
+
+        return list(
+            self.db.scalars(
+                select(PipelineStatusHistory)
+                .where(
+                    PipelineStatusHistory.pipeline_id == pipeline_id,
+                    PipelineStatusHistory.organization_id == organization_id,
+                )
+                .order_by(PipelineStatusHistory.changed_at)
+            ).all()
+        )
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
+
+def _is_admin(current_user: CurrentUser) -> bool:
+    return (getattr(current_user, "role", "") or "").lower() == "admin"
+
+
+# ── COMM-005 helpers ───────────────────────────────────────────────────────────
+
+def _notify_stage_change(
+    *,
+    db: Session,
+    pipeline: Pipeline,
+    previous_stage: str,
+    new_stage: str,
+    actor_user_id: UUID | None,
+    reason: str | None,
+) -> None:
+    """
+    COMM-005: Fire a best-effort notification on stage change.
+
+    Currently records a CandidateInteraction in the candidate-management
+    store when the candidate exists there.  Email / SMS delivery can be
+    wired in here once comm templates are configured for stage-change events.
+    """
+    try:
+        from app.candidate_management.models import CandidateInteraction, InteractionType  # noqa: PLC0415
+
+        # Look up the candidate in the candidate-management store using the
+        # ATS candidate id.  The CM store uses a different tenant key
+        # (org_id + workspace_id) so we query by id only and accept the first hit.
+        from app.candidate_management.models import Candidate as CMCandidate  # noqa: PLC0415
+        from sqlalchemy import select as _select  # noqa: PLC0415
+
+        cm_candidate = db.scalar(
+            _select(CMCandidate).where(CMCandidate.id == pipeline.candidate_id)
+        )
+        if cm_candidate is None:
+            # Candidate not in CM store — skip silently.
+            return
+
+        note = f"Stage changed: {previous_stage} → {new_stage}"
+        if reason:
+            note += f"\nReason: {reason}"
+
+        interaction = CandidateInteraction(
+            org_id=cm_candidate.org_id,
+            workspace_id=cm_candidate.workspace_id,
+            candidate_id=cm_candidate.id,
+            interaction_type=InteractionType.STAGE_CHANGE,
+            title=f"Pipeline stage: {new_stage}",
+            body=note,
+            actor_user_id=actor_user_id,
+        )
+        db.add(interaction)
+        db.commit()
+    except Exception:
+        # Never let notification failure roll back the already-committed transition.
+        logger.warning(
+            "comm_005.notify_stage_change failed pipeline_id=%s — suppressed",
+            pipeline.id,
+            exc_info=True,
+        )
+
+
+def _notify_status_change(
+    *,
+    db: Session,
+    pipeline: Pipeline,
+    previous_status: str,
+    new_status: str,
+    actor_user_id: UUID | None,
+    reason: str | None,
+) -> None:
+    """
+    COMM-005: Fire a best-effort notification on pipeline status change (PIPE-003).
+
+    Records a CandidateInteraction for the status event. Email / push delivery
+    can be wired in here once COMM templates are defined for status events.
+    """
+    try:
+        from app.candidate_management.models import CandidateInteraction, InteractionType  # noqa: PLC0415
+        from app.candidate_management.models import Candidate as CMCandidate  # noqa: PLC0415
+        from sqlalchemy import select as _select  # noqa: PLC0415
+
+        cm_candidate = db.scalar(
+            _select(CMCandidate).where(CMCandidate.id == pipeline.candidate_id)
+        )
+        if cm_candidate is None:
+            return
+
+        note = f"Status changed: {previous_status} → {new_status}"
+        if reason:
+            note += f"\nReason: {reason}"
+
+        interaction = CandidateInteraction(
+            org_id=cm_candidate.org_id,
+            workspace_id=cm_candidate.workspace_id,
+            candidate_id=cm_candidate.id,
+            interaction_type=InteractionType.STAGE_CHANGE,
+            title=f"Pipeline status: {new_status}",
+            body=note,
+            actor_user_id=actor_user_id,
+        )
+        db.add(interaction)
+        db.commit()
+    except Exception:
+        logger.warning(
+            "comm_005.notify_status_change failed pipeline_id=%s — suppressed",
+            pipeline.id,
+            exc_info=True,
+        )

@@ -36,10 +36,14 @@ from app.schemas.job import (
     JobMatchTriggerRequest,
     JobMatchTriggerResponse,
     JobMatchesResponse,
+    ClientFeedbackUpdate,
     JobSubmissionCreate,
     JobSubmissionResponse,
     JobSubmissionStatus,
     JobSubmissionStatusUpdate,
+    SubmissionOutcome,
+    SubmissionOutcomeUpdate,
+    VendorSubmissionResponse,
     JobUpdate,
     JobResponse,
 )
@@ -869,11 +873,15 @@ class JobService:
         candidate = self._candidates.get_candidate_by_id(payload.candidate_id, organization_id, current_user)
 
         submitted_by = UUID(current_user.user_id)
+        # PIPE-005: set vendor_id when the submitter is a vendor.
+        is_vendor = self._scope.is_vendor_user(current_user)
         submission = JobSubmission(
             job_id=job.id,
             candidate_id=candidate.id,
             submitted_by=submitted_by,
+            vendor_id=submitted_by if is_vendor else None,
             submission_status=JobSubmissionStatus.PENDING.value,
+            outcome=SubmissionOutcome.PENDING.value,
             notes=payload.notes,
         )
         self.db.add(submission)
@@ -979,8 +987,11 @@ class JobService:
         )
         if submission_status is not None:
             stmt = stmt.where(JobSubmission.submission_status == submission_status.value)
+        # PIPE-005 CRITICAL: vendor users see ONLY their own submissions (not other vendors').
+        if self._scope.is_vendor_user(current_user):
+            stmt = stmt.where(JobSubmission.vendor_id == UUID(current_user.user_id))
         stmt = stmt.order_by(JobSubmission.submitted_at.desc()).offset(offset).limit(limit)
-        
+
         try:
             submissions = list(self.db.scalars(stmt))
             return [JobSubmissionResponse.model_validate(s) for s in submissions]
@@ -989,6 +1000,116 @@ class JobService:
             logging.getLogger(__name__).warning(f"Could not fetch submissions (migration missing?): {e}")
             self.db.rollback()
             return []
+
+    def list_vendor_submissions(
+        self,
+        *,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[VendorSubmissionResponse]:
+        """
+        PIPE-005: Return ALL submissions made by this vendor across all their jobs.
+
+        CRITICAL SECURITY: vendor_id == current_user.user_id is always enforced.
+        Vendors cannot see submissions by other vendors.
+        """
+        if not self._scope.is_vendor_user(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only vendor users can access this endpoint.",
+            )
+        vendor_id = UUID(current_user.user_id)
+        # Scope to jobs this vendor is assigned to (belt + suspenders: vendor_id already scopes).
+        allowed_jobs_sub = self._scope.allowed_job_ids_subquery(current_user)
+        stmt = (
+            select(JobSubmission)
+            .where(
+                JobSubmission.vendor_id == vendor_id,
+                JobSubmission.job_id.in_(allowed_jobs_sub),
+            )
+            .order_by(JobSubmission.submitted_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        try:
+            submissions = list(self.db.scalars(stmt))
+            return [VendorSubmissionResponse.model_validate(s) for s in submissions]
+        except Exception as exc:
+            logger.warning("list_vendor_submissions.failed vendor_id=%s: %s", vendor_id, exc, exc_info=True)
+            self.db.rollback()
+            return []
+
+    def update_submission_outcome(
+        self,
+        *,
+        job_id: UUID,
+        submission_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        payload: SubmissionOutcomeUpdate,
+    ) -> JobSubmissionResponse:
+        """
+        PIPE-005: Set outcome (accepted/rejected/pending) and optional client feedback.
+        Only recruiters/admins/clients; vendors cannot call this.
+        """
+        if self._scope.is_vendor_user(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Vendors cannot update submission outcomes.",
+            )
+        job = self.get_job_by_id(job_id, organization_id, current_user)
+        submission = self.db.scalar(
+            select(JobSubmission).where(
+                JobSubmission.id == submission_id,
+                JobSubmission.job_id == job.id,
+            )
+        )
+        if submission is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found.")
+
+        submission.outcome = payload.outcome.value
+        if payload.client_feedback is not None:
+            submission.client_feedback = payload.client_feedback
+        self.db.add(submission)
+        self.db.commit()
+        self.db.refresh(submission)
+        logger.info(
+            "submission.outcome_updated submission_id=%s outcome=%s actor=%s",
+            submission_id, payload.outcome, current_user.user_id,
+        )
+        return JobSubmissionResponse.model_validate(submission)
+
+    def update_client_feedback(
+        self,
+        *,
+        job_id: UUID,
+        submission_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+        payload: ClientFeedbackUpdate,
+    ) -> JobSubmissionResponse:
+        """PIPE-005: Update client feedback text independently of outcome."""
+        if self._scope.is_vendor_user(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Vendors cannot set client feedback.",
+            )
+        job = self.get_job_by_id(job_id, organization_id, current_user)
+        submission = self.db.scalar(
+            select(JobSubmission).where(
+                JobSubmission.id == submission_id,
+                JobSubmission.job_id == job.id,
+            )
+        )
+        if submission is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found.")
+        submission.client_feedback = payload.client_feedback
+        self.db.add(submission)
+        self.db.commit()
+        self.db.refresh(submission)
+        return JobSubmissionResponse.model_validate(submission)
 
     def update_submission_status(
         self,
@@ -1355,15 +1476,24 @@ class JobService:
         )
         return len(candidate_ids)
 
-    def rescore_candidate_fast(self, *, organization_id: UUID, candidate_id: UUID) -> int:
-        job_ids = list(
-            self.db.scalars(
-                select(Pipeline.job_id).where(
-                    Pipeline.organization_id == organization_id,
-                    Pipeline.candidate_id == candidate_id,
+    def rescore_candidate_fast(
+        self,
+        *,
+        organization_id: UUID,
+        candidate_id: UUID,
+        job_id: UUID | None = None,
+    ) -> int:
+        if job_id is not None:
+            job_ids = [job_id]
+        else:
+            job_ids = list(
+                self.db.scalars(
+                    select(Pipeline.job_id).where(
+                        Pipeline.organization_id == organization_id,
+                        Pipeline.candidate_id == candidate_id,
+                    )
                 )
             )
-        )
         t0 = time.monotonic()
         for job_id in job_ids:
             self.rescore_candidate_job_deterministic_sync(
@@ -1385,16 +1515,25 @@ class JobService:
         )
         return len(job_ids)
 
-    def rescore_candidate_full_sync(self, *, organization_id: UUID, candidate_id: UUID) -> int:
-        """Synchronous full pipeline (deterministic + semantic) for every pipeline job."""
-        job_ids = list(
-            self.db.scalars(
-                select(Pipeline.job_id).where(
-                    Pipeline.organization_id == organization_id,
-                    Pipeline.candidate_id == candidate_id,
+    def rescore_candidate_full_sync(
+        self,
+        *,
+        organization_id: UUID,
+        candidate_id: UUID,
+        job_id: UUID | None = None,
+    ) -> int:
+        """Synchronous full pipeline (deterministic + semantic) for one or every pipeline job."""
+        if job_id is not None:
+            job_ids = [job_id]
+        else:
+            job_ids = list(
+                self.db.scalars(
+                    select(Pipeline.job_id).where(
+                        Pipeline.organization_id == organization_id,
+                        Pipeline.candidate_id == candidate_id,
+                    )
                 )
             )
-        )
         for job_id in job_ids:
             self.rescore_candidate_job_full_sync(
                 organization_id=organization_id, candidate_id=candidate_id, job_id=job_id

@@ -30,7 +30,7 @@ from app.models.job_vendor import JobVendor  # noqa: F401
 from app.models.organization import Organization  # noqa: F401
 from app.models.organization_role import OrganizationRole  # noqa: F401
 from app.models.permission import Permission  # noqa: F401
-from app.models.pipeline import Pipeline  # noqa: F401
+from app.models.pipeline import Pipeline, PipelineStageHistory  # noqa: F401
 from app.models.profile import Profile  # noqa: F401
 from app.models.role_permission import RolePermission  # noqa: F401
 

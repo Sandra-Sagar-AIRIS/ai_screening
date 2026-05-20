@@ -1,3 +1,4 @@
+import threading
 import time
 
 from fastapi import FastAPI, Request
@@ -9,7 +10,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import get_cors_origins, get_settings
 from app.candidate_management.api import router as candidate_management_router
-from app.models import reflect_database_schema
 from app.routes.auth import router as auth_router
 from app.routes.ats import router as ats_router
 from app.routes.candidate import router as candidate_router
@@ -30,6 +30,8 @@ from app.routes.roles import router as roles_router
 from app.routes.users import router as users_router
 from app.routes.vendor import router as vendor_router
 from app.routes.dashboard import router as dashboard_router
+from app.routes.pipeline_analytics import router as pipeline_analytics_router
+from app.routes.offer import router as offer_router
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -177,11 +179,27 @@ async def request_timing_middleware(request: Request, call_next):
     return response
 
 
-# Reflect once at startup so ORM classes are available for repositories/services.
 @app.on_event("startup")
 def startup_event() -> None:
-    reflect_database_schema()
-    _backfill_permissions()
+    # Permission backfill hits the DB for every org; run off the critical path so
+    # uvicorn can accept traffic immediately (reflection is lazy — see reflected.py).
+    threading.Thread(
+        target=_backfill_permissions,
+        name="permission-backfill",
+        daemon=True,
+    ).start()
+    # PIPE-008: start background offer expiry scheduler.
+    from app.scheduler import start_offer_expiry_scheduler
+    start_offer_expiry_scheduler()
+
+
+@app.on_event("shutdown")
+def shutdown_event() -> None:
+    from app.scheduler import stop_offer_expiry_scheduler
+    from app.services.task_runner import shutdown_task_runner
+
+    stop_offer_expiry_scheduler()
+    shutdown_task_runner(wait=False)
 
 
 def _backfill_permissions() -> None:
@@ -219,4 +237,6 @@ app.include_router(roles_router, prefix="/api/v1/roles", tags=["roles"])
 app.include_router(users_router, prefix="/api/v1/users", tags=["users"])
 app.include_router(vendor_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
+app.include_router(pipeline_analytics_router, prefix="/api/v1")
+app.include_router(offer_router, prefix="/api/v1")
 

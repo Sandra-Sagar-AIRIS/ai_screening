@@ -1,101 +1,183 @@
-import { API_BASE_URL, ApiError } from "@/lib/api/client";
-import type { Pipeline } from "@/lib/api/types";
+import { apiRequest, invalidateApiCache } from "@/lib/api/client";
+import type {
+  Pipeline,
+  PipelineListResponse,
+  PipelineStage,
+  PipelineStageHistory,
+  PipelineStatusHistory,
+  PipelineStatusChangePayload,
+  WithdrawPipelinePayload,
+} from "@/lib/api/types";
 
-type PipelineCreatePayload = {
+export type PipelineCreatePayload = {
   candidate_id: string;
   job_id: string;
-  stage?: "applied" | "screening" | "ai_screening" | "interview" | "offer" | "placed" | "rejected";
+  stage?: PipelineStage;
   status?: "active" | "on_hold" | "withdrawn" | "closed";
   notes?: string;
 };
 
-type PipelineUpdatePayload = {
-  stage?: "applied" | "screening" | "ai_screening" | "interview" | "offer" | "placed" | "rejected";
+export type PipelineUpdatePayload = {
+  stage?: PipelineStage;
   status?: "active" | "on_hold" | "withdrawn" | "closed";
   notes?: string;
 };
 
+/** PIPE-002: payload for a validated stage transition. */
+export type PipelineTransitionPayload = {
+  stage: PipelineStage;
+  /** Required (≥ 10 chars) when transitioning to "rejected". */
+  reason?: string;
+};
+
+/** PIPE-004: Filter + sort + pagination options for the pipeline list endpoint. */
+export type PipelineListParams = {
+  limit?: number;
+  offset?: number;
+  jobId?: string;
+  candidateId?: string;
+  stage?: PipelineStage;
+  status?: "active" | "on_hold" | "withdrawn" | "closed";
+  sortBy?: "created_at" | "stage_updated_at";
+  sortDir?: "asc" | "desc";
+};
+
+function buildPipelineParams(params: PipelineListParams): URLSearchParams {
+  const p = new URLSearchParams({
+    limit: String(params.limit ?? 200),
+    offset: String(params.offset ?? 0),
+  });
+  if (params.jobId) p.set("job_id", params.jobId);
+  if (params.candidateId) p.set("candidate_id", params.candidateId);
+  if (params.stage) p.set("stage", params.stage);
+  if (params.status) p.set("status", params.status);
+  if (params.sortBy) p.set("sort_by", params.sortBy);
+  if (params.sortDir) p.set("sort_dir", params.sortDir);
+  return p;
+}
+
+/**
+ * Fetch pipelines — returns `Pipeline[]` for backward compatibility.
+ * All existing callers (board, candidate detail, etc.) continue to work.
+ *
+ * Internally calls the new PIPE-004 paginated endpoint and extracts `.data`.
+ */
 export async function getPipelines(
   limit = 200,
   offset = 0,
   jobId?: string,
   candidateId?: string
-) {
-  const jobFilter = jobId ? `&job_id=${encodeURIComponent(jobId)}` : "";
-  const candidateFilter = candidateId ? `&candidate_id=${encodeURIComponent(candidateId)}` : "";
-  const token = typeof window !== "undefined" ? window.localStorage.getItem("airis_access_token") : null;
-  const response = await fetch(
-    `${API_BASE_URL}/pipelines?limit=${limit}&offset=${offset}${jobFilter}${candidateFilter}`,
-    {
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    }
-  );
-
-  // Some running backend variants don't expose /pipelines; treat as empty list instead of noisy hard error.
-  if (response.status === 404 || response.status === 405) {
-    return [];
+): Promise<Pipeline[]> {
+  const params = buildPipelineParams({ limit, offset, jobId, candidateId });
+  try {
+    const response = await apiRequest<PipelineListResponse>(`/pipelines?${params.toString()}`);
+    return response.data;
+  } catch (err: unknown) {
+    // Some running backend variants don't expose /pipelines; treat as empty list.
+    const s = (err as { status?: number })?.status;
+    if (s === 404 || s === 405) return [];
+    throw err;
   }
-
-  if (!response.ok) {
-    let detail: unknown = null;
-    try {
-      detail = await response.json();
-    } catch {
-      detail = await response.text();
-    }
-    throw new ApiError("Unable to load pipelines.", response.status, detail);
-  }
-
-  return (await response.json()) as Pipeline[];
 }
 
-export async function createPipeline(payload: PipelineCreatePayload) {
-  const token = typeof window !== "undefined" ? window.localStorage.getItem("airis_access_token") : null;
-  const response = await fetch(`${API_BASE_URL}/pipelines`, {
+/**
+ * PIPE-004: Fetch pipelines with full metadata (total count + stage counts).
+ * Used by the pipeline list/table page.
+ */
+export async function getPipelinesWithMeta(
+  params: PipelineListParams = {}
+): Promise<PipelineListResponse> {
+  const qp = buildPipelineParams(params);
+  return apiRequest<PipelineListResponse>(`/pipelines?${qp.toString()}`, {}, 0);
+}
+
+export async function createPipeline(payload: PipelineCreatePayload): Promise<Pipeline> {
+  const result = await apiRequest<Pipeline>("/pipelines", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
     body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    let detail: unknown = null;
-    try {
-      detail = await response.json();
-    } catch {
-      detail = await response.text();
-    }
-    throw new ApiError("Unable to create pipeline.", response.status, detail);
-  }
-
-  return (await response.json()) as Pipeline;
+  }, 0);
+  invalidateApiCache("/pipelines");
+  return result;
 }
 
-export async function updatePipeline(pipelineId: string, payload: PipelineUpdatePayload) {
-  const token = typeof window !== "undefined" ? window.localStorage.getItem("airis_access_token") : null;
-  const response = await fetch(`${API_BASE_URL}/pipelines/${pipelineId}`, {
+export async function updatePipeline(
+  pipelineId: string,
+  payload: PipelineUpdatePayload
+): Promise<Pipeline> {
+  const result = await apiRequest<Pipeline>(`/pipelines/${pipelineId}`, {
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
     body: JSON.stringify(payload),
-  });
+  }, 0);
+  invalidateApiCache("/pipelines");
+  return result;
+}
 
-  if (!response.ok) {
-    let detail: unknown = null;
-    try {
-      detail = await response.json();
-    } catch {
-      detail = await response.text();
-    }
-    throw new ApiError("Unable to update pipeline.", response.status, detail);
-  }
+/**
+ * PIPE-002: Apply a validated stage transition.
+ *
+ * Only transitions that follow the defined flow are accepted.
+ * Returns HTTP 422 for invalid transitions or missing rejection reason.
+ */
+export async function transitionPipelineStage(
+  pipelineId: string,
+  payload: PipelineTransitionPayload
+): Promise<Pipeline> {
+  const result = await apiRequest<Pipeline>(`/pipelines/${pipelineId}/transition`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, 0);
+  invalidateApiCache("/pipelines");
+  return result;
+}
 
-  return (await response.json()) as Pipeline;
+/**
+ * PIPE-002: Fetch the full stage-transition audit history for a pipeline.
+ */
+export async function getPipelineStageHistory(
+  pipelineId: string
+): Promise<PipelineStageHistory[]> {
+  return apiRequest<PipelineStageHistory[]>(`/pipelines/${pipelineId}/history`, {}, 0);
+}
+
+// ── PIPE-003: Status tracking ──────────────────────────────────────────────
+
+/**
+ * PIPE-003: Change the pipeline status (active / on_hold / withdrawn / closed).
+ * Each change is recorded in the status history audit log.
+ */
+export async function changePipelineStatus(
+  pipelineId: string,
+  payload: PipelineStatusChangePayload
+): Promise<Pipeline> {
+  const result = await apiRequest<Pipeline>(`/pipelines/${pipelineId}/status`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, 0);
+  invalidateApiCache("/pipelines");
+  return result;
+}
+
+/**
+ * PIPE-003: Withdraw a pipeline (candidate-requested removal).
+ * A non-empty reason (≥ 5 chars) is required.
+ */
+export async function withdrawPipeline(
+  pipelineId: string,
+  payload: WithdrawPipelinePayload
+): Promise<Pipeline> {
+  const result = await apiRequest<Pipeline>(`/pipelines/${pipelineId}/withdraw`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, 0);
+  invalidateApiCache("/pipelines");
+  return result;
+}
+
+/**
+ * PIPE-003: Fetch the full status-change audit history for a pipeline.
+ */
+export async function getPipelineStatusHistory(
+  pipelineId: string
+): Promise<PipelineStatusHistory[]> {
+  return apiRequest<PipelineStatusHistory[]>(`/pipelines/${pipelineId}/status-history`, {}, 0);
 }

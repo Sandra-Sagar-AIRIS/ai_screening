@@ -193,6 +193,21 @@ export type CandidateCreatePayload = {
 
 export type JobStatus = "draft" | "open" | "paused" | "closed" | "filled";
 
+export type Client = {
+  id: string;
+  organization_id: string;
+  name: string;
+  legal_name?: string | null;
+  industry?: string | null;
+  website?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  location?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Job = {
   id: string;
   organization_id: string;
@@ -230,18 +245,6 @@ export type JobMetrics = {
   job_id: string;
   vendor_count: number;
   candidate_count: number;
-};
-
-export type JobSubmissionStatus = "pending" | "shortlisted" | "rejected" | "interviewing" | "offered" | "hired";
-
-export type JobSubmission = {
-  id: string;
-  candidate_id: string;
-  job_id: string;
-  submission_status: JobSubmissionStatus;
-  notes?: string | null;
-  created_at: string;
-  updated_at: string;
 };
 
 export type JobMatchEntry = {
@@ -369,8 +372,108 @@ export type Pipeline = {
   stage: PipelineStage;
   status: PipelineStatus;
   notes: string | null;
+  /** Set when the stage was last changed via transition_stage (PIPE-004). Null for pre-migration rows. */
+  stage_updated_at: string | null;
+  /** Set when the status was last changed via change_pipeline_status (PIPE-003). */
+  status_changed_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+/** PIPE-004: Metadata returned in paginated pipeline list responses. */
+export type PipelineListMeta = {
+  total: number;
+  limit: number;
+  offset: number;
+  stage_counts: Partial<Record<PipelineStage, number>>;
+};
+
+/** PIPE-004: Paginated pipeline list with metadata. */
+export type PipelineListResponse = {
+  data: Pipeline[];
+  meta: PipelineListMeta;
+};
+
+/** One row in the pipeline stage-transition audit log (PIPE-002). */
+export type PipelineStageHistory = {
+  id: string;
+  pipeline_id: string;
+  organization_id: string;
+  previous_stage: PipelineStage | null;
+  new_stage: PipelineStage;
+  actor_user_id: string | null;
+  reason: string | null;
+  transitioned_at: string;
+  created_at: string;
+};
+
+/** One row in the pipeline status-change audit log (PIPE-003). */
+export type PipelineStatusHistory = {
+  id: string;
+  pipeline_id: string;
+  organization_id: string;
+  previous_status: PipelineStatus | null;
+  new_status: PipelineStatus;
+  actor_user_id: string | null;
+  reason: string | null;
+  changed_at: string;
+  created_at: string;
+};
+
+/** PIPE-003: Payload for changing pipeline status. */
+export type PipelineStatusChangePayload = {
+  status: PipelineStatus;
+  reason?: string;
+};
+
+/** PIPE-003: Payload for the withdraw endpoint. */
+export type WithdrawPipelinePayload = {
+  reason: string;
+};
+
+// ── PIPE-005: Submission Tracking ────────────────────────────────────
+
+export type SubmissionOutcome = "pending" | "accepted" | "rejected";
+export type VendorSubmissionStatus = "submitted" | "under_review" | "accepted" | "rejected";
+export type JobSubmissionStatus = "pending" | "shortlisted" | "rejected" | "interviewing" | "offered" | "hired";
+
+/** Full submission record (recruiter/admin view). */
+export type JobSubmission = {
+  id: string;
+  job_id: string;
+  candidate_id: string;
+  submission_status: JobSubmissionStatus;
+  submitted_at: string;
+  submitted_by: string;
+  notes: string | null;
+  vendor_id: string | null;
+  outcome: SubmissionOutcome;
+  client_feedback: string | null;
+  vendor_status: VendorSubmissionStatus | null;
+};
+
+/** Vendor-facing submission row — no cross-vendor data. */
+export type VendorSubmission = {
+  id: string;
+  job_id: string;
+  candidate_id: string;
+  submitted_at: string;
+  outcome: SubmissionOutcome;
+  vendor_status: VendorSubmissionStatus;
+  /** Only present when outcome is final (accepted/rejected). */
+  client_feedback: string | null;
+  notes: string | null;
+};
+
+/** PIPE-005: Update outcome + optional feedback. */
+export type SubmissionOutcomePayload = {
+  outcome: SubmissionOutcome;
+  client_feedback?: string;
+};
+
+/** PIPE-005: Update feedback only. */
+export type ClientFeedbackPayload = {
+  client_feedback: string;
 };
 
 // ── Interview domain ──────────────────────────────────────────────────
@@ -785,4 +888,133 @@ export type CopilotWsEvent = {
   type: CopilotWsEventType;
   data: Record<string, unknown>;
   ts: string;
+};
+
+// ── PIPE-007: Pipeline Analytics ─────────────────────────────────────────────
+
+export type StageFunnelEntry = {
+  stage: string;
+  label: string;
+  entered: number;
+  advanced: number;
+  rejected: number;
+  still_in_stage: number;
+  /** Percentage of entered that advanced (0–100). */
+  conversion_rate: number;
+  /** Percentage of entered that were rejected directly (0–100). */
+  rejection_rate: number;
+};
+
+export type StageDurationEntry = {
+  stage: string;
+  label: string;
+  avg_days: number;
+  median_days: number | null;
+  sample_count: number;
+  /** True when avg_days is >25% above the overall mean across all stages. */
+  is_slow: boolean;
+};
+
+export type DropOffEntry = {
+  stage: string;
+  label: string;
+  rejected_count: number;
+  drop_off_rate: number;
+  /** True for the stage with the highest drop-off rate. */
+  is_bottleneck: boolean;
+  rank: number;
+};
+
+export type PipelineAnalytics = {
+  organization_id: string;
+  job_id: string | null;
+  date_range_start: string | null;
+  date_range_end: string | null;
+  total_pipelines: number;
+  total_placed: number;
+  total_rejected: number;
+  overall_placement_rate: number;
+  funnel: StageFunnelEntry[];
+  stage_durations: StageDurationEntry[];
+  drop_off: DropOffEntry[];
+  generated_at: string;
+};
+
+export type PipelineAnalyticsParams = {
+  jobId?: string;
+  startDate?: string;
+  endDate?: string;
+};
+
+// ── PIPE-008: Offer Management ─────────────────────────────────────────────
+
+export type OfferResponseStatus = "pending" | "accepted" | "declined" | "negotiating";
+
+export type OfferEventType =
+  | "offer_created"
+  | "offer_revised"
+  | "response_updated"
+  | "expiry_alert_sent"
+  | "offer_expired";
+
+/** Full offer record (PIPE-008). */
+export type PipelineOffer = {
+  id: string;
+  organization_id: string;
+  pipeline_id: string;
+  candidate_id: string;
+  job_id: string;
+  offered_salary: string; // Decimal serialized as string
+  currency: string;       // ISO 4217, e.g. "USD"
+  offer_date: string;     // YYYY-MM-DD
+  expiry_date: string;    // YYYY-MM-DD
+  offer_response: OfferResponseStatus;
+  decline_reason: string | null;
+  previous_stage: string | null;
+  expiry_alert_sent: boolean;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // Computed by service layer:
+  days_until_expiry: number | null;
+  is_expired: boolean;
+};
+
+/** One event in the offer audit log. */
+export type PipelineOfferEvent = {
+  id: string;
+  organization_id: string;
+  pipeline_id: string;
+  offer_id: string;
+  event_type: OfferEventType;
+  actor_user_id: string | null;
+  previous_response: string | null;
+  new_response: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+/** Payload to create a new offer. */
+export type OfferCreatePayload = {
+  offered_salary: number;
+  currency: string;
+  offer_date: string;  // YYYY-MM-DD
+  expiry_date: string; // YYYY-MM-DD
+  notes?: string;
+};
+
+/** Payload to revise an existing offer. */
+export type OfferRevisePayload = {
+  offered_salary?: number;
+  currency?: string;
+  expiry_date?: string;
+  notes?: string;
+};
+
+/** Payload to submit a candidate's response. */
+export type OfferRespondPayload = {
+  response: OfferResponseStatus;
+  decline_reason?: string;
+  revert_to_previous_stage?: boolean;
 };
