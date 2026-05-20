@@ -82,8 +82,9 @@ async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPE
         },
     )
     headers = dict(CORS_HEADERS)
-    if getattr(exc, "headers", None):
-        headers.update(exc.headers)
+    exc_headers = getattr(exc, "headers", None)
+    if exc_headers is not None:
+        headers = {**headers, **exc_headers}
     return JSONResponse(
         status_code=exc.status_code,
         headers=headers,

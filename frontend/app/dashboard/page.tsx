@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { formatApiErrorForUser } from "@/lib/api/client";
-import { getDashboardSummary, DashboardSummary, DashboardActivityItem, DashboardRecentJob } from "@/lib/api/dashboard";
+import {
+  getDashboardSummary,
+  readCachedDashboardSummary,
+  writeCachedDashboardSummary,
+  type DashboardActivityItem,
+  type DashboardRecentJob,
+  type DashboardSummary,
+} from "@/lib/api/dashboard";
 import { useAuthStore } from "@/store/auth-store";
 import { Users, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -43,6 +50,7 @@ export default function DashboardPage() {
       const summary = await getDashboardSummary();
       if (cancelledRef?.cancelled) return;
       setData(summary);
+      writeCachedDashboardSummary(summary);
     } catch (err: unknown) {
       if (!cancelledRef?.cancelled) {
         if (!isBackground) setError(formatApiErrorForUser(err));
