@@ -43,6 +43,11 @@ _RECRUITER_DEFAULTS: tuple[str, ...] = (
     "interviews:claim",
     "interviews:panel",
     "interviews:copilot",
+    # Client workspace (WS-002)
+    "clients:create",
+    "clients:read",
+    "clients:update",
+    "clients:delete",
 )
 _CLIENT_DEFAULTS: tuple[str, ...] = (
     "jobs:read",

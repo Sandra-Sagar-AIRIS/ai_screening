@@ -14,6 +14,7 @@ from app.models.candidate import Candidate  # noqa: F401
 from app.models.candidate_job_match import CandidateJobMatch  # noqa: F401
 from app.models.client import Client  # noqa: F401
 from app.models.client_job_access import ClientJobAccess  # noqa: F401
+from app.models.client_recruiter_assignment import ClientRecruiterAssignment  # noqa: F401
 from app.models.interview import (  # noqa: F401
     Interview,
     InterviewFeedback,

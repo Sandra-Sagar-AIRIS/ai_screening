@@ -9,6 +9,7 @@ import logging
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import get_cors_origins, get_settings
+from app.core.openapi import build_custom_openapi, is_docs_enabled
 from app.candidate_management.api import router as candidate_management_router
 from app.routes.auth import router as auth_router
 from app.routes.ats import router as ats_router
@@ -32,11 +33,35 @@ from app.routes.vendor import router as vendor_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.pipeline_analytics import router as pipeline_analytics_router
 from app.routes.offer import router as offer_router
+from app.routes.sourcing import router as sourcing_router
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title=settings.app_name, debug=settings.debug)
+# ── API docs visibility ───────────────────────────────────────────────────────
+# /docs (Swagger UI) and /redoc are DISABLED in production by default.
+# Override with DOCS_ENABLED=true in the environment for intentional access.
+# See app/core/openapi.py for the full decision logic.
+_docs_on = is_docs_enabled(settings)
+if not _docs_on:
+    logger.info(
+        "API docs disabled (APP_ENV=%s). Set DOCS_ENABLED=true to enable.",
+        settings.app_env,
+    )
+
+app = FastAPI(
+    title=settings.app_name,
+    debug=settings.debug,
+    # Expose /docs, /redoc, /openapi.json only in non-production environments.
+    docs_url="/docs" if _docs_on else None,
+    redoc_url="/redoc" if _docs_on else None,
+    openapi_url="/openapi.json" if _docs_on else None,
+)
+
+# ── Custom OpenAPI schema (BearerAuth, error schemas, tag descriptions) ───────
+# Registered after app creation so routes are available when the schema is built.
+# The callable is invoked lazily on the first request to /openapi.json.
+app.openapi = build_custom_openapi(app, settings)  # type: ignore[method-assign]
 
 # Step 2: ADD CORS (TOP LEVEL)
 app.add_middleware(
@@ -240,4 +265,5 @@ app.include_router(vendor_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(pipeline_analytics_router, prefix="/api/v1")
 app.include_router(offer_router, prefix="/api/v1")
+app.include_router(sourcing_router, prefix="/api/v1/sourcing", tags=["sourcing"])
 

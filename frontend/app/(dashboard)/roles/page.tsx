@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { RoleTable } from "@/components/RoleTable";
 import { getRoles, type Role } from "@/lib/api";
 import { useAuthStore } from "@/store/auth-store";
@@ -63,6 +63,12 @@ export default function RolesPage() {
     void load();
   }, [role]);
 
+  /** Remove the deleted role from local state and show a success banner. */
+  const handleRoleDeleted = useCallback((roleId: string) => {
+    setRoles((prev) => prev.filter((r) => r.id !== roleId));
+    setSuccessMessage("Role deleted successfully.");
+  }, []);
+
   if (role !== "admin") {
     return <p className="text-sm text-slate-600">Only admins can manage roles.</p>;
   }
@@ -88,8 +94,8 @@ export default function RolesPage() {
           {successMessage}
         </div>
       ) : null}
-      
-      <RoleTable roles={roles} error={error} />
+
+      <RoleTable roles={roles} error={error} onRoleDeleted={handleRoleDeleted} />
     </div>
   );
 }

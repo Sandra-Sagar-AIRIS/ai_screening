@@ -8,6 +8,7 @@ CANDIDATES_READ = "candidates:read"
 CANDIDATES_READ_OWN = "candidates:read_own"
 CANDIDATES_UPDATE = "candidates:update"
 CANDIDATES_DELETE = "candidates:delete"
+CANDIDATES_MERGE = "candidates:merge"
 
 JOBS_CREATE = "jobs:create"
 JOBS_READ = "jobs:read"
@@ -36,6 +37,7 @@ USERS_DELETE = "users:delete"
 CLIENTS_CREATE = "clients:create"
 CLIENTS_READ = "clients:read"
 CLIENTS_UPDATE = "clients:update"
+CLIENTS_DELETE = "clients:delete"
 ATS_READ = "ats:read"
 ATS_RESCORE = "ats:rescore"
 
@@ -55,6 +57,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     CANDIDATES_READ_OWN,
     CANDIDATES_UPDATE,
     CANDIDATES_DELETE,
+    CANDIDATES_MERGE,
     JOBS_CREATE,
     JOBS_READ,
     JOBS_READ_LIMITED,
@@ -78,6 +81,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     CLIENTS_CREATE,
     CLIENTS_READ,
     CLIENTS_UPDATE,
+    CLIENTS_DELETE,
     ATS_READ,
     ATS_RESCORE,
     AI_SCREENING_CREATE,

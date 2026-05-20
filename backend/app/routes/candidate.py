@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -7,15 +8,73 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_any_permissions, require_permission
-from app.core.permissions import ATS_READ, ATS_RESCORE, CANDIDATES_CREATE, CANDIDATES_READ, CANDIDATES_READ_OWN, CANDIDATES_UPDATE
+from app.core.permissions import (
+    ATS_READ,
+    ATS_RESCORE,
+    CANDIDATES_CREATE,
+    CANDIDATES_MERGE,
+    CANDIDATES_READ,
+    CANDIDATES_READ_OWN,
+    CANDIDATES_UPDATE,
+)
 from app.db.session import get_db
 from app.schemas.auth import CurrentUser
 from app.schemas.candidate import CandidateCreate, CandidateResponse, CandidateUpdate
+from app.schemas.candidate_dedup import DuplicateCheckRequest, DuplicateCheckResult, DuplicateMatchOut, MergeRequest, MergeResponse
 from app.services.candidate_service import CandidateService
+from app.services.candidate_dedup.detection_service import DuplicateDetectionService
+from app.services.candidate_dedup.merge_service import CandidateMergeService
 from app.services.job_service import JobService
 from app.schemas.job import AtsCandidateRescoreResponse, CandidateMatchesResponse
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/candidates", tags=["candidates"])
+
+
+@router.post("/check-duplicate", response_model=DuplicateCheckResult)
+def check_duplicate(
+    payload: DuplicateCheckRequest,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_any_permissions(CANDIDATES_CREATE, CANDIDATES_READ, CANDIDATES_READ_OWN))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> DuplicateCheckResult:
+    """Check whether a candidate with the given email/phone already exists.
+
+    Called client-side before creating a new candidate to surface potential
+    duplicates and give the recruiter a chance to abort or open the existing record.
+    """
+    if not payload.email and not payload.phone:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide at least one of email or phone.",
+        )
+    org_id = UUID(current_user.organization_id)
+    svc = DuplicateDetectionService()
+    result = svc.check(
+        email=payload.email,
+        phone=payload.phone,
+        org_id=org_id,
+        db=db,
+        exclude_id=payload.exclude_id,
+    )
+    return DuplicateCheckResult(
+        has_duplicates=result.has_duplicates,
+        matches=[
+            DuplicateMatchOut(
+                candidate_id=m.candidate_id,
+                first_name=m.first_name,
+                last_name=m.last_name,
+                email=m.email,
+                phone=m.phone,
+                location=m.location,
+                pipeline_count=m.pipeline_count,
+                confidence=m.confidence,
+                match_type=m.match_type,
+            )
+            for m in result.matches
+        ],
+    )
 
 
 @router.post("", response_model=CandidateResponse, status_code=status.HTTP_201_CREATED)
@@ -94,6 +153,52 @@ def get_candidate_matches(
         current_user=current_user,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.post("/{candidate_id}/merge", response_model=MergeResponse)
+def merge_candidates(
+    candidate_id: UUID,
+    payload: MergeRequest,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_MERGE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> MergeResponse:
+    """Merge a duplicate candidate into the survivor (admin-only).
+
+    ``candidate_id`` is the **survivor** — the record to keep.
+    ``payload.duplicate_id`` is the record that will be soft-deleted after
+    all its pipeline/interview/ATS history is reassigned to the survivor.
+    """
+    org_id = UUID(current_user.organization_id)
+    actor_id = UUID(current_user.user_id)
+    svc = CandidateMergeService()
+    try:
+        svc.merge(
+            survivor_id=candidate_id,
+            duplicate_id=payload.duplicate_id,
+            actor_id=actor_id,
+            org_id=org_id,
+            db=db,
+        )
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.error("cand006.merge.unexpected_error", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "MERGE_FAILED",
+                "message": str(exc) or "An unexpected error occurred during merge.",
+            },
+        ) from exc
+    return MergeResponse(
+        survivor_id=str(candidate_id),
+        duplicate_id=str(payload.duplicate_id),
+        message="Candidates merged successfully.",
     )
 
 

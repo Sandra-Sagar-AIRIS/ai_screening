@@ -112,6 +112,21 @@ export type ReplaceRolePermissionsPayload = {
   permissions: string[];
 };
 
+export type RoleInUseAffectedUser = {
+  id: string;
+  email: string;
+};
+
+/**
+ * Structured body inside `ApiError.detail.detail` when the API returns
+ * 409 ROLE_IN_USE for a blocked role deletion.
+ */
+export type RoleInUseErrorDetail = {
+  message: string;
+  code: "ROLE_IN_USE";
+  affected_users: RoleInUseAffectedUser[];
+};
+
 export type Candidate = {
   id: string;
   organization_id: string;
@@ -204,8 +219,31 @@ export type Client = {
   phone?: string | null;
   location?: string | null;
   notes?: string | null;
+  is_deleted: boolean;
+  deleted_at?: string | null;
+  assigned_recruiter_ids: string[];
   created_at: string;
   updated_at: string;
+};
+
+export type ClientCreatePayload = {
+  name: string;
+  industry: string;
+  email: string;
+  legal_name?: string | null;
+  website?: string | null;
+  phone?: string | null;
+  location?: string | null;
+  notes?: string | null;
+  assigned_recruiter_ids?: string[];
+};
+
+export type ClientUpdatePayload = Partial<Omit<ClientCreatePayload, "assigned_recruiter_ids">>;
+
+export type ClientRecruiter = {
+  recruiter_id: string;
+  assigned_at: string;
+  assigned_by: string | null;
 };
 
 export type Job = {
