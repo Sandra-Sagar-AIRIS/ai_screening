@@ -8,7 +8,7 @@ import {
   Menu, Search,
   LayoutDashboard, Users, Briefcase, Filter, Mail, UserCheck,
   CalendarDays, List, Settings, Shield, Brain, Send, BarChart3,
-  ChevronLeft, ChevronRight, LogOut
+  ChevronLeft, ChevronRight, LogOut, Sparkles
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -37,6 +37,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "Interview Queue": List,
   "My Interviews": CalendarDays,
   "AI Screenings": Brain,
+  "Source Candidates": Sparkles,
   "My Submissions": Send,
   "Pipeline Analytics": BarChart3,
 };
@@ -64,7 +65,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   const recruitingMenu = filteredMenu.filter(i => ["Dashboard", "Candidates", "Jobs", "Pipeline", "Pipeline Analytics", "My Jobs", "Clients", "Invites", "Invite", "My Submissions"].includes(i.name));
   const interviewMenu = filteredMenu.filter(i => ["Interview Queue", "My Interviews"].includes(i.name));
-  const aiMenu = filteredMenu.filter(i => ["AI Screenings"].includes(i.name));
+  const aiMenu = filteredMenu.filter(i => ["AI Screenings", "Source Candidates"].includes(i.name));
   const managementMenu = filteredMenu.filter(i => ["Users", "Roles", "Settings"].includes(i.name));
 
   useEffect(() => {

@@ -20,7 +20,7 @@ from app.models.role_permission import RolePermission
 from app.schemas.auth import CurrentUser, UserType
 from app.services.permission_service import PermissionService
 
-bearer_scheme = HTTPBearer(auto_error=False)
+bearer_scheme = HTTPBearer(auto_error=False, scheme_name="BearerAuth")
 logger = logging.getLogger(__name__)
 
 

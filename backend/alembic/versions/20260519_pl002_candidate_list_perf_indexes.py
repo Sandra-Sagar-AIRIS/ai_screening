@@ -1,10 +1,11 @@
 """Add candidate list/filter performance indexes (safe, idempotent).
 
-Revision ID: 20260519_0001
-Revises: 20260514_0001
+Revision ID: 20260519_pl002_candidate_list_perf_indexes
+Revises: 20260519_pl002_pipeline_stage_history
 Create Date: 2026-05-19
-"""
 
+Note: Formerly incorrectly shared revision id 20260519_0001 with pipeline_stage_history.
+"""
 from collections.abc import Sequence
 
 from alembic import op
@@ -12,8 +13,8 @@ from sqlalchemy import inspect
 
 from app.core.config import get_settings
 
-revision: str = "20260519_0001"
-down_revision: str | None = "20260514_0001"
+revision: str = "20260519_pl002_candidate_list_perf_indexes"
+down_revision: str | None = "20260519_pl002_pipeline_stage_history"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

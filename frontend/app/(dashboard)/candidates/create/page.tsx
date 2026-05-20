@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ApiError } from "@/lib/api/client";
+import { checkDuplicate, type DuplicateMatch } from "@/lib/api/candidate-dedup";
+import { DuplicateAlert } from "@/components/candidates/DuplicateAlert";
 import {
   addCandidateInteraction,
   bulkAssignRecruiter,
@@ -46,6 +48,7 @@ type CandidateDraft = {
 };
 
 export default function CandidatesPage() {
+  const router = useRouter();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [users, setUsers] = useState<OrganizationUser[]>([]);
@@ -99,6 +102,10 @@ export default function CandidatesPage() {
   const permissions = useAuthStore((state) => state.permissions);
   const searchParams = useSearchParams();
   const canCreate = hasPermission(permissions, CANDIDATES_CREATE_PERMISSION);
+
+  // CAND-006: Duplicate detection state
+  const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatch[] | null>(null);
+  const [pendingCreate, setPendingCreate] = useState<(() => Promise<void>) | null>(null);
 
   function trackModuleEvent(eventName: string, payload?: Record<string, unknown>) {
     // Lightweight client telemetry hook; can be wired to analytics backend later.
@@ -170,11 +177,7 @@ export default function CandidatesPage() {
     void loadUsers();
   }, [searchParams]);
 
-  async function handleCreateCandidate() {
-    if (!firstName.trim() || !lastName.trim()) {
-      setError("First name and last name are required.");
-      return;
-    }
+  async function _doCreateManual() {
     setCreating(true);
     try {
       const created = await createCandidate({
@@ -200,17 +203,37 @@ export default function CandidatesPage() {
       setYearsExperience("");
       setSummary("");
       setError(null);
-      return true;
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError("This candidate already exists in the system (Duplicate email or phone).");
       } else {
         setError(err instanceof Error ? err.message : "Unable to create candidate.");
       }
-      return false;
     } finally {
       setCreating(false);
     }
+  }
+
+  async function handleCreateCandidate() {
+    if (!firstName.trim() || !lastName.trim()) {
+      setError("First name and last name are required.");
+      return false;
+    }
+    // CAND-006: Pre-check for duplicates before committing creation
+    if (email.trim() || phone.trim()) {
+      try {
+        const dupResult = await checkDuplicate(email.trim() || null, phone.trim() || null);
+        if (dupResult.has_duplicates) {
+          setPendingCreate(() => _doCreateManual);
+          setDuplicateMatches(dupResult.matches);
+          return false;
+        }
+      } catch {
+        // Non-blocking: if dedup check fails, fall through to creation
+      }
+    }
+    await _doCreateManual();
+    return true;
   }
 
   async function handleUploadResume() {
@@ -252,12 +275,8 @@ export default function CandidatesPage() {
     }
   }
 
-  async function handleSaveReviewedCandidate() {
+  async function _doSaveReviewedCandidate() {
     if (!draftCandidate) return;
-    if (!draftCandidate.first_name.trim() || !draftCandidate.last_name.trim()) {
-      setError("First name and last name are required in parsed resume verification.");
-      return;
-    }
     setSavingReview(true);
     try {
       const created = await createCandidate({
@@ -284,17 +303,39 @@ export default function CandidatesPage() {
       setParseResult(null);
       setResumeFile(null);
       setError(null);
-      return true;
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError("This candidate already exists in the system (Duplicate email or phone).");
       } else {
         setError(err instanceof Error ? err.message : "Unable to save parsed candidate.");
       }
-      return false;
     } finally {
       setSavingReview(false);
     }
+  }
+
+  async function handleSaveReviewedCandidate() {
+    if (!draftCandidate) return;
+    if (!draftCandidate.first_name.trim() || !draftCandidate.last_name.trim()) {
+      setError("First name and last name are required in parsed resume verification.");
+      return;
+    }
+    // CAND-006: Pre-check for duplicates
+    const emailVal = draftCandidate.email.trim();
+    const phoneVal = draftCandidate.phone.trim();
+    if (emailVal || phoneVal) {
+      try {
+        const dupResult = await checkDuplicate(emailVal || null, phoneVal || null);
+        if (dupResult.has_duplicates) {
+          setPendingCreate(() => _doSaveReviewedCandidate);
+          setDuplicateMatches(dupResult.matches);
+          return;
+        }
+      } catch {
+        // Non-blocking: if dedup check fails, fall through to creation
+      }
+    }
+    await _doSaveReviewedCandidate();
   }
 
   async function handleCreateBulkUpload() {
@@ -556,6 +597,24 @@ export default function CandidatesPage() {
   );
 
   return (
+    <>
+      {/* CAND-006: Duplicate detection modal */}
+      {duplicateMatches && (
+        <DuplicateAlert
+          matches={duplicateMatches}
+          onCancel={() => {
+            setDuplicateMatches(null);
+            setPendingCreate(null);
+          }}
+          onContinue={async () => {
+            const action = pendingCreate;
+            setDuplicateMatches(null);
+            setPendingCreate(null);
+            if (action) await action();
+          }}
+        />
+      )}
+
     <section className="mx-auto max-w-4xl space-y-6 py-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-gray-900">Add Candidate</h1>
@@ -902,5 +961,6 @@ export default function CandidatesPage() {
         )}
       </div>
     </section>
+    </>
   );
 }

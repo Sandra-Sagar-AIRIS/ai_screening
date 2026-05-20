@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -12,12 +13,14 @@ from app.core.dependencies import get_current_user, get_user_permissions, requir
 from app.core.permissions import ALL_PERMISSIONS, USERS_INVITE
 from app.db.session import get_db
 from app.models.organization_role import OrganizationRole
+from app.models.profile import Profile
 from app.models.role_permission import RolePermission
 from app.schemas.auth import CurrentUser
 from app.services.organization_role_service import make_unique_role_key, slugify_role_name
 from app.services.permission_service import invalidate_permission_cache
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 class OrganizationRoleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -196,3 +199,76 @@ def replace_role_permissions(
     db.commit()
     invalidate_permission_cache()
     return permissions
+
+
+@router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+def delete_organization_role(
+    role_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_admin)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> Response:
+    """
+    Delete an organization role (admin only).
+
+    Blocked with **409 CONFLICT** when one or more users are still assigned this role.
+    The response body includes ``code: "ROLE_IN_USE"`` and a list of ``affected_users``
+    (id + email) so the caller can surface a meaningful error message.
+
+    On success the role and all its role_permissions rows are hard-deleted (204).
+    Deletion is recorded as a structured audit log entry.
+    """
+    org_id = UUID(current_user.organization_id)
+    role = _get_org_role_for_org(db, organization_id=org_id, role_id=role_id)
+
+    # ── Safety check: block deletion if any user is currently assigned this role ──
+    assigned_profiles = list(
+        db.scalars(
+            select(Profile).where(
+                Profile.organization_id == org_id,
+                Profile.role_id == role_id,
+            )
+        ).all()
+    )
+
+    if assigned_profiles:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Role is assigned to active users and cannot be deleted.",
+                "code": "ROLE_IN_USE",
+                "affected_users": [
+                    {"id": str(p.id), "email": p.email}
+                    for p in assigned_profiles
+                ],
+            },
+        )
+
+    # Capture for audit log before deletion
+    role_name = role.name
+    role_key = role.key
+
+    # Cascade: delete all role_permissions tied to this role before removing the role
+    db.execute(
+        delete(RolePermission).where(
+            RolePermission.organization_id == org_id,
+            RolePermission.role_id == role_id,
+        )
+    )
+    db.delete(role)
+    db.commit()
+
+    # ── Audit trail (structured log) ─────────────────────────────────────────────
+    logger.info(
+        "role.deleted",
+        extra={
+            "role_id": str(role_id),
+            "role_key": role_key,
+            "role_name": role_name,
+            "organization_id": str(org_id),
+            "deleted_by_user_id": current_user.user_id,
+        },
+    )
+
+    invalidate_permission_cache()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

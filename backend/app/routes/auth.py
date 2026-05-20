@@ -26,7 +26,7 @@ from app.schemas.auth_api import LoginRequest, RefreshRequest, SignupRequest, Si
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
-bearer_scheme = HTTPBearer(auto_error=False)
+bearer_scheme = HTTPBearer(auto_error=False, scheme_name="BearerAuth")
 
 
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)

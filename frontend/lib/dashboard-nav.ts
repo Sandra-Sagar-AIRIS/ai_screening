@@ -13,6 +13,7 @@ export const NAV_PERMISSION_CODES = {
   USERS_INVITE: "users:invite",
   INTERVIEWS_READ: "interviews:read",
   SUBMISSIONS_READ_OWN: "submissions:read_own",
+  CLIENTS_READ: "clients:read",
 } as const;
 
 export type SidebarNavItem = {
@@ -76,6 +77,20 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     anyOfPermissions: [NAV_PERMISSION_CODES.PIPELINE_READ],
     showInSidebar: false,
   },
+  // ── Client Workspaces (WS-002) ────────────────────────────────────────────
+  {
+    name: "Clients",
+    path: "/clients",
+    anyOfPermissions: [NAV_PERMISSION_CODES.CLIENTS_READ],
+    adminMayAccess: true,
+  },
+  {
+    name: "Client Detail",
+    path: "/clients",
+    anyOfPermissions: [NAV_PERMISSION_CODES.CLIENTS_READ],
+    adminMayAccess: true,
+    showInSidebar: false,
+  },
   {
     name: "Invites",
     path: "/invites",
@@ -109,6 +124,13 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     anyOfPermissions: [NAV_PERMISSION_CODES.INTERVIEWS_READ],
     adminMayAccess: true,
     showInSidebar: false,
+  },
+  // ── AI Sourcing (AI-SOURCE-001) ────────────────────────────────────────
+  {
+    name: "Source Candidates",
+    path: "/source",
+    anyOfPermissions: [NAV_PERMISSION_CODES.CANDIDATES_READ],
+    adminMayAccess: true,
   },
   // ── AI Screening section ───────────────────────────────────────────────
   {

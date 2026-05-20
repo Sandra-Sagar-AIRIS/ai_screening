@@ -1,7 +1,7 @@
 """Add pg_trgm GIN index for fast candidate text search (idempotent).
 
 Revision ID: 20260519_0002
-Revises: 20260519_0001
+Revises: 20260519_pl002_merge_jd
 Create Date: 2026-05-19
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy import inspect, text
 from app.core.config import get_settings
 
 revision: str = "20260519_0002"
-down_revision: str | None = "20260519_0001"
+down_revision: str | None = "20260519_pl002_merge_jd"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

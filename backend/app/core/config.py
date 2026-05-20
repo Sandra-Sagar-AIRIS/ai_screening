@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # Optional target schema if you want to scope reflection and migrations.
     db_schema: str | None = None
     jwt_secret_key: str = Field(
+        # SECURITY: override this with a cryptographically-random value in all
+        # non-local environments. Generate one with:
+        #   python -c "import secrets; print(secrets.token_hex(32))"
+        # The startup validator below raises if this default survives to production.
         default="change-me-in-production",
         validation_alias=AliasChoices("JWT_SECRET_KEY", "jwt_secret_key"),
     )
@@ -238,12 +242,39 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ASSEMBLYAI_API_KEY", "assemblyai_api_key"),
     )
 
+    # ── API Documentation ─────────────────────────────────────────────────────
+    # Override default env-based docs visibility.
+    # True  → always serve /docs and /redoc.
+    # False → always disable /docs and /redoc.
+    # None  → auto: enabled in development/staging, disabled in production.
+    docs_enabled: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("DOCS_ENABLED", "docs_enabled"),
+    )
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def validate_jwt_secret(self) -> "Settings":
+        _INSECURE_DEFAULT = "change-me-in-production"
+        if self.jwt_secret_key == _INSECURE_DEFAULT:
+            env = self.app_env.lower()
+            if env in ("production", "staging", "prod", "stage"):
+                raise ValueError(
+                    "JWT_SECRET_KEY must be set to a secure random value in production/staging. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "JWT_SECRET_KEY is using the insecure default value. "
+                "Set JWT_SECRET_KEY in your .env file before deploying."
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_database_config(self) -> "Settings":

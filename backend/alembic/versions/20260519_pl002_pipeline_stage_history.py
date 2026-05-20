@@ -1,12 +1,14 @@
 """Add pipeline_stage_history table (PIPE-002).
 
-Revision ID: 20260519_0001
+Revision ID: 20260519_pl002_pipeline_stage_history
 Revises: 20260514_0001
 Create Date: 2026-05-19
 
 Adds an immutable audit log for pipeline stage transitions.
 One row is written per transition, recording the actor, the stage change,
 and an optional rejection reason.
+
+Note: Formerly incorrectly shared revision id 20260519_0001 with candidate_list_perf_indexes.
 """
 from collections.abc import Sequence
 
@@ -17,15 +19,10 @@ from sqlalchemy.dialects import postgresql
 
 from app.core.config import get_settings
 
-revision: str = "20260519_0001"
+revision: str = "20260519_pl002_pipeline_stage_history"
 down_revision: str | None = "20260514_0001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
-
-
-def _schema_prefix() -> str:
-    schema = get_settings().db_schema
-    return f"{schema}." if schema else ""
 
 
 def _table_exists(connection, table_name: str) -> bool:
