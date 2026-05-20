@@ -70,6 +70,7 @@ class CandidateService:
                     Candidate.org_id == organization_id,
                 ),
                 Candidate.is_deleted.is_(False),
+                Candidate.deleted_at.is_(None),
             )
             .order_by(Candidate.created_at.desc())
             .offset(offset)
@@ -96,6 +97,7 @@ class CandidateService:
                 Candidate.org_id == organization_id,
             ),
             Candidate.is_deleted.is_(False),
+            Candidate.deleted_at.is_(None),
         )
         if self._scope.is_client_user(current_user):
             stmt = stmt.where(

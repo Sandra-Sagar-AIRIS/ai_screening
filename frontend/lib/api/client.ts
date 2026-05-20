@@ -21,6 +21,21 @@ export function getWsApiBase(): string {
   return backend.replace(/^http/i, "ws");
 }
 
+export const API_BASE_URL = getApiBaseUrl();
+
+/** WebSocket API base (direct to backend when REST uses `/api/v1` proxy). */
+export function getWsApiBase(): string {
+  const explicit = process.env.NEXT_PUBLIC_WS_API_BASE_URL?.replace(/\/$/, "");
+  if (explicit) {
+    return explicit.replace(/^http/i, "ws");
+  }
+  const base = API_BASE_URL;
+  if (/^https?:\/\//i.test(base)) {
+    return base.replace(/^http/i, "ws");
+  }
+  // Fallback for browser when API_BASE_URL is relative (e.g., '/api/v1')
+  return "ws://127.0.0.1:8000/api/v1";
+}
 // ---------------------------------------------------------------------------
 // Lightweight GET-request cache (prevents duplicate in-flight + re-render fetches)
 // ---------------------------------------------------------------------------
@@ -58,9 +73,22 @@ function toErrorMessage(detail: unknown, status: number): string {
     return detail;
   }
   if (typeof detail === "object") {
-    const record = detail as { detail?: unknown; message?: unknown };
+    const record = detail as { detail?: unknown; error?: unknown; message?: unknown };
+    const serverError =
+      typeof record.error === "string" && record.error.trim() ? record.error.trim() : null;
     if (typeof record.detail === "string") {
-      return record.detail;
+      const detailText = record.detail;
+      if (
+        serverError &&
+        detailText.toLowerCase() === "internal server error" &&
+        serverError.toLowerCase() !== detailText.toLowerCase()
+      ) {
+        return serverError;
+      }
+      return detailText;
+    }
+    if (serverError) {
+      return serverError;
     }
     if (Array.isArray(record.detail) && record.detail.length > 0) {
       const first = record.detail[0] as { msg?: unknown };
@@ -96,6 +124,8 @@ type RequestOptions = RequestInit & {
   auth?: boolean;
   /** Abort the request after this many milliseconds (non-blocking server work should not require long waits). */
   timeoutMs?: number;
+  /** When true, failed responses log as warn (avoids Next.js dev error overlay for optional fetches). */
+  silentErrors?: boolean;
 };
 
 function getAuthToken() {
@@ -177,29 +207,6 @@ export async function apiRequest<T>(
     if (hit) {
       // Return live or in-flight data without an extra network round-trip.
       if (hit.expiresAt > now) {
-        // #region agent log
-        if (path.includes("/matches")) {
-          let cachedMatchCount: number | null = null;
-          try {
-            const d = hit.data as { matches?: unknown[] };
-            if (d && Array.isArray(d.matches)) cachedMatchCount = d.matches.length;
-          } catch {
-            /* ignore */
-          }
-          fetch("http://127.0.0.1:7675/ingest/4eb54ee1-e774-4d05-9ae0-3cff8d045ce2", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "473244" },
-            body: JSON.stringify({
-              sessionId: "473244",
-              hypothesisId: "H1",
-              location: "client.ts:apiRequest",
-              message: "GET_served_from_cache",
-              data: { path, cachedMatchCount },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-        }
-        // #endregion
         return hit.data as T;
       }
       if (hit.inflight) return hit.inflight as Promise<T>;
@@ -224,7 +231,7 @@ export async function apiRequest<T>(
 }
 
 async function _fetchRaw<T>(path: string, options: RequestOptions): Promise<T> {
-  const { auth = true, timeoutMs, headers, signal: userSignal, ...rest } = options;
+  const { auth = true, timeoutMs, silentErrors, headers, signal: userSignal, ...rest } = options;
   const token = auth ? getAuthToken() : null;
 
   const abortController = new AbortController();
@@ -243,7 +250,7 @@ async function _fetchRaw<T>(path: string, options: RequestOptions): Promise<T> {
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetch(`${getApiBaseUrl()}${path}`, {
       ...rest,
       signal,
       headers: {
@@ -301,7 +308,7 @@ async function _fetchRaw<T>(path: string, options: RequestOptions): Promise<T> {
     const expectedCandidateConflict =
       response.status === 409 &&
       (path.includes("/candidate-management/candidates") || /^\/jobs\/[^/]+\/submit(?:\?|$)/.test(path));
-    const suppressErrorLog = shouldSuppressApiErrorLog(path, response.status);
+    const suppressErrorLog = shouldSuppressApiErrorLog(path, response.status) || Boolean(silentErrors);
 
     if (expectedCandidateConflict) {
       // Expected domain conflict; avoid noisy dev overlay.

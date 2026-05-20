@@ -127,6 +127,8 @@ class Candidate(Base):
         Index("ix_candidates_org_email_active", "org_id", "email", postgresql_where=sa.text("deleted_at IS NULL")),
         Index("ix_candidates_org_phone_active", "org_id", "phone", postgresql_where=sa.text("deleted_at IS NULL")),
         Index("ix_candidates_org_workspace_created_at", "org_id", "workspace_id", "created_at"),
+        Index("ix_candidates_org_workspace_stage", "org_id", "workspace_id", "stage"),
+        Index("ix_candidates_org_workspace_status", "org_id", "workspace_id", "status"),
         UniqueConstraint("id", "org_id", "workspace_id", name="uq_candidates_id_org_workspace"),
         CheckConstraint("years_experience >= 0", name="ck_candidates_years_experience_non_negative"),
         CheckConstraint(

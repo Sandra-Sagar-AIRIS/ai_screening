@@ -24,6 +24,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const permissions = useAuthStore((state) => state.permissions);
   const hydrated = useAuthStore((state) => state.hydrated);
+  const token = useAuthStore((state) => state.token);
 
   const hasAnyPermission =
     permissions.includes("candidates:read") ||
@@ -33,8 +34,11 @@ export default function DashboardPage() {
     permissions.includes("pipeline:read");
 
   async function loadData(cancelledRef?: { cancelled: boolean }, isBackground = false) {
-    if (!isBackground) setLoading(true);
-    if (!isBackground) setError(null);
+    const hasCachedUi = !isBackground && (data !== null || readCachedDashboardSummary() !== null);
+    if (!isBackground) {
+      setLoading(!hasCachedUi);
+      setError(null);
+    }
     try {
       const summary = await getDashboardSummary();
       if (cancelledRef?.cancelled) return;
@@ -44,14 +48,16 @@ export default function DashboardPage() {
         if (!isBackground) setError(formatApiErrorForUser(err));
       }
     } finally {
-      if (!cancelledRef?.cancelled && !isBackground) {
-        setLoading(false);
+      if (!cancelledRef?.cancelled) {
+        if (!isBackground) {
+          setLoading(false);
+        }
       }
     }
   }
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !token) return;
     const cancelledRef = { cancelled: false };
     void loadData(cancelledRef, false);
     const interval = window.setInterval(() => {

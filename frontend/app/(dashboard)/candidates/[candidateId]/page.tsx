@@ -117,6 +117,7 @@ export default function CandidateDetailPage() {
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab") || "profile";
   const [candidate, setCandidate] = useState<Candidate | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [interactions, setInteractions] = useState<CandidateInteraction[]>([]);
   const [interactionsLoadFailed, setInteractionsLoadFailed] = useState(false);
@@ -227,30 +228,12 @@ export default function CandidateDetailPage() {
   async function loadCandidateMatchesWithRetry(
     candidateId: string,
     loadSeq: number,
-    attempts = 4,
-    waitMs = 1200
+    attempts = 3,
+    waitMs = 800
   ): Promise<CandidateMatchEntry[]> {
     for (let i = 0; i < attempts; i++) {
       try {
         const result = await getCandidateMatchesAts(candidateId, { limit: 50, offset: 0 });
-        // #region agent log
-        fetch("http://127.0.0.1:7675/ingest/4eb54ee1-e774-4d05-9ae0-3cff8d045ce2", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "473244" },
-          body: JSON.stringify({
-            sessionId: "473244",
-            hypothesisId: "H4",
-            location: "page.tsx:loadCandidateMatchesWithRetry",
-            message: "retry_attempt",
-            data: {
-              attempt: i + 1,
-              matchLen: result.matches.length,
-              candidateIdSuffix: candidateId.slice(-8),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         if (loadSeq !== candidateLoadSeqRef.current) {
           return [];
         }
@@ -267,131 +250,163 @@ export default function CandidateDetailPage() {
     return [];
   }
 
+  function applyCandidateFormFields(data: Candidate) {
+    setFirstName(data.first_name || "");
+    setLastName(data.last_name || "");
+    setEmail(data.email || "");
+    setComposeEmailTo(data.email || "");
+    setPhone(data.phone ?? "");
+    setComposePhoneTo(data.phone ?? "");
+    setLocation(data.location ?? "");
+    setRole(data.role ?? "");
+    setYearsExperience(
+      data.years_experience !== null && data.years_experience !== undefined
+        ? String(data.years_experience)
+        : ""
+    );
+    setSelectedRecruiterId(data.recruiter_id ?? "");
+  }
+
+  /** ATS rescore + poll runs after the profile is visible — never blocks first paint. */
+  async function bootstrapAtsInBackground(
+    candidateId: string,
+    loadSeq: number,
+    pipelineCount: number
+  ) {
+    if (pipelineCount === 0) {
+      return;
+    }
+    setAtsLoading(true);
+    try {
+      await rescoreCandidateAts(candidateId).catch(() => undefined);
+      if (loadSeq !== candidateLoadSeqRef.current) {
+        return;
+      }
+      const retried = await loadCandidateMatchesWithRetry(candidateId, loadSeq);
+      if (loadSeq !== candidateLoadSeqRef.current) {
+        return;
+      }
+      if (retried.length > 0) {
+        setAtsMatches(retried);
+      }
+    } finally {
+      if (loadSeq === candidateLoadSeqRef.current) {
+        setAtsLoading(false);
+      }
+    }
+  }
+
   useEffect(() => {
     if (!params.candidateId) {
       return;
     }
     const loadSeq = ++candidateLoadSeqRef.current;
-    async function loadData() {
+    const candidateId = params.candidateId;
+
+    async function loadProfile() {
+      setProfileLoading(true);
+      setError(null);
+      setInteractionsLoadFailed(false);
       try {
-        setInteractionsLoadFailed(false);
-        // Fire candidate + all supporting data concurrently; none depends on another.
-        const [data, timelineResult, pipelinesResult, interviewResult, jobsResult, usersResult] =
-          await Promise.all([
-            getCandidateById(params.candidateId),
-            getCandidateInteractions(params.candidateId, 100, 0).catch(() => null),
-            getPipelines(200, 0, undefined, params.candidateId).catch(() => []),
-            getInterviews({ candidate_id: params.candidateId, limit: 100 }).catch(() => []),
-            getJobs(50, 0).catch(() => []),
-            getUsers().catch(() => []),
-          ]);
-        setAtsLoading(true);
-        setAtsHint(null);
-        let initialMatches: CandidateMatchEntry[] = [];
-        try {
-          const first = await getCandidateMatchesAts(params.candidateId, { limit: 50, offset: 0 });
-          initialMatches = first.matches ?? [];
-          setAtsHint(first.ats_hint ?? null);
-        } catch {
-          initialMatches = [];
-          setAtsHint(null);
-        }
+        const data = await getCandidateById(candidateId);
         if (loadSeq !== candidateLoadSeqRef.current) {
           return;
         }
         setCandidate(data);
-        setInteractionsLoadFailed(timelineResult === null);
-        setInteractions(timelineResult ?? []);
-        const loadedPipelines = pipelinesResult as Pipeline[];
-        setPipelines(loadedPipelines);
-        setInterviews(interviewResult as Interview[]);
-        setJobs((jobsResult as Job[]).filter(Boolean));
-        setUsers((usersResult as OrganizationUser[]).filter((u) => u.role === "recruiter" || u.role === "admin"));
-        setAtsMatches(initialMatches);
-        // #region agent log
-        fetch("http://127.0.0.1:7675/ingest/4eb54ee1-e774-4d05-9ae0-3cff8d045ce2", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "473244" },
-          body: JSON.stringify({
-            sessionId: "473244",
-            hypothesisId: "H3",
-            location: "page.tsx:loadData",
-            message: "ats_initial_state",
-            data: {
-              initialMatchCount: initialMatches.length,
-              pipelineCount: loadedPipelines.length,
-              willRescoreEmpty: initialMatches.length === 0 && loadedPipelines.length > 0,
-              candidateIdSuffix: params.candidateId.slice(-8),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-        if (initialMatches.length === 0 && loadedPipelines.length > 0) {
-          // ATS scoring is async; trigger once and poll briefly before showing unavailable.
-          await rescoreCandidateAts(params.candidateId).catch(() => undefined);
-          if (loadSeq !== candidateLoadSeqRef.current) {
-            return;
-          }
-          const retried = await loadCandidateMatchesWithRetry(params.candidateId, loadSeq, 4, 1200);
-          // #region agent log
-          fetch("http://127.0.0.1:7675/ingest/4eb54ee1-e774-4d05-9ae0-3cff8d045ce2", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "473244" },
-            body: JSON.stringify({
-              sessionId: "473244",
-              hypothesisId: "H3",
-              location: "page.tsx:loadData",
-              message: "ats_after_retry",
-              data: { retriedMatchCount: retried.length, candidateIdSuffix: params.candidateId.slice(-8) },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
-          if (retried.length > 0) {
-            setAtsMatches(retried);
-          }
-        }
-        setFirstName(data.first_name || "");
-        setLastName(data.last_name || "");
-        setEmail(data.email || "");
-        setComposeEmailTo(data.email || "");
-        setPhone(data.phone ?? "");
-        setComposePhoneTo(data.phone ?? "");
-        setLocation(data.location ?? "");
-        setRole(data.role ?? "");
-        setYearsExperience(data.years_experience !== null && data.years_experience !== undefined ? String(data.years_experience) : "");
-        setSelectedRecruiterId(data.recruiter_id ?? "");
-        setError(null);
-
-        // Load AI screenings for this candidate (non-blocking, non-critical)
-        setAiScreeningsLoading(true);
-        listScreenings({ candidate_id: params.candidateId, limit: 50 })
-          .then((screenings) => {
-            if (loadSeq === candidateLoadSeqRef.current) {
-              setAiScreenings(screenings);
-            }
-          })
-          .catch(() => { /* screenings unavailable — don't block the rest of the page */ })
-          .finally(() => {
-            if (loadSeq === candidateLoadSeqRef.current) {
-              setAiScreeningsLoading(false);
-            }
-          });
+        applyCandidateFormFields(data);
       } catch (err) {
+        if (loadSeq !== candidateLoadSeqRef.current) {
+          return;
+        }
+        setCandidate(null);
         if (err instanceof ApiError) {
           setError(err.message);
         } else {
           setError("Unable to load candidate details");
         }
+      } finally {
+        if (loadSeq === candidateLoadSeqRef.current) {
+          setProfileLoading(false);
+        }
       }
-      finally {
+    }
+
+    async function loadSupplementary() {
+      setAtsLoading(true);
+      setAtsHint(null);
+      try {
+        const [
+          timelineResult,
+          pipelinesResult,
+          interviewResult,
+          jobsResult,
+          usersResult,
+          atsResult,
+        ] = await Promise.all([
+          getCandidateInteractions(candidateId, 100, 0).catch(() => null),
+          getPipelines(50, 0, undefined, candidateId).catch(() => [] as Pipeline[]),
+          getInterviews({ candidate_id: candidateId, limit: 100 }).catch(() => [] as Interview[]),
+          getJobs(50, 0).catch(() => [] as Job[]),
+          getUsers().catch(() => [] as OrganizationUser[]),
+          getCandidateMatchesAts(candidateId, { limit: 50, offset: 0 }).catch(() => ({
+            matches: [] as CandidateMatchEntry[],
+            ats_hint: null as string | null,
+          })),
+        ]);
+
+        if (loadSeq !== candidateLoadSeqRef.current) {
+          return;
+        }
+
+        const loadedPipelines = pipelinesResult as Pipeline[];
+        const initialMatches = atsResult.matches ?? [];
+
+        setInteractionsLoadFailed(timelineResult === null);
+        setInteractions(timelineResult ?? []);
+        setPipelines(loadedPipelines);
+        setInterviews(interviewResult as Interview[]);
+        setJobs((jobsResult as Job[]).filter(Boolean));
+        setUsers(
+          (usersResult as OrganizationUser[]).filter((u) => u.role === "recruiter" || u.role === "admin")
+        );
+        setAtsMatches(initialMatches);
+        setAtsHint(atsResult.ats_hint ?? null);
+
+        if (initialMatches.length === 0 && loadedPipelines.length > 0) {
+          void bootstrapAtsInBackground(candidateId, loadSeq, loadedPipelines.length);
+        } else if (loadSeq === candidateLoadSeqRef.current) {
+          setAtsLoading(false);
+        }
+      } catch {
         if (loadSeq === candidateLoadSeqRef.current) {
           setAtsLoading(false);
         }
       }
     }
-    void loadData();
+
+    function loadAiScreenings() {
+      setAiScreeningsLoading(true);
+      listScreenings({ candidate_id: candidateId, limit: 50 })
+        .then((screenings) => {
+          if (loadSeq === candidateLoadSeqRef.current) {
+            setAiScreenings(screenings);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (loadSeq === candidateLoadSeqRef.current) {
+            setAiScreeningsLoading(false);
+          }
+        });
+    }
+
+    void loadProfile().then(() => {
+      if (loadSeq !== candidateLoadSeqRef.current) {
+        return;
+      }
+      void loadSupplementary();
+      loadAiScreenings();
+    });
   }, [params.candidateId]);
 
 
@@ -701,8 +716,12 @@ export default function CandidateDetailPage() {
     return <p className="text-sm text-red-600">{error}</p>;
   }
 
-  if (!candidate) {
+  if (profileLoading) {
     return <p className="text-sm text-slate-600">Loading candidate...</p>;
+  }
+
+  if (!candidate) {
+    return <p className="text-sm text-slate-600">Candidate not found.</p>;
   }
 
   async function handleSave() {
@@ -1675,24 +1694,11 @@ export default function CandidateDetailPage() {
                                 {emailTemplateRendering && (
                                   <p className="px-4 py-1 text-xs font-medium text-[#FF5A1F]">Loading template content...</p>
                                 )}
-                                <div className="flex items-center gap-1 border-b border-gray-100 px-4 py-1.5 bg-gray-50/50">
-                                  <button className="p-1.5 rounded hover:bg-gray-200 text-gray-500 transition-colors" title="Bold"><Bold className="w-3.5 h-3.5" /></button>
-                                  <button className="p-1.5 rounded hover:bg-gray-200 text-gray-500 transition-colors" title="Italic"><Italic className="w-3.5 h-3.5" /></button>
-                                  <button className="p-1.5 rounded hover:bg-gray-200 text-gray-500 transition-colors" title="Underline"><Underline className="w-3.5 h-3.5" /></button>
-                                  <div className="w-px h-4 bg-gray-300 mx-1" />
-                                  <button className="p-1.5 rounded hover:bg-gray-200 text-gray-500 transition-colors" title="Bullet List"><ListIcon className="w-3.5 h-3.5" /></button>
-                                  <button className="p-1.5 rounded hover:bg-gray-200 text-gray-500 transition-colors" title="Numbered List"><ListOrdered className="w-3.5 h-3.5" /></button>
-                                  <div className="w-px h-4 bg-gray-300 mx-1" />
-                                  <button className="p-1.5 rounded hover:bg-gray-200 text-gray-500 transition-colors" title="Link"><LinkIcon className="w-3.5 h-3.5" /></button>
-                                </div>
                                 <div className="p-4">
                                   <textarea className="w-full min-h-[170px] text-sm outline-none resize-none bg-transparent" placeholder="Type your message here..." value={emailBody} onChange={(e) => setEmailBody(e.target.value)} />
                                 </div>
                               </div>
-                              <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-                                <button className="text-gray-500 hover:text-gray-700 transition-colors flex items-center gap-1 text-xs font-medium">
-                                  <Paperclip className="w-4 h-4" /> Attach File
-                                </button>
+                              <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-end">
                                 <div className="flex items-center gap-2">
                                   <Button variant="ghost" className="h-8 text-xs text-gray-600 hover:bg-gray-200" onClick={() => void handleSendEmail(true, "timeline_draft")} disabled={emailDraftDisabled}>Save Draft</Button>
                                   <Button className="h-8 text-xs bg-[#FF5A1F] hover:bg-[#E54E1A] text-white shadow-sm px-4" onClick={() => void handleSendEmail(false, "timeline_send")} disabled={emailSendDisabled}>{sendingEmail ? "Sending..." : "Send Email"}</Button>
@@ -1988,15 +1994,6 @@ export default function CandidateDetailPage() {
                             </div>
                           </div>
 
-                          <div className="bg-blue-50/50 rounded-xl p-4 border border-blue-100 flex items-start gap-3">
-                            <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center shadow-sm shrink-0 mt-0.5 border border-blue-50">
-                              <span className="text-xs">💡</span>
-                            </div>
-                            <div>
-                              <h4 className="text-xs font-bold text-blue-900 mb-1">Tip</h4>
-                              <p className="text-xs text-blue-800 leading-relaxed font-medium">Use templates to save time and maintain consistent communication.</p>
-                            </div>
-                          </div>
                         </div>
                       </div>
                     ) : activeCommunicationTab === "whatsapp" ? (
@@ -2169,15 +2166,6 @@ export default function CandidateDetailPage() {
                             </div>
                           </div>
 
-                          <div className="bg-green-50/50 rounded-xl p-4 border border-green-100 flex items-start gap-3">
-                            <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center shadow-sm shrink-0 mt-0.5 border border-green-50">
-                              <span className="text-xs">💡</span>
-                            </div>
-                            <div>
-                              <h4 className="text-xs font-bold text-green-900 mb-1">Tip</h4>
-                              <p className="text-xs text-green-800 leading-relaxed font-medium">Use templates to save time and maintain consistent communication.</p>
-                            </div>
-                          </div>
                         </div>
                       </div>
                     ) : (
@@ -2386,29 +2374,7 @@ export default function CandidateDetailPage() {
                         </div>
                       </div>
                     )}
-                    <div className="rounded-md border border-gray-200 p-3">
-                      <p className="text-xs font-medium text-gray-600 mb-2">Reminder Scheduling</p>
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                        <select className="rounded-md border border-gray-200 px-2 py-1.5 text-sm" value={reminderChannel} onChange={(e) => setReminderChannel(e.target.value as "email" | "whatsapp")}>
-                          <option value="email">Email</option>
-                          <option value="whatsapp">WhatsApp</option>
-                        </select>
-                        <Input type="datetime-local" value={reminderAt} onChange={(e) => setReminderAt(e.target.value)} />
-                        <Button variant="outline" disabled={reminderDisabled} onClick={() => void handleCreateReminder()}>{schedulingReminder ? "Scheduling..." : "Schedule Reminder"}</Button>
-                        <Button variant="outline" disabled={runningReminders} onClick={() => void handleRunDueReminders()}>{runningReminders ? "Running..." : "Run Due Jobs"}</Button>
-                      </div>
-                      {communicationReminders.length > 0 ? (
-                        <div className="mt-3 space-y-1">
-                          {communicationReminders.slice(0, 5).map((r) => (
-                            <p key={r.id} className="text-xs text-gray-600">
-                              {r.channel.toUpperCase()} {new Date(r.scheduled_for).toLocaleString()} - {r.status}
-                            </p>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-2 text-xs text-gray-500">No reminders scheduled yet.</p>
-                      )}
-                    </div>
+
                     {communicationConnections.length > 0 ? (
                       <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
                         <p className="text-xs font-medium text-gray-600 mb-2">Connected providers</p>

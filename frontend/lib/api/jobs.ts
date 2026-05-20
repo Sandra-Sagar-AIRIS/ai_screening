@@ -72,8 +72,58 @@ export async function parseJD(
   return (await response.json()) as JobParseResult;
 }
 
+const JOBS_LIST_SESSION_KEY = "airis_jobs_list_v1";
+const JOBS_LIST_SESSION_TTL_MS = 5 * 60_000;
+
+export function readCachedJobsList(): Job[] | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.sessionStorage.getItem(JOBS_LIST_SESSION_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as { savedAt: number; jobs: Job[] };
+    if (Date.now() - parsed.savedAt > JOBS_LIST_SESSION_TTL_MS) {
+      window.sessionStorage.removeItem(JOBS_LIST_SESSION_KEY);
+      return null;
+    }
+    return parsed.jobs;
+  } catch {
+    return null;
+  }
+}
+
+export function writeCachedJobsList(jobs: Job[]): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(JOBS_LIST_SESSION_KEY, JSON.stringify({ savedAt: Date.now(), jobs }));
+  } catch {
+    // Ignore quota errors.
+  }
+}
+
 export async function getJobs(limit = 50, offset = 0) {
-  return apiRequest<Job[]>(`/jobs?limit=${limit}&offset=${offset}`);
+  return apiRequest<Job[]>(`/jobs?limit=${limit}&offset=${offset}`, {}, 60_000);
+}
+
+/** Jobs for dropdowns/filters — never throws; uses session cache on failure. */
+export async function getJobsForSelect(limit = 100, offset = 0): Promise<Job[]> {
+  const cached = readCachedJobsList();
+  try {
+    const jobs = await apiRequest<Job[]>(
+      `/jobs?limit=${limit}&offset=${offset}`,
+      { silentErrors: true },
+      60_000
+    );
+    writeCachedJobsList(jobs);
+    return jobs;
+  } catch {
+    return cached ?? [];
+  }
 }
 
 export async function getJobById(jobId: string) {
