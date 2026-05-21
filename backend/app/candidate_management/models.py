@@ -62,6 +62,8 @@ class InteractionType(str, enum.Enum):
     EMAIL = "email"
     STAGE_CHANGE = "stage_change"
     INTERVIEW = "interview"
+    CALL = "call"
+    MEETING = "meeting"
     SYSTEM = "system"
 
 

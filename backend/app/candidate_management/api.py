@@ -271,14 +271,14 @@ def bulk_delete_candidates(
     workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
 ) -> ApiResponse[dict[str, Any]]:
     service = _service(db)
-    deleted_count = service.bulk_soft_delete(
+    archived_count = service.bulk_soft_delete(
         org_id=UUID(current_user.organization_id),
         workspace_id=workspace_id,
         actor_user_id=UUID(current_user.user_id),
         actor_role=current_user.role,
         payload=payload,
     )
-    return _success({"deleted_count": deleted_count})
+    return _success({"archived_count": archived_count, "deleted_count": archived_count})
 
 
 @router.post(CANDIDATES_BULK_UNARCHIVE, response_model=ApiResponse[dict[str, Any]])
@@ -560,7 +560,7 @@ def get_candidate(
 ):
     try:
         service = _service(db)
-        candidate = service._require_candidate(
+        candidate = service.get_candidate(
             org_id=UUID(current_user.organization_id),
             workspace_id=workspace_id,
             candidate_id=candidate_id,
@@ -572,7 +572,12 @@ def get_candidate(
         if exc.status_code == status.HTTP_404_NOT_FOUND:
             try:
                 legacy_service = LegacyCandidateService(db)
-                legacy_candidate = legacy_service.get_candidate_by_id(candidate_id, UUID(current_user.organization_id), current_user)
+                legacy_candidate = legacy_service.get_candidate_by_id(
+                    candidate_id,
+                    UUID(current_user.organization_id),
+                    current_user,
+                    include_archived=True,
+                )
                 candidate_resp = CandidateResponse(
                     id=legacy_candidate.id,
                     org_id=UUID(current_user.organization_id),
@@ -639,7 +644,7 @@ def download_candidate_resume(
 ):
     """Serve or download the candidate resume file stored locally."""
     service = _service(db)
-    candidate = service._require_candidate(
+    candidate = service.get_candidate(
         org_id=UUID(current_user.organization_id),
         workspace_id=workspace_id,
         candidate_id=candidate_id,
@@ -686,7 +691,7 @@ def preview_candidate_resume(
 ):
     """Return styled HTML preview for formats browsers don't inline render."""
     service = _service(db)
-    candidate = service._require_candidate(
+    candidate = service.get_candidate(
         org_id=UUID(current_user.organization_id),
         workspace_id=workspace_id,
         candidate_id=candidate_id,
@@ -837,6 +842,26 @@ def assign_candidate_recruiter(
     return _success(CandidateResponse.model_validate(candidate))
 
 
+@router.post("/candidates/{candidate_id}/archive", response_model=ApiResponse[dict[str, Any]])
+def archive_candidate(
+    candidate_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_DELETE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[dict[str, Any]]:
+    """AIR-510: Archive (soft-delete) — is_deleted, deleted_at, deleted_by; row retained."""
+    service = _service(db)
+    service.archive_candidate(
+        org_id=UUID(current_user.organization_id),
+        workspace_id=workspace_id,
+        candidate_id=candidate_id,
+        actor_user_id=UUID(current_user.user_id),
+        actor_role=current_user.role,
+    )
+    return _success({"archived": True, "candidate_id": str(candidate_id)})
+
+
 @router.delete("/candidates/{candidate_id}", response_model=ApiResponse[dict[str, Any]])
 def delete_candidate(
     candidate_id: UUID,
@@ -845,13 +870,34 @@ def delete_candidate(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
 ) -> ApiResponse[dict[str, Any]]:
+    """Permanent hard delete — unchanged GDPR/cleanup behavior."""
     service = _service(db)
     service.hard_delete_candidate(
         org_id=UUID(current_user.organization_id),
         workspace_id=workspace_id,
         candidate_id=candidate_id,
     )
-    return _success({"deleted": True, "candidate_id": str(candidate_id)})
+    return _success({"deleted": True, "hard_deleted": True, "candidate_id": str(candidate_id)})
+
+
+@router.patch("/candidates/{candidate_id}/restore", response_model=ApiResponse[CandidateResponse])
+def restore_candidate(
+    candidate_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Annotated[UUID, Depends(_workspace_id_header)],
+) -> ApiResponse[CandidateResponse]:
+    """AIR-512: Admin restore — sets is_deleted=false and clears deleted_at."""
+    service = _service(db)
+    candidate = service.restore_candidate(
+        org_id=UUID(current_user.organization_id),
+        workspace_id=workspace_id,
+        candidate_id=candidate_id,
+        actor_user_id=UUID(current_user.user_id),
+        actor_role=current_user.role,
+    )
+    return _success(CandidateResponse.model_validate(candidate))
 
 
 @router.post("/candidates/merge", response_model=ApiResponse[CandidateResponse])
@@ -895,7 +941,8 @@ def add_interaction(
         actor_role=current_user.role,
         payload=payload,
     )
-    return _success(InteractionResponse.model_validate(interaction))
+    normalized = service._normalize_interaction(interaction)
+    return _success(InteractionResponse.model_validate(normalized))
 
 
 @router.get("/candidates/{candidate_id}/interactions", response_model=ApiResponse[list[InteractionResponse]])

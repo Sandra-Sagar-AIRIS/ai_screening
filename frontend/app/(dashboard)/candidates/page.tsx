@@ -6,11 +6,11 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { ApiError } from "@/lib/api/client";
 import {
   addCandidateInteraction,
-  bulkDeleteCandidates,
+  archiveCandidate,
+  bulkArchiveCandidates,
   bulkHardDeleteCandidates,
   bulkUnarchiveCandidates,
   bulkAssignRecruiter,
-  getCandidateInteractions,
   createBulkUploadJob,
   createCandidate,
   getBulkUploadJobStatus,
@@ -20,7 +20,6 @@ import {
   writeCachedCandidatesListPage,
   type CandidateManagementParseResult,
   type BulkUploadJobStatus,
-  type CandidateInteraction,
   updateCandidate,
   uploadResumeForReview,
 } from "@/lib/api/candidates";
@@ -30,6 +29,7 @@ import type { Candidate, Job, OrganizationUser, Pipeline } from "@/lib/api/types
 import { getUsers } from "@/lib/api/users";
 import { CANDIDATES_CREATE_PERMISSION, hasPermission } from "@/lib/rbac";
 import { useAuthStore } from "@/store/auth-store";
+import { CandidateNotesPanel } from "@/components/candidates/CandidateNotesPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -121,6 +121,8 @@ export default function CandidatesPage() {
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [bulkRecruiterId, setBulkRecruiterId] = useState("");
   const permissions = useAuthStore((state) => state.permissions);
+  const userRole = useAuthStore((state) => state.role);
+  const isNotesAdmin = userRole === "admin" || userRole === "agency_admin";
   const searchParams = useSearchParams();
   const canCreate = hasPermission(permissions, CANDIDATES_CREATE_PERMISSION);
   const canReadCandidates = hasPermission(permissions, "candidates:read") || hasPermission(permissions, "candidates:read_own");
@@ -129,10 +131,6 @@ export default function CandidatesPage() {
   const [submitModalJobId, setSubmitModalJobId] = useState("");
   const [submitLoading, setSubmitLoading] = useState(false);
   const [noteModalCandidateId, setNoteModalCandidateId] = useState<string | null>(null);
-  const [noteInput, setNoteInput] = useState("");
-  const [noteItems, setNoteItems] = useState<CandidateInteraction[]>([]);
-  const [noteLoading, setNoteLoading] = useState(false);
-  const [noteSaving, setNoteSaving] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(
     () => readCachedCandidatesListPage()?.total_count ?? 0
@@ -601,8 +599,8 @@ export default function CandidatesPage() {
   }
 
   const sortedCandidates = useMemo(() => {
-    let data = viewImportedOnly 
-      ? candidates.filter((candidate) => candidate.source === "bulk_upload" || candidate.source === "import") 
+    let data = viewImportedOnly
+      ? candidates.filter((candidate) => candidate.source === "bulk_upload" || candidate.source === "import")
       : [...candidates];
     
     if (locationFilter.trim()) {
@@ -685,42 +683,8 @@ export default function CandidatesPage() {
 
   const selectedJobTitle = jobs.find((job) => job.id === selectedJobId)?.title ?? "No job selected";
 
-  async function openNotesModal(candidateId: string) {
+  function openNotesModal(candidateId: string) {
     setNoteModalCandidateId(candidateId);
-    setNoteInput("");
-    setNoteLoading(true);
-    try {
-      const interactions = await getCandidateInteractions(candidateId, 100, 0);
-      setNoteItems(interactions.filter((item) => item.interaction_type === "note"));
-    } catch {
-      setNoteItems([]);
-    } finally {
-      setNoteLoading(false);
-    }
-  }
-
-  async function saveNote() {
-    if (!noteModalCandidateId || !noteInput.trim()) return;
-    setNoteSaving(true);
-    try {
-      await addCandidateInteraction(noteModalCandidateId, {
-        interaction_type: "note",
-        title: "Candidate note",
-        body: noteInput.trim(),
-        interaction_metadata: {
-          candidate_id: noteModalCandidateId,
-          text: noteInput.trim(),
-          created_at: new Date().toISOString(),
-        },
-      });
-      const interactions = await getCandidateInteractions(noteModalCandidateId, 100, 0);
-      setNoteItems(interactions.filter((item) => item.interaction_type === "note"));
-      setNoteInput("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to add note.");
-    } finally {
-      setNoteSaving(false);
-    }
   }
 
   async function submitCandidateToPipeline(candidateId: string, jobId: string) {
@@ -791,11 +755,18 @@ export default function CandidatesPage() {
 
   async function handleBulkArchive() {
     if (selectedCandidateIds.length === 0) return;
+    if (
+      !window.confirm(
+        "Archive selected candidates? They will be hidden from lists; admins can restore them later."
+      )
+    ) {
+      return;
+    }
     setBulkActionLoading(true);
     try {
       const prevCandidates = candidates;
       setCandidates((prev) => prev.filter((candidate) => !selectedCandidateIds.includes(candidate.id)));
-      await bulkDeleteCandidates({ candidate_ids: selectedCandidateIds });
+      await bulkArchiveCandidates({ candidate_ids: selectedCandidateIds });
       setSelectedCandidateIds([]);
       await loadCandidates({
         query: searchQuery.trim() || undefined,
@@ -806,7 +777,7 @@ export default function CandidatesPage() {
         query: searchQuery.trim() || undefined,
         location: locationFilter.trim() || undefined,
       });
-      setError(err instanceof Error ? err.message : "Unable to delete selected candidates.");
+      setError(err instanceof Error ? err.message : "Unable to archive selected candidates.");
     } finally {
       setBulkActionLoading(false);
     }
@@ -951,7 +922,7 @@ export default function CandidatesPage() {
                 </span>
               ) : null}
             </div>
-            <button 
+            <button
               className={`flex items-center gap-2 px-4 h-11 rounded-2xl border transition-all text-[13px] font-semibold ${showFilters ? 'bg-slate-50 border-slate-300 text-slate-900 shadow-inner' : 'bg-white border-slate-200/80 text-slate-600 hover:text-slate-900 hover:bg-slate-50 shadow-[0_2px_8px_rgba(0,0,0,0.02)]'}`}
               onClick={() => setShowFilters(!showFilters)}
             >
@@ -1122,180 +1093,193 @@ export default function CandidatesPage() {
                   </tr>
                 ) : (
                   sortedCandidates.map((candidate) => (
-                    <tr 
-                      key={candidate.id} 
+                    <tr
+                      key={candidate.id}
                       className="border-b border-slate-100/60 hover:bg-slate-50/80 transition-colors text-xs group cursor-pointer"
                       onClick={() => router.push(`/candidates/${candidate.id}`)}
                     >
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="h-7 w-7 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold text-[10px] shrink-0 border border-indigo-100">
-                          {candidate.first_name.charAt(0)}{candidate.last_name.charAt(0)}
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="h-7 w-7 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold text-[10px] shrink-0 border border-indigo-100">
+                            {candidate.first_name.charAt(0)}{candidate.last_name.charAt(0)}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors truncate max-w-[140px]">{candidate.first_name} {candidate.last_name}</p>
+                            <p className="text-[10px] text-slate-500 truncate max-w-[140px]">{candidate.email}</p>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <p className="font-bold text-slate-900 group-hover:text-[#FF5A1F] transition-colors truncate max-w-[140px]">{candidate.first_name} {candidate.last_name}</p>
-                          <p className="text-[10px] text-slate-500 truncate max-w-[140px]">{candidate.email}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 text-slate-600">
-                      <div className="truncate max-w-[120px]" title={(() => {
-                        const pipeline = pipelineByCandidate.get(candidate.id);
-                        const job = jobs.find((item) => item.id === pipeline?.job_id);
-                        return job?.title ?? "-";
-                      })()}>
-                        {(() => {
+                      </td>
+                      <td className="px-3 py-3 text-slate-600">
+                        <div className="truncate max-w-[120px]" title={(() => {
                           const pipeline = pipelineByCandidate.get(candidate.id);
                           const job = jobs.find((item) => item.id === pipeline?.job_id);
                           return job?.title ?? "-";
-                        })()}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span
-                        className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700"
-                        title={`Applied to ${pipelineCountByCandidate.get(candidate.id) ?? 0} jobs`}
-                      >
-                        {pipelineByCandidate.get(candidate.id) ? pipelineStageLabel(pipelineByCandidate.get(candidate.id)) : "Not submitted"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">
-                        {getCandidateSourceLabel(candidate)}
-                      </span>
-                    </td>
+                        })()}>
+                          {(() => {
+                            const pipeline = pipelineByCandidate.get(candidate.id);
+                            const job = jobs.find((item) => item.id === pipeline?.job_id);
+                            return job?.title ?? "-";
+                          })()}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span
+                          className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700"
+                          title={`Applied to ${pipelineCountByCandidate.get(candidate.id) ?? 0} jobs`}
+                        >
+                          {pipelineByCandidate.get(candidate.id) ? pipelineStageLabel(pipelineByCandidate.get(candidate.id)) : "Not submitted"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">
+                          {getCandidateSourceLabel(candidate)}
+                        </span>
+                      </td>
 
-                    <td className="px-3 py-3 text-slate-500">
-                      <div className="truncate max-w-[120px]" title={candidate.location ?? ""}>
-                        {candidate.location ?? "-"}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 text-slate-500">
-                      <div className="max-w-[120px] truncate" title={candidate.role ?? ""}>
-                        {candidate.role ?? "-"}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 text-slate-500 whitespace-nowrap">
-                      {candidate.years_experience !== null && candidate.years_experience !== undefined
-                        ? `${candidate.years_experience}y`
-                        : "-"}
-                    </td>
-                    <td className="px-3 py-3 text-slate-500 whitespace-nowrap">
-                      {new Date(candidate.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-3 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {canCreate ? (
-                          <Button
-                            variant="outline"
-                            className="h-8 px-2 text-[11px]"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSubmitModalCandidateId(candidate.id);
-                              setSubmitModalJobId(selectedJobId);
-                            }}
-                          >
-                            Submit to Job
-                          </Button>
-                        ) : null}
-                        
-                        <div className="relative">
-                          <Button
-                            variant="ghost"
-                            className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenDropdownId(openDropdownId === candidate.id ? null : candidate.id);
-                            }}
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
+                      <td className="px-3 py-3 text-slate-500">
+                        <div className="truncate max-w-[120px]" title={candidate.location ?? ""}>
+                          {candidate.location ?? "-"}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-slate-500">
+                        <div className="max-w-[120px] truncate" title={candidate.role ?? ""}>
+                          {candidate.role ?? "-"}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-slate-500 whitespace-nowrap">
+                        {candidate.years_experience !== null && candidate.years_experience !== undefined
+                          ? `${candidate.years_experience}y`
+                          : "-"}
+                      </td>
+                      <td className="px-3 py-3 text-slate-500 whitespace-nowrap">
+                        {new Date(candidate.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {canCreate ? (
+                            <Button
+                              variant="outline"
+                              className="h-8 px-2 text-[11px]"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSubmitModalCandidateId(candidate.id);
+                                setSubmitModalJobId(selectedJobId);
+                              }}
+                            >
+                              Submit to Job
+                            </Button>
+                          ) : null}
 
-                          {openDropdownId === candidate.id && (
-                            <>
-                              <div
-                                className="fixed inset-0 z-40"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenDropdownId(null);
-                                }}
-                              />
-                              <div className="absolute right-0 mt-1 w-36 bg-white rounded-lg shadow-lg border border-slate-100 z-50 py-1 overflow-hidden">
-                              {canCreate && (
-                                <button
-                                  className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-[#FF5A1F] transition-colors flex items-center gap-2"
+                          <div className="relative">
+                            <Button
+                              variant="ghost"
+                              className="h-8 w-8 p-0 text-slate-400 hover:text-slate-900"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenDropdownId(openDropdownId === candidate.id ? null : candidate.id);
+                              }}
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+
+                            {openDropdownId === candidate.id && (
+                              <>
+                                <div
+                                  className="fixed inset-0 z-40"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setOpenDropdownId(null);
-                                    void openNotesModal(candidate.id);
                                   }}
-                                >
-                                  <FileText className="h-3.5 w-3.5" />
-                                  Notes
-                                </button>
-                              )}
-                              
-                              {statusFilter === "deleted" ? (
-                                <button
-                                  className="w-full text-left px-3 py-2 text-xs text-emerald-600 hover:bg-emerald-50 transition-colors flex items-center gap-2"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    setOpenDropdownId(null);
-                                    try {
-                                      await bulkUnarchiveCandidates({ candidate_ids: [candidate.id] });
-                                      setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
-                                    } catch (err) {
-                                      setError(err instanceof Error ? err.message : "Unable to unarchive candidate.");
-                                    }
-                                  }}
-                                >
-                                  <ArchiveRestore className="h-3.5 w-3.5" />
-                                  Unarchive
-                                </button>
-                              ) : (
-                                <button
-                                  className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-red-600 transition-colors flex items-center gap-2"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    setOpenDropdownId(null);
-                                    try {
-                                      setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
-                                      await bulkDeleteCandidates({ candidate_ids: [candidate.id] });
-                                    } catch (err) {
-                                      setError(err instanceof Error ? err.message : "Unable to archive candidate.");
-                                    }
-                                  }}
-                                >
-                                  <ArchiveRestore className="h-3.5 w-3.5" />
-                                  Archive
-                                </button>
-                              )}
-                              
-                              <button
-                                className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  setOpenDropdownId(null);
-                                  if (!window.confirm("Are you sure you want to permanently delete this candidate?")) return;
-                                  try {
-                                    setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
-                                    await bulkHardDeleteCandidates({ candidate_ids: [candidate.id] });
-                                  } catch (err) {
-                                    setError(err instanceof Error ? err.message : "Unable to delete candidate.");
-                                  }
-                                }}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                Delete
-                              </button>
-                            </div>
-                            </>
-                          )}
+                                />
+                                <div className="absolute right-0 mt-1 w-36 bg-white rounded-lg shadow-lg border border-slate-100 z-50 py-1 overflow-hidden">
+                                  {canCreate && (
+                                    <button
+                                      className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-[#FF5A1F] transition-colors flex items-center gap-2"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setOpenDropdownId(null);
+                                        void openNotesModal(candidate.id);
+                                      }}
+                                    >
+                                      <FileText className="h-3.5 w-3.5" />
+                                      Notes
+                                    </button>
+                                  )}
+
+                                  {statusFilter === "deleted" ? (
+                                    <button
+                                      className="w-full text-left px-3 py-2 text-xs text-emerald-600 hover:bg-emerald-50 transition-colors flex items-center gap-2"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        setOpenDropdownId(null);
+                                        try {
+                                          await bulkUnarchiveCandidates({ candidate_ids: [candidate.id] });
+                                          setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
+                                        } catch (err) {
+                                          setError(err instanceof Error ? err.message : "Unable to unarchive candidate.");
+                                        }
+                                      }}
+                                    >
+                                      <ArchiveRestore className="h-3.5 w-3.5" />
+                                      Unarchive
+                                    </button>
+                                  ) : (
+                                    <button
+                                      className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-[#FF5A1F] transition-colors flex items-center gap-2"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        setOpenDropdownId(null);
+                                        if (
+                                          !window.confirm(
+                                            "Archive this candidate? They will be hidden from lists and search. Active pipelines will be marked withdrawn. An admin can restore them later."
+                                          )
+                                        ) {
+                                          return;
+                                        }
+                                        try {
+                                          setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
+                                          await archiveCandidate(candidate.id);
+                                        } catch (err) {
+                                          setError(err instanceof Error ? err.message : "Unable to archive candidate.");
+                                        }
+                                      }}
+                                    >
+                                      <ArchiveRestore className="h-3.5 w-3.5" />
+                                      Archive
+                                    </button>
+                                  )}
+
+                                  <button
+                                    className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      setOpenDropdownId(null);
+                                      if (
+                                        !window.confirm(
+                                          "Permanently delete this candidate? This cannot be undone and removes their data from the system."
+                                        )
+                                      ) {
+                                        return;
+                                      }
+                                      try {
+                                        setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
+                                        await bulkHardDeleteCandidates({ candidate_ids: [candidate.id] });
+                                      } catch (err) {
+                                        setError(err instanceof Error ? err.message : "Unable to delete candidate.");
+                                      }
+                                    }}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Delete
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                  </tr>
-                )))}
+                      </td>
+                    </tr>
+                  )))}
               </tbody>
             </table>
           </div>
@@ -1346,23 +1330,12 @@ export default function CandidatesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-lg rounded-lg bg-white p-4 shadow-xl">
             <h3 className="text-base font-semibold">Candidate Notes</h3>
-            <div className="mt-3 flex gap-2">
-              <Input value={noteInput} onChange={(event) => setNoteInput(event.target.value)} placeholder="Add note..." />
-              <Button onClick={() => void saveNote()} disabled={noteSaving || !noteInput.trim()}>
-                {noteSaving ? "Saving..." : "Save"}
-              </Button>
-            </div>
-            <div className="mt-3 max-h-64 space-y-2 overflow-auto rounded border border-slate-200 p-2">
-              {noteLoading ? <p className="text-xs text-slate-500">Loading notes...</p> : null}
-              {!noteLoading && noteItems.length === 0 ? <p className="text-xs text-slate-500">No notes yet.</p> : null}
-              {!noteLoading
-                ? noteItems.map((item) => (
-                    <div key={item.id} className="rounded border border-slate-100 p-2">
-                      <p className="text-sm text-slate-800">{item.body ?? "-"}</p>
-                      <p className="text-[11px] text-slate-500">{new Date(item.created_at).toLocaleString()}</p>
-                    </div>
-                  ))
-                : null}
+            <div className="mt-3">
+              <CandidateNotesPanel
+                candidateId={noteModalCandidateId}
+                isAdmin={isNotesAdmin}
+                compact
+              />
             </div>
             <div className="mt-4 flex justify-end">
               <Button variant="outline" onClick={() => setNoteModalCandidateId(null)}>

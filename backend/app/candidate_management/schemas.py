@@ -42,6 +42,8 @@ class InteractionTypeSchema(str, Enum):
     EMAIL = "email"
     STAGE_CHANGE = "stage_change"
     INTERVIEW = "interview"
+    CALL = "call"
+    MEETING = "meeting"
     SYSTEM = "system"
 
 
@@ -325,6 +327,42 @@ class InteractionResponse(BaseModel):
         if isinstance(value, str):
             return value
         return str(value)
+
+
+class NoteCreate(BaseModel):
+    """AIR-38 / AIR-507: Create a candidate note (stored as interaction type note)."""
+
+    content: str = Field(min_length=1, max_length=8000)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("content")
+    @classmethod
+    def strip_non_empty_content(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("content cannot be empty or whitespace only")
+        return stripped
+
+
+class NoteResponse(BaseModel):
+    """AIR-38: Note row for timeline UI."""
+
+    id: UUID
+    candidate_id: UUID
+    content: str
+    author_user_id: UUID | None
+    author_email: str | None = None
+    author_role: str | None = None
+    created_at: datetime
+    hidden: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NoteListResponse(BaseModel):
+    data: list[NoteResponse] = Field(default_factory=list)
+    total: int = 0
 
 
 class MergeCandidatesRequest(BaseModel):

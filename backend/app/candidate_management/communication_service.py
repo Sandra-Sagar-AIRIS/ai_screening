@@ -333,6 +333,7 @@ class CommunicationService:
         template_id: UUID | None,
         template_values: dict[str, Any] | None,
         idempotency_key: str | None,
+        pipeline_stage_notification: dict[str, Any] | None = None,
     ) -> CommunicationMessage:
         candidate = self.db.scalar(
             select(Candidate).where(
@@ -374,7 +375,13 @@ class CommunicationService:
         delivery_provider, connection = self._select_email_delivery(
             org_id=org_id, workspace_id=workspace_id, user_id=user_id, requested_provider=provider
         )
-        record_provider = CommunicationProvider(delivery_provider) if connection is not None else CommunicationProvider(provider)
+        if connection is not None:
+            record_provider = CommunicationProvider(delivery_provider)
+        elif delivery_provider == "smtp":
+            # Enum has no SMTP member; delivery still goes via _send_via_smtp (provider in metadata/events).
+            record_provider = CommunicationProvider.GMAIL
+        else:
+            record_provider = CommunicationProvider(provider)
         from_address = connection.external_account_email if connection is not None else self.settings.smtp_from
         message = CommunicationMessage(
             org_id=org_id,
@@ -433,21 +440,29 @@ class CommunicationService:
                 event_type="sent",
                 payload={"provider_message_id": provider_message_id},
             )
+            interaction_metadata: dict[str, Any] = {
+                "channel": "email",
+                "provider": delivery_provider,
+                "to": to_email,
+                "subject": rendered_subject,
+                "message_id": str(message.id),
+                "provider_message_id": provider_message_id,
+            }
+            if pipeline_stage_notification:
+                interaction_metadata.update(pipeline_stage_notification)
+            interaction_title = (
+                f"Automated email: {pipeline_stage_notification.get('stage_key', 'pipeline update')}"
+                if pipeline_stage_notification and pipeline_stage_notification.get("automated")
+                else f"Email sent via {delivery_provider}"
+            )
             self._append_candidate_interaction(
                 org_id=org_id,
                 workspace_id=workspace_id,
                 candidate_id=candidate_id,
                 user_id=user_id,
-                title=f"Email sent via {delivery_provider}",
+                title=interaction_title,
                 body=(rendered_body or "")[:2000],
-                metadata={
-                    "channel": "email",
-                    "provider": delivery_provider,
-                    "to": to_email,
-                    "subject": rendered_subject,
-                    "message_id": str(message.id),
-                    "provider_message_id": provider_message_id,
-                },
+                metadata=interaction_metadata,
             )
             self.db.add(message)
             self.db.commit()
@@ -790,6 +805,10 @@ class CommunicationService:
     def _select_email_delivery(
         self, *, org_id: UUID, workspace_id: UUID, user_id: UUID, requested_provider: str
     ) -> tuple[str, CommunicationConnection | None]:
+        # AIR-572: pipeline automated emails always use org SMTP (not recruiter OAuth).
+        if requested_provider == "smtp":
+            return "smtp", None
+
         for provider in (CommunicationProvider.GMAIL.value, CommunicationProvider.OUTLOOK.value):
             conn = self.db.scalar(
                 select(CommunicationConnection).where(

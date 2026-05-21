@@ -12,6 +12,7 @@ from app.core.permissions import (
     ATS_READ,
     ATS_RESCORE,
     CANDIDATES_CREATE,
+    CANDIDATES_DELETE,
     CANDIDATES_MERGE,
     CANDIDATES_READ,
     CANDIDATES_READ_OWN,
@@ -26,6 +27,8 @@ from app.services.candidate_dedup.detection_service import DuplicateDetectionSer
 from app.services.candidate_dedup.merge_service import CandidateMergeService
 from app.services.job_service import JobService
 from app.schemas.job import AtsCandidateRescoreResponse, CandidateMatchesResponse
+from app.schemas.placement_history import CandidatePlacementListResponse
+from app.services.placement_history_service import PlacementHistoryService
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +118,12 @@ def get_candidate(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CandidateResponse:
     service = CandidateService(db)
-    candidate = service.get_candidate_by_id(candidate_id, UUID(current_user.organization_id), current_user)
+    candidate = service.get_candidate_by_id(
+        candidate_id,
+        UUID(current_user.organization_id),
+        current_user,
+        include_archived=True,
+    )
     return CandidateResponse.model_validate(candidate)
 
 
@@ -135,6 +143,24 @@ def update_candidate(
         payload=payload,
     )
     return CandidateResponse.model_validate(candidate)
+
+
+@router.get("/{candidate_id}/placements", response_model=CandidatePlacementListResponse)
+def list_candidate_placements(
+    candidate_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_any_permissions(CANDIDATES_READ, CANDIDATES_READ_OWN))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> CandidatePlacementListResponse:
+    """AIR-503: Read-only placement history from candidate_placement_history (latest per job, newest first)."""
+    org_id = UUID(current_user.organization_id)
+    CandidateService(db).get_candidate_by_id(
+        candidate_id, org_id, current_user, include_archived=True
+    )
+    return PlacementHistoryService(db).list_for_candidate(
+        candidate_id=candidate_id,
+        organization_id=org_id,
+    )
 
 
 @router.get("/{candidate_id}/matches", response_model=CandidateMatchesResponse)
@@ -270,4 +296,43 @@ def rescore_candidate_matches(
         semantic_enrichment=sem,
         mode="fast",
     )
+
+
+@router.post("/{candidate_id}/archive", status_code=status.HTTP_200_OK)
+def archive_candidate(
+    candidate_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_DELETE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict[str, object]:
+    """AIR-510: Archive (soft-delete) — sets is_deleted and deleted_at; row retained."""
+    org_id = UUID(current_user.organization_id)
+    CandidateService(db).archive_candidate(candidate_id, org_id, current_user)
+    return {"archived": True, "candidate_id": str(candidate_id)}
+
+
+@router.delete("/{candidate_id}", status_code=status.HTTP_200_OK)
+def delete_candidate(
+    candidate_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_DELETE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict[str, object]:
+    """Permanent hard delete — removes candidate data."""
+    org_id = UUID(current_user.organization_id)
+    CandidateService(db).hard_delete_candidate(candidate_id, org_id, current_user)
+    return {"deleted": True, "hard_deleted": True, "candidate_id": str(candidate_id)}
+
+
+@router.patch("/{candidate_id}/restore", response_model=CandidateResponse)
+def restore_candidate(
+    candidate_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[CurrentUser, Depends(require_permission(CANDIDATES_UPDATE))],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> CandidateResponse:
+    """AIR-512: Admin restore — sets is_deleted=false."""
+    org_id = UUID(current_user.organization_id)
+    candidate = CandidateService(db).restore_candidate(candidate_id, org_id, current_user)
+    return CandidateResponse.model_validate(candidate)
 

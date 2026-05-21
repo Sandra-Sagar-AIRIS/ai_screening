@@ -895,6 +895,13 @@ class JobService:
         try:
             # Flush so we can create the pipeline in the same transaction.
             self.db.flush()
+            from app.services.placement_history_service import PlacementHistoryService
+
+            PlacementHistoryService(self.db).record_pending_submission(
+                candidate_id=candidate.id,
+                job_id=job.id,
+                submitted_at=submission.submitted_at,
+            )
         except IntegrityError:
             self.db.rollback()
             existing = self.db.scalar(
@@ -1299,7 +1306,9 @@ class JobService:
         limit: int,
         offset: int,
     ) -> CandidateMatchesResponse:
-        self._candidates.get_candidate_by_id(candidate_id, organization_id, current_user)
+        self._candidates.get_candidate_by_id(
+            candidate_id, organization_id, current_user, include_archived=True
+        )
         filters = [
             CandidateJobMatch.organization_id == organization_id,
             CandidateJobMatch.candidate_id == candidate_id,

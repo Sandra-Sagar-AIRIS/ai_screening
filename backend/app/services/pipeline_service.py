@@ -404,6 +404,17 @@ class PipelineService:
             transitioned_at=datetime.now(UTC),
         )
         self.db.add(history)
+        self.db.flush()
+        stage_history_id = history.id
+
+        from app.services.placement_history_service import PlacementHistoryService
+
+        PlacementHistoryService(self.db).record_pipeline_stage(
+            candidate_id=pipeline.candidate_id,
+            job_id=pipeline.job_id,
+            stage=new_stage,
+            transitioned_at=history.transitioned_at,
+        )
 
         # Apply stage change; auto-close terminal stages.
         # PIPE-004: record when the stage was last updated for sort-by-stage-updated.
@@ -422,10 +433,12 @@ class PipelineService:
             _notify_stage_change(
                 db=self.db,
                 pipeline=pipeline,
+                organization_id=organization_id,
                 previous_stage=current_stage,
                 new_stage=new_stage,
                 actor_user_id=UUID(current_user.user_id) if current_user.user_id else None,
                 reason=payload.reason,
+                stage_history_id=stage_history_id,
             )
         except Exception:
             logger.warning(
@@ -599,38 +612,46 @@ def _notify_stage_change(
     *,
     db: Session,
     pipeline: Pipeline,
+    organization_id: UUID,
     previous_stage: str,
     new_stage: str,
     actor_user_id: UUID | None,
     reason: str | None,
+    stage_history_id: UUID,
 ) -> None:
     """
     COMM-005: Fire a best-effort notification on stage change.
 
-    Currently records a CandidateInteraction in the candidate-management
-    store when the candidate exists there.  Email / SMS delivery can be
-    wired in here once comm templates are configured for stage-change events.
+    Records a timeline interaction synchronously, then dispatches automated
+    candidate email delivery on a background thread (AIR-570/572).
     """
+    from app.candidate_management.models import CandidateInteraction, InteractionType  # noqa: PLC0415
+    from app.candidate_management.models import Candidate as CMCandidate  # noqa: PLC0415
+    from app.services.pipeline_stage_notification_service import (  # noqa: PLC0415
+        run_pipeline_stage_email_notification,
+    )
+    from app.services.task_runner import dispatch_task  # noqa: PLC0415
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    cm_candidate = db.scalar(
+        _select(CMCandidate).where(CMCandidate.id == pipeline.candidate_id)
+    )
+    if cm_candidate is None:
+        return
+
+    note = f"Stage changed: {previous_stage} → {new_stage}"
+    if reason:
+        note += f"\nReason: {reason}"
+
+    stage_metadata: dict[str, str | None] = {
+        "pipeline_id": str(pipeline.id),
+        "job_id": str(pipeline.job_id) if pipeline.job_id else None,
+        "previous_stage": previous_stage,
+        "new_stage": new_stage,
+        "stage_history_id": str(stage_history_id),
+    }
+
     try:
-        from app.candidate_management.models import CandidateInteraction, InteractionType  # noqa: PLC0415
-
-        # Look up the candidate in the candidate-management store using the
-        # ATS candidate id.  The CM store uses a different tenant key
-        # (org_id + workspace_id) so we query by id only and accept the first hit.
-        from app.candidate_management.models import Candidate as CMCandidate  # noqa: PLC0415
-        from sqlalchemy import select as _select  # noqa: PLC0415
-
-        cm_candidate = db.scalar(
-            _select(CMCandidate).where(CMCandidate.id == pipeline.candidate_id)
-        )
-        if cm_candidate is None:
-            # Candidate not in CM store — skip silently.
-            return
-
-        note = f"Stage changed: {previous_stage} → {new_stage}"
-        if reason:
-            note += f"\nReason: {reason}"
-
         interaction = CandidateInteraction(
             org_id=cm_candidate.org_id,
             workspace_id=cm_candidate.workspace_id,
@@ -638,14 +659,46 @@ def _notify_stage_change(
             interaction_type=InteractionType.STAGE_CHANGE,
             title=f"Pipeline stage: {new_stage}",
             body=note,
+            interaction_metadata=stage_metadata,
             actor_user_id=actor_user_id,
         )
         db.add(interaction)
         db.commit()
     except Exception:
-        # Never let notification failure roll back the already-committed transition.
         logger.warning(
             "comm_005.notify_stage_change failed pipeline_id=%s — suppressed",
+            pipeline.id,
+            exc_info=True,
+        )
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+    if actor_user_id is None:
+        return
+
+    try:
+        dispatch_task(
+            task=None,
+            fallback=run_pipeline_stage_email_notification,
+            kwargs={
+                "organization_id": str(organization_id),
+                "org_id": str(cm_candidate.org_id),
+                "workspace_id": str(cm_candidate.workspace_id),
+                "candidate_id": str(cm_candidate.id),
+                "pipeline_id": str(pipeline.id),
+                "job_id": str(pipeline.job_id) if pipeline.job_id else None,
+                "previous_stage": previous_stage,
+                "new_stage": new_stage,
+                "stage_history_id": str(stage_history_id),
+                "actor_user_id": str(actor_user_id),
+                "reason": reason,
+            },
+        )
+    except Exception:
+        logger.warning(
+            "pipeline_stage_email.dispatch_failed pipeline_id=%s — suppressed",
             pipeline.id,
             exc_info=True,
         )

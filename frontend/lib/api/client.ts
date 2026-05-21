@@ -1,16 +1,18 @@
-const DEFAULT_SERVER_API = "http://127.0.0.1:8000/api/v1";
-const DEFAULT_BROWSER_API = "/api/v1";
-
-/** REST base URL. Browser default uses same-origin `/api/v1` (proxied by Next in dev). */
+/** Resolve API base URL (browser uses same-origin proxy in dev when env is a relative path). */
 export function getApiBaseUrl(): string {
-  const explicit = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
-  if (explicit) return explicit;
-  return typeof window === "undefined" ? DEFAULT_SERVER_API : DEFAULT_BROWSER_API;
+  const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
+  const proxyOrigin = (process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+  if (configured) {
+    if (configured.startsWith("/") && typeof window === "undefined") {
+      return `${proxyOrigin}${configured}`;
+    }
+    return configured;
+  }
+  if (typeof window !== "undefined") return "/api/v1";
+  return `${proxyOrigin}/api/v1`;
 }
 
-/** Static base for URL builders; prefer `getApiBaseUrl()` inside fetch for SSR/client correctness. */
 export const API_BASE_URL = getApiBaseUrl();
-
 /** WebSocket API base (direct to backend when REST uses `/api/v1` proxy). */
 export function getWsApiBase(): string {
   const explicit = process.env.NEXT_PUBLIC_WS_API_BASE_URL?.replace(/\/$/, "");
@@ -21,9 +23,8 @@ export function getWsApiBase(): string {
   if (/^https?:\/\//i.test(base)) {
     return base.replace(/^http/i, "ws");
   }
-  const backend =
-    process.env.NEXT_PUBLIC_API_BACKEND_URL?.replace(/\/$/, "") ?? DEFAULT_SERVER_API;
-  return backend.replace(/^http/i, "ws");
+  // Fallback for browser when API_BASE_URL is relative (e.g., '/api/v1')
+  return "ws://127.0.0.1:8000/api/v1";
 }
 // ---------------------------------------------------------------------------
 // Lightweight GET-request cache (prevents duplicate in-flight + re-render fetches)
@@ -134,6 +135,10 @@ function shouldSuppressApiErrorLog(path: string, status: number): boolean {
   }
   // Mixed candidate stores: ATS route may 404 for candidate-management-only IDs.
   if (status === 404 && /^\/candidates\/[^/]+\/matches(?:\?|$)/.test(path)) {
+    return true;
+  }
+  // Placement history uses legacy /candidates/{id}/placements — 404 degrades to empty in UI.
+  if (status === 404 && /^\/candidates\/[^/]+\/placements(?:\?|$)/.test(path)) {
     return true;
   }
   // Job removed, wrong org, or no access — detail page degrades without console spam.
