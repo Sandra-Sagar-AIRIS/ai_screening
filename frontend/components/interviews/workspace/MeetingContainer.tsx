@@ -30,8 +30,8 @@
  *   other        → iframe → fallback external
  */
 
-import { memo, useCallback, useEffect, useState } from "react";
-import { Copy, ExternalLink, Maximize2, Minimize2, Pencil } from "lucide-react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { Copy, ExternalLink, Link2, Maximize2, Minimize2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { detectProvider, getProviderConfig } from "@/lib/meeting/providers";
 import type { MeetingProvider } from "@/lib/meeting/providers";
@@ -105,8 +105,14 @@ export const MeetingContainer = memo(function MeetingContainer({
 }) {
   const [state, setState] = useState<MeetingState>("not_started");
   const [joinMode, setJoinMode] = useState<JoinMode>("external");
+
+  // Stable ref for onMeetingStarted — avoids recreating joinMeeting (and
+  // re-triggering the auto-launch effect) whenever the parent re-renders.
+  const onMeetingStartedRef = useRef(onMeetingStarted);
+  useEffect(() => { onMeetingStartedRef.current = onMeetingStarted; }, [onMeetingStarted]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedInvite, setCopiedInvite] = useState(false);
   // Quick-capture for Companion Panel
   const [quickNote, setQuickNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -157,14 +163,16 @@ export const MeetingContainer = memo(function MeetingContainer({
       // Show "active" optimistically; onBlocked handles the fallback.
       setTimeout(() => {
         setState("active");
-        onMeetingStarted();
+        onMeetingStartedRef.current();
       }, 800);
     } else {
       // external — recruiter will click the link themselves
       setState("active");
-      onMeetingStarted();
+      onMeetingStartedRef.current();
     }
-  }, [meetingUrl, provider, resolveJoinMode, onMeetingStarted]);
+  // onMeetingStarted excluded from deps — it lives in a ref above
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingUrl, provider, resolveJoinMode]);
 
   // ── Auto-launch embedded LiveKit session when no external URL ──────
   //
@@ -215,6 +223,14 @@ export const MeetingContainer = memo(function MeetingContainer({
     setTimeout(() => setCopied(false), 2000);
   }, [meetingUrl]);
 
+  const copyInviteLink = useCallback(async () => {
+    if (!interviewId) return;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    await navigator.clipboard.writeText(`${origin}/join/${interviewId}`);
+    setCopiedInvite(true);
+    setTimeout(() => setCopiedInvite(false), 2000);
+  }, [interviewId]);
+
   const embedUrl =
     config.canEmbed && meetingUrl ? config.getEmbedUrl(meetingUrl) : null;
 
@@ -237,6 +253,17 @@ export const MeetingContainer = memo(function MeetingContainer({
         <ProviderBadge provider={provider} />
         {state === "active" && <ActivePulse />}
         <div className="ml-auto flex items-center gap-1">
+          {/* Copy shareable candidate link — shown when LiveKit room is active/connecting */}
+          {provider === "livekit" && (state === "active" || state === "connecting") && interviewId && (
+            <button
+              onClick={() => void copyInviteLink()}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              title="Copy the candidate's join link"
+            >
+              <Link2 className="w-3.5 h-3.5" />
+              {copiedInvite ? "Copied!" : "Copy invite link"}
+            </button>
+          )}
           {state === "active" && meetingUrl && (
             <button
               onClick={() => void copyLink()}
@@ -272,8 +299,9 @@ export const MeetingContainer = memo(function MeetingContainer({
         </div>
       </div>
 
-      {/* Content area */}
-      <div className="flex-1 min-h-0 relative overflow-hidden">
+      {/* Content area — capped so the video never fills the entire viewport height.
+          In fullscreen mode we restore the full available height. */}
+      <div className={`relative overflow-hidden ${isFullscreen ? "flex-1 min-h-0" : "h-[min(440px,55vh)]"}`}>
 
         {/* ─ not_started ─────────────────────────────────────────────── */}
         {state === "not_started" && (
@@ -342,14 +370,14 @@ export const MeetingContainer = memo(function MeetingContainer({
             interviewId={interviewId!}
             onConnected={() => {
               setState("active");
-              onMeetingStarted();
+              onMeetingStartedRef.current();
             }}
             onDisconnected={() => setState("disconnected")}
             onNotConfigured={() => {
               // LiveKit not configured on this backend — fall back to external link mode
               setJoinMode("external");
               setState("active");
-              onMeetingStarted();
+              onMeetingStartedRef.current();
             }}
           />
         )}

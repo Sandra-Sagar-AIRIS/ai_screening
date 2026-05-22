@@ -15,6 +15,19 @@
  *  - Fires onConnected / onDisconnected / onNotConfigured for MeetingContainer
  *
  * No popups. No iframes. No external windows.
+ *
+ * ── React Strict Mode safety ──────────────────────────────────────────────────
+ * React 18 (used by Next.js 15) double-invokes effects in development to help
+ * detect side-effect bugs. The naïve pattern of calling an async `connect()`
+ * inside a useEffect creates TWO Room instances: cleanup from the first invocation
+ * disconnects a room that may still be mid-connection, which fires a Disconnected
+ * event that corrupts parent state and causes a visible connect→disconnect loop.
+ *
+ * The fix: inline the async logic directly inside useEffect with a local `active`
+ * boolean that is set to false by the cleanup function. Every async continuation
+ * and every Room event handler checks `active` before touching React state or
+ * calling parent callbacks. When Strict Mode's cleanup fires, `active = false`
+ * silences the stale Room's events and the second invocation starts clean.
  */
 
 import {
@@ -30,7 +43,14 @@ import {
   VideoPresets,
   createLocalAudioTrack,
   createLocalVideoTrack,
+  setLogLevel,
 } from "livekit-client";
+
+// Suppress noisy internal LiveKit DataChannel error events.
+// These fire from WebRTC's onerror handler on the 'lossy' / 'reliable'
+// internal data channels when the connection tears down or receives an
+// unrecognisable message — they don't indicate a real application error.
+setLogLevel("silent");
 import { getLiveKitToken } from "@/lib/api/livekit";
 import { ApiError } from "@/lib/api/client";
 import {
@@ -138,8 +158,21 @@ export function LiveKitRoom({ interviewId, onConnected, onDisconnected, onNotCon
   const [videoTracks, setVideoTracks] = useState<VideoTrackEntry[]>([]);
   const [audioTracks, setAudioTracks] = useState<Track[]>([]);
 
+  // Incrementing this causes the connection effect to re-run (manual retry).
+  const [reconnectKey, setReconnectKey] = useState(0);
+
   const roomRef = useRef<Room | null>(null);
   const connectedFiredRef = useRef(false);
+
+  // ── Stable callback refs ─────────────────────────────────────────────
+  // Props stored in refs so the connection effect (which must remain stable)
+  // can always call the latest version without being listed as a dep.
+  const onConnectedRef = useRef(onConnected);
+  const onDisconnectedRef = useRef(onDisconnected);
+  const onNotConfiguredRef = useRef(onNotConfigured);
+  useEffect(() => { onConnectedRef.current = onConnected; }, [onConnected]);
+  useEffect(() => { onDisconnectedRef.current = onDisconnected; }, [onDisconnected]);
+  useEffect(() => { onNotConfiguredRef.current = onNotConfigured; }, [onNotConfigured]);
 
   // ── Track state helpers ─────────────────────────────────────────────
 
@@ -182,79 +215,108 @@ export function LiveKitRoom({ interviewId, onConnected, onDisconnected, onNotCon
     setAudioTracks(audios);
   }, []);
 
-  // ── Connect ─────────────────────────────────────────────────────────
+  // ── Core connection effect ─────────────────────────────────────────────
+  //
+  // The `active` flag is the key to React Strict Mode safety.
+  //
+  // In development, React 18 double-invokes this effect:
+  //   1. Setup runs  (active = true)
+  //   2. Cleanup runs (active = false, room disconnected)
+  //   3. Setup runs again (active = true, fresh connection)
+  //
+  // Every async continuation and every Room event handler checks `active`
+  // before calling setState or parent callbacks, so the stale first-pass
+  // Room is completely silenced once its cleanup fires.
+  //
+  // In production this behaves identically to a normal useEffect: runs once
+  // on mount, cleanup on unmount.
+  //
+  // `reconnectKey` is incremented by the "Try again" button to force a retry.
 
-  const connect = useCallback(async () => {
+  useEffect(() => {
+    let active = true;
+
     setPhase("fetching_token");
     setErrorMsg("");
+    connectedFiredRef.current = false;
 
-    let token: string;
-    let wsUrl: string;
-
-    try {
-      const data = await getLiveKitToken(interviewId);
-      token = data.token;
-      wsUrl = data.ws_url;
-    } catch (err: unknown) {
-      // A 503 from the token endpoint has exactly one meaning: LiveKit is not
-      // configured on this backend instance.  Fall back to the companion panel
-      // rather than showing a hard error — this is an expected operational state.
-      if (err instanceof ApiError && err.status === 503) {
-        onNotConfigured?.();
+    void (async () => {
+      // ── 1. Fetch token ─────────────────────────────────────────────────
+      let token: string;
+      let wsUrl: string;
+      try {
+        const data = await getLiveKitToken(interviewId);
+        token = data.token;
+        wsUrl = data.ws_url;
+      } catch (err: unknown) {
+        if (!active) return; // cleanup ran while we were waiting — abort
+        if (err instanceof ApiError && err.status === 503) {
+          onNotConfiguredRef.current?.();
+          return;
+        }
+        setPhase("error");
+        setErrorMsg(err instanceof Error ? err.message : "Token request failed.");
         return;
       }
-      const msg = err instanceof Error ? err.message : "Token request failed.";
-      setPhase("error");
-      setErrorMsg(msg);
-      return;
-    }
 
-    const room = new Room({
-      adaptiveStream: true,
-      dynacast: true,
-      videoCaptureDefaults: { resolution: VideoPresets.h720.resolution },
-    });
-    roomRef.current = room;
+      if (!active) return; // cleanup fired between token fetch and room creation
 
-    // Wire up events before connecting
-    room
-      .on(RoomEvent.TrackSubscribed, () => rebuildTracks(room))
-      .on(RoomEvent.TrackUnsubscribed, () => rebuildTracks(room))
-      .on(RoomEvent.LocalTrackPublished, () => rebuildTracks(room))
-      .on(RoomEvent.LocalTrackUnpublished, () => rebuildTracks(room))
-      .on(RoomEvent.ParticipantConnected, () => rebuildTracks(room))
-      .on(RoomEvent.ParticipantDisconnected, () => rebuildTracks(room))
-      .on(RoomEvent.Disconnected, () => {
-        connectedFiredRef.current = false;
-        setPhase("idle");
-        onDisconnected?.();
-      })
-      .on(RoomEvent.Connected, () => {
-        if (!connectedFiredRef.current) {
-          connectedFiredRef.current = true;
-          setPhase("connected");
-          rebuildTracks(room);
-          onConnected?.();
-        }
+      // ── 2. Create room and wire events ────────────────────────────────
+      const room = new Room({
+        adaptiveStream: true,
+        dynacast: true,
+        videoCaptureDefaults: { resolution: VideoPresets.h720.resolution },
       });
+      roomRef.current = room;
 
-    setPhase("connecting");
+      room
+        .on(RoomEvent.TrackSubscribed,      () => { if (active) rebuildTracks(room); })
+        .on(RoomEvent.TrackUnsubscribed,    () => { if (active) rebuildTracks(room); })
+        .on(RoomEvent.LocalTrackPublished,  () => { if (active) rebuildTracks(room); })
+        .on(RoomEvent.LocalTrackUnpublished,() => { if (active) rebuildTracks(room); })
+        .on(RoomEvent.ParticipantConnected, () => { if (active) rebuildTracks(room); })
+        .on(RoomEvent.ParticipantDisconnected, () => { if (active) rebuildTracks(room); })
+        .on(RoomEvent.Disconnected, () => {
+          if (!active) return; // stale room from Strict Mode first-pass — ignore
+          connectedFiredRef.current = false;
+          setPhase("idle");
+          onDisconnectedRef.current?.();
+        })
+        .on(RoomEvent.Connected, () => {
+          if (!active) return; // stale room — ignore
+          if (!connectedFiredRef.current) {
+            connectedFiredRef.current = true;
+            setPhase("connected");
+            rebuildTracks(room);
+            onConnectedRef.current?.();
+          }
+        });
 
-    try {
-      await room.connect(wsUrl, token);
-    } catch (err: unknown) {
-      setPhase("error");
-      setErrorMsg(err instanceof Error ? err.message : "Could not connect to meeting room.");
-    }
-  }, [interviewId, onConnected, onDisconnected, onNotConfigured, rebuildTracks]);
+      setPhase("connecting");
 
-  // Auto-connect on mount; disconnect on unmount
-  useEffect(() => {
-    void connect();
+      // ── 3. Connect ────────────────────────────────────────────────────
+      try {
+        await room.connect(wsUrl, token);
+      } catch (err: unknown) {
+        if (!active) return;
+        setPhase("error");
+        setErrorMsg(err instanceof Error ? err.message : "Could not connect to meeting room.");
+      }
+    })();
+
+    // Cleanup: silence this effect's room so its events don't corrupt state,
+    // then disconnect it to release the LiveKit server-side participant slot.
     return () => {
-      roomRef.current?.disconnect();
+      active = false;            // silences all event handlers and async continuations
+      const r = roomRef.current;
+      roomRef.current = null;    // clear ref before disconnect so leave() doesn't double-disconnect
+      r?.disconnect();
     };
-  }, [connect]);
+    // reconnectKey: intentionally included so "Try again" button forces a new connection
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interviewId, reconnectKey]);
+  // NOTE: rebuildTracks and callback refs are intentionally omitted from deps —
+  // rebuildTracks is stable (empty deps), and callbacks live in refs above.
 
   // ── Media controls ───────────────────────────────────────────────────
 
@@ -343,7 +405,7 @@ export function LiveKitRoom({ interviewId, onConnected, onDisconnected, onNotCon
           <p className="text-sm font-semibold text-white">Could not join meeting room</p>
           <p className="text-xs text-white/50">{errorMsg}</p>
           <button
-            onClick={() => void connect()}
+            onClick={() => setReconnectKey((k) => k + 1)}
             className="text-xs px-4 py-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors"
           >
             Try again

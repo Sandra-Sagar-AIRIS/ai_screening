@@ -1064,3 +1064,28 @@ export type OfferRespondPayload = {
   decline_reason?: string;
   revert_to_previous_stage?: boolean;
 };
+
+// ── AI-003: Interview question generation ─────────────────────────────────────
+
+export type InterviewQuestionCategory = "technical" | "behavioural" | "situational";
+
+export type InterviewQuestion = {
+  category: InterviewQuestionCategory;
+  question_text: string;
+  follow_up_probe: string | null;
+  ideal_answer_traits: string[];
+};
+
+export type GenerateQuestionsRequest = {
+  job_title: string;
+  job_description: string;
+  required_skills: string[];
+};
+
+export type GenerateQuestionsResponse = {
+  questions: InterviewQuestion[];
+  questions_by_category: Record<InterviewQuestionCategory, number>;
+  provider_used: string;
+  fallback_used: boolean;
+  duration_ms: number;
+};

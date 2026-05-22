@@ -18,7 +18,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.dialects import postgresql
 
 revision: str = "20260522_0001"
-down_revision: str = "20260520_0003"
+down_revision: str = "20260522_0002"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

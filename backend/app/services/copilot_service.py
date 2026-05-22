@@ -9,6 +9,7 @@ Responsible for:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from uuid import UUID
@@ -38,6 +39,23 @@ from app.services.ai.copilot_suggester import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── Event loop reference for WS notifications from background threads ─────────
+# Set by the async startup handler in main.py.  Background tasks (which run in
+# a thread pool) cannot directly await coroutines, so they use
+# asyncio.run_coroutine_threadsafe() to schedule WS pushes on the main loop.
+_main_event_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _notify_ws_from_thread(interview_id: UUID, event_type: object, data: dict) -> None:
+    """Fire-and-forget: schedule a WS broadcast from a sync background thread."""
+    if _main_event_loop is None or _main_event_loop.is_closed():
+        return
+    from app.websocket.copilot_ws import notify_interview_clients
+    asyncio.run_coroutine_threadsafe(
+        notify_interview_clients(str(interview_id), event_type, data),  # type: ignore[arg-type]
+        _main_event_loop,
+    )
 
 
 def _copilot_guard() -> None:
@@ -445,6 +463,15 @@ def _run_suggestion_generation(
             result.fallback_used,
         )
 
+        # Push real-time notification so the frontend can refresh immediately
+        # instead of waiting for the polling timeout.
+        from app.schemas.interview_copilot import WsEventType
+        _notify_ws_from_thread(
+            interview_id,
+            WsEventType.SUGGESTION_READY,
+            {"session_id": str(session_id), "count": len(result.suggestions)},
+        )
+
     except Exception as exc:
         db.rollback()
         logger.exception("copilot_suggest.failed session_id=%s: %s", session_id, exc)
@@ -525,6 +552,15 @@ def _run_summary_generation(
             "copilot_summary.completed session_id=%s fallback=%s",
             session_id,
             result.fallback_used,
+        )
+
+        # Push real-time notification so the frontend receives the summary
+        # immediately rather than waiting for the polling timeout.
+        from app.schemas.interview_copilot import WsEventType
+        _notify_ws_from_thread(
+            interview_id,
+            WsEventType.SUMMARY_READY,
+            {"session_id": str(session_id)},
         )
 
     except Exception as exc:

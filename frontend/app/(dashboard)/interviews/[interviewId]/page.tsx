@@ -158,6 +158,7 @@ export default function InterviewWorkspacePage() {
               currentUserId={currentUserId}
               onScorecardOpen={() => setShowScorecard(true)}
               onInterviewUpdated={handleInterviewUpdated}
+              jobTitle={workspace.job_title}
             />
           </aside>
         </div>

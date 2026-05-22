@@ -8,7 +8,7 @@ from uuid import UUID
 _lk_log = logging.getLogger("airis.livekit")
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -476,6 +476,95 @@ def get_livekit_token(
         )
     except Exception:
         _lk_log.error("[LiveKit] token generation failed:\n%s", traceback.format_exc())
+        raise
+
+    return LiveKitTokenResponse(
+        token=token,
+        ws_url=ws_url,
+        room_name=room_name,
+        identity=identity,
+    )
+
+
+# ── Guest token (candidate join — no auth required) ──────────────────────────
+
+class GuestJoinRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100, description="Candidate's display name in the meeting")
+
+
+@router.post(
+    "/{interview_id}/livekit/guest-token",
+    response_model=LiveKitTokenResponse,
+    summary="Generate a guest LiveKit token for a candidate (no authentication required)",
+)
+def get_livekit_guest_token(
+    interview_id: UUID,
+    payload: GuestJoinRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> LiveKitTokenResponse:
+    """
+    Issues a short-lived LiveKit token for a candidate to join the interview room.
+
+    **No authentication required** — the interview UUID (128-bit random) is the
+    room secret; it is unguessable in practice.
+
+    Rejects requests for interviews that are ``cancelled`` or ``no_show`` (410 Gone).
+    Returns 503 if LiveKit is not configured on this server.
+    """
+    from app.models.interview import Interview  # local import to avoid circular dep
+
+    settings = get_settings()
+    api_key = settings.livekit_api_key
+    api_secret = settings.livekit_api_secret
+    ws_url = settings.livekit_ws_url
+
+    missing = [
+        name
+        for name, val in [
+            ("LIVEKIT_API_KEY", api_key),
+            ("LIVEKIT_API_SECRET", api_secret),
+            ("LIVEKIT_WS_URL (or LIVEKIT_URL)", ws_url),
+        ]
+        if not val
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"LiveKit is not configured. Missing: {', '.join(missing)}. "
+                "Set these in backend/.env and restart the backend."
+            ),
+        )
+    if api_key is None or api_secret is None or ws_url is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LiveKit is not configured.",
+        )
+
+    interview = db.get(Interview, interview_id)
+    if not interview:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
+    if interview.status in ("cancelled", "no_show"):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="This interview is no longer active.",
+        )
+
+    room_name = get_room_name(interview_id)
+    # Use a guest-prefixed identity so hosts can distinguish candidates in the room
+    identity = f"guest-{interview_id}"
+    display_name = payload.name.strip() or "Candidate"
+
+    try:
+        token = generate_token(
+            api_key=api_key,
+            api_secret=api_secret,
+            room_name=room_name,
+            participant_identity=identity,
+            participant_name=display_name,
+        )
+    except Exception:
+        _lk_log.error("[LiveKit] guest token generation failed:\n%s", traceback.format_exc())
         raise
 
     return LiveKitTokenResponse(

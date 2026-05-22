@@ -35,6 +35,7 @@ from app.routes.dashboard import router as dashboard_router
 from app.routes.pipeline_analytics import router as pipeline_analytics_router
 from app.routes.offer import router as offer_router
 from app.routes.sourcing import router as sourcing_router
+from app.routes.ai_interview_questions import router as ai_interview_questions_router
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -207,6 +208,15 @@ async def request_timing_middleware(request: Request, call_next):
 
 
 @app.on_event("startup")
+async def _capture_event_loop() -> None:
+    """Store the main asyncio event loop so background threads can schedule
+    coroutines (e.g. WebSocket notifications) onto it."""
+    import asyncio
+    from app.services import copilot_service
+    copilot_service._main_event_loop = asyncio.get_running_loop()
+
+
+@app.on_event("startup")
 def startup_event() -> None:
     # Permission backfill hits the DB for every org; run off the critical path so
     # uvicorn can accept traffic immediately (reflection is lazy — see reflected.py).
@@ -268,4 +278,5 @@ app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(pipeline_analytics_router, prefix="/api/v1")
 app.include_router(offer_router, prefix="/api/v1")
 app.include_router(sourcing_router, prefix="/api/v1/sourcing", tags=["sourcing"])
+app.include_router(ai_interview_questions_router, prefix="/api/v1")
 
