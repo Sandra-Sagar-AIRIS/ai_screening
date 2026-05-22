@@ -168,16 +168,36 @@ class CandidateRepository:
         return candidate
 
     def soft_delete_candidate(self, *, candidate: Candidate, deleted_by: UUID | None) -> Candidate:
-        candidate.deleted_at = datetime.now(timezone.utc)
+        from app.models.candidate import Candidate as LegacyCandidateRow
+        from sqlalchemy import update
+
+        now = datetime.now(timezone.utc)
+        candidate.deleted_at = now
         candidate.deleted_by = deleted_by
         self.db.add(candidate)
+        self.db.flush()
+        # AIR-510: keep legacy is_deleted flag in sync on shared candidates table.
+        self.db.execute(
+            update(LegacyCandidateRow)
+            .where(LegacyCandidateRow.id == candidate.id)
+            .values(is_deleted=True, deleted_at=now)
+        )
         self.db.flush()
         return candidate
 
     def restore_candidate(self, *, candidate: Candidate) -> Candidate:
+        from app.models.candidate import Candidate as LegacyCandidateRow
+        from sqlalchemy import update
+
         candidate.deleted_at = None
         candidate.deleted_by = None
         self.db.add(candidate)
+        self.db.flush()
+        self.db.execute(
+            update(LegacyCandidateRow)
+            .where(LegacyCandidateRow.id == candidate.id)
+            .values(is_deleted=False, deleted_at=None)
+        )
         self.db.flush()
         return candidate
 
@@ -298,6 +318,23 @@ class CandidateRepository:
             .limit(limit)
         )
         return list(self.db.scalars(stmt))
+
+    def get_interaction_by_id(
+        self,
+        *,
+        org_id: UUID,
+        workspace_id: UUID,
+        candidate_id: UUID,
+        interaction_id: UUID,
+    ) -> CandidateInteraction | None:
+        return self.db.scalar(
+            select(CandidateInteraction).where(
+                CandidateInteraction.id == interaction_id,
+                CandidateInteraction.org_id == org_id,
+                CandidateInteraction.workspace_id == workspace_id,
+                CandidateInteraction.candidate_id == candidate_id,
+            )
+        )
 
     # -------------------------------
     # Audit log (insert-only)

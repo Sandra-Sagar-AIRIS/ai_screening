@@ -1,4 +1,4 @@
-import { API_BASE_URL, ApiError, apiRequest } from "@/lib/api/client";
+import { API_BASE_URL, ApiError, apiRequest, invalidateApiCache } from "@/lib/api/client";
 import { CANDIDATES_BULK_STAGE_PATH } from "@/lib/api/candidateManagementPaths";
 import type { Candidate } from "@/lib/api/types";
 
@@ -68,7 +68,7 @@ function shouldUseCandidateManagementApi(): boolean {
   return (process.env.NEXT_PUBLIC_USE_CANDIDATE_MANAGEMENT ?? "false").toLowerCase() === "true";
 }
 
-function getWorkspaceHeader(): Record<string, string> {
+export function getWorkspaceHeader(): Record<string, string> {
   if (typeof window === "undefined") {
     return {};
   }
@@ -174,7 +174,14 @@ type CandidateStageFilter =
 type CandidateSourceFilter = "manual" | "resume_upload" | "bulk_upload" | "referral" | "agency";
 
 type CandidateInteractionPayload = {
-  interaction_type: "note" | "email" | "stage_change" | "interview" | "system";
+  interaction_type:
+    | "note"
+    | "email"
+    | "stage_change"
+    | "interview"
+    | "call"
+    | "meeting"
+    | "system";
   title?: string;
   body?: string;
   interaction_metadata?: Record<string, unknown>;
@@ -183,7 +190,14 @@ type CandidateInteractionPayload = {
 export type CandidateInteraction = {
   id: string;
   candidate_id: string;
-  interaction_type: "note" | "email" | "stage_change" | "interview" | "system";
+  interaction_type:
+    | "note"
+    | "email"
+    | "stage_change"
+    | "interview"
+    | "call"
+    | "meeting"
+    | "system";
   title: string | null;
   body: string | null;
   metadata: Record<string, unknown> | null;
@@ -223,7 +237,7 @@ export type CommunicationMessage = {
   channel: "email" | "whatsapp";
   provider: "gmail" | "outlook" | "whatsapp";
   direction: "outbound" | "inbound";
-  status: "queued" | "sent" | "delivered" | "read" | "failed";
+  status: "draft" | "queued" | "sent" | "delivered" | "read" | "replied" | "failed";
   to_address: string | null;
   from_address: string | null;
   subject: string | null;
@@ -547,6 +561,32 @@ export async function uploadResume(file: File) {
   };
 }
 
+export async function uploadRawResume(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = typeof window !== "undefined" ? window.localStorage.getItem("airis_access_token") : null;
+  const response = await fetch(
+    `${API_BASE_URL}/candidate-management/candidates/upload-raw-resume`,
+    {
+      method: "POST",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...getWorkspaceHeader(),
+      },
+      body: formData,
+    }
+  );
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || "Raw resume upload failed");
+  }
+  const payload = (await response.json()) as CandidateManagementEnvelope<{
+    resume_s3_key: string;
+    resume_file_name: string;
+  }>;
+  return payload.data;
+}
+
 export async function uploadResumeForReview(file: File) {
   const formData = new FormData();
   formData.append("file", file);
@@ -585,7 +625,8 @@ export async function uploadResumeForReview(file: File) {
 }
 
 export async function addCandidateInteraction(candidateId: string, payload: CandidateInteractionPayload) {
-  return apiRequest<CandidateManagementEnvelope<{ id: string }>>(
+  invalidateApiCache(`/candidate-management/candidates/${candidateId}/interactions`);
+  const response = await apiRequest<CandidateManagementEnvelope<CandidateInteraction>>(
     `/candidate-management/candidates/${candidateId}/interactions`,
     {
       method: "POST",
@@ -595,9 +636,15 @@ export async function addCandidateInteraction(candidateId: string, payload: Cand
       },
     }
   );
+  return response.data;
 }
 
-export async function getCandidateInteractions(candidateId: string, limit = 50, offset = 0) {
+export async function getCandidateInteractions(
+  candidateId: string,
+  limit = 100,
+  offset = 0,
+  options?: { skipCache?: boolean }
+) {
   try {
     const response = await apiRequest<CandidateManagementEnvelope<CandidateInteraction[]>>(
       `/candidate-management/candidates/${candidateId}/interactions?limit=${limit}&offset=${offset}`,
@@ -605,7 +652,8 @@ export async function getCandidateInteractions(candidateId: string, limit = 50, 
         headers: {
           ...getWorkspaceHeader(),
         },
-      }
+      },
+      options?.skipCache ? 0 : undefined
     );
     return response.data;
   } catch (error) {
@@ -928,14 +976,23 @@ export async function bulkUpdateCandidateStage(payload: {
   });
 }
 
+/** AIR-510: Bulk archive (soft-delete). */
+export async function bulkArchiveCandidates(payload: { candidate_ids: string[] }) {
+  return apiRequest<CandidateManagementEnvelope<{ archived_count?: number; deleted_count: number }>>(
+    "/candidate-management/candidates/bulk/delete",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: {
+        ...getWorkspaceHeader(),
+      },
+    }
+  );
+}
+
+/** @deprecated Use bulkArchiveCandidates — bulk/delete is the archive endpoint. */
 export async function bulkDeleteCandidates(payload: { candidate_ids: string[] }) {
-  return apiRequest<CandidateManagementEnvelope<{ deleted_count: number }>>("/candidate-management/candidates/bulk/delete", {
-    method: "POST",
-    body: JSON.stringify(payload),
-    headers: {
-      ...getWorkspaceHeader(),
-    },
-  });
+  return bulkArchiveCandidates(payload);
 }
 
 export async function bulkUnarchiveCandidates(payload: { candidate_ids: string[] }) {
@@ -1002,9 +1059,10 @@ export async function uploadResumeAndCreateCandidate(file: File) {
   return payload.candidate;
 }
 
+/** Permanent hard delete (not archive). */
 export async function deleteCandidate(candidateId: string) {
   if (shouldUseCandidateManagementApi()) {
-    await apiRequest<CandidateManagementEnvelope<{ deleted: boolean; candidate_id: string }>>(
+    await apiRequest<CandidateManagementEnvelope<{ deleted: boolean; hard_deleted?: boolean; candidate_id: string }>>(
       `/candidate-management/candidates/${candidateId}`,
       {
         method: "DELETE",
@@ -1015,9 +1073,44 @@ export async function deleteCandidate(candidateId: string) {
     );
     return;
   }
-  await apiRequest(`/candidates/${candidateId}`, {
-    method: "DELETE",
+  await apiRequest<{ deleted: boolean; hard_deleted?: boolean; candidate_id: string }>(
+    `/candidates/${candidateId}`,
+    {
+      method: "DELETE",
+    }
+  );
+}
+
+/** AIR-510: Archive (soft-delete) a single candidate. */
+export async function archiveCandidate(candidateId: string) {
+  if (shouldUseCandidateManagementApi()) {
+    await apiRequest<CandidateManagementEnvelope<{ archived: boolean; candidate_id: string }>>(
+      `/candidate-management/candidates/${candidateId}/archive`,
+      {
+        method: "POST",
+        headers: { ...getWorkspaceHeader() },
+      }
+    );
+    return;
+  }
+  await apiRequest<{ archived: boolean; candidate_id: string }>(`/candidates/${candidateId}/archive`, {
+    method: "POST",
   });
+}
+
+/** AIR-512: Admin restore soft-deleted candidate. */
+export async function restoreCandidate(candidateId: string) {
+  if (shouldUseCandidateManagementApi()) {
+    const response = await apiRequest<CandidateManagementEnvelope<CandidateManagementCandidate>>(
+      `/candidate-management/candidates/${candidateId}/restore`,
+      {
+        method: "PATCH",
+        headers: { ...getWorkspaceHeader() },
+      }
+    );
+    return response.data;
+  }
+  return apiRequest<Candidate>(`/candidates/${candidateId}/restore`, { method: "PATCH" });
 }
 
 export async function updateCandidate(candidateId: string, payload: UpdateCandidatePayload) {

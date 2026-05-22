@@ -6,6 +6,9 @@ import {
   getDashboardSummary,
   readCachedDashboardSummary,
   writeCachedDashboardSummary,
+  DashboardSummary,
+  DashboardActivityItem,
+  DashboardRecentJob,
   type DashboardActivityItem,
   type DashboardRecentJob,
   type DashboardSummary,
@@ -26,8 +29,8 @@ function getRelativeTimeString(date: Date | number, lang = "en-US"): string {
 }
 
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<DashboardSummary | null>(() => readCachedDashboardSummary());
+  const [loading, setLoading] = useState(() => readCachedDashboardSummary() === null);
   const [error, setError] = useState<string | null>(null);
   const permissions = useAuthStore((state) => state.permissions);
   const hydrated = useAuthStore((state) => state.hydrated);
@@ -50,9 +53,10 @@ export default function DashboardPage() {
       const summary = await getDashboardSummary();
       if (cancelledRef?.cancelled) return;
       setData(summary);
+      writeCachedDashboardSummary(summary);
     } catch (err: unknown) {
-      if (!cancelledRef?.cancelled) {
-        if (!isBackground) setError(formatApiErrorForUser(err));
+      if (!cancelledRef?.cancelled && !isBackground && !hasCachedUi) {
+        setError(formatApiErrorForUser(err));
       }
     } finally {
       if (!cancelledRef?.cancelled) {
@@ -74,7 +78,8 @@ export default function DashboardPage() {
       cancelledRef.cancelled = true;
       window.clearInterval(interval);
     };
-  }, [hydrated]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load when auth is ready; data cache handled inside loadData
+  }, [hydrated, token]);
 
   if (hydrated && !hasAnyPermission) {
     return (

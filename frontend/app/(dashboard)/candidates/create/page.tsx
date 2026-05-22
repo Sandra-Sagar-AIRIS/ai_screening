@@ -742,10 +742,10 @@ export default function CandidatesPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={(e) => { 
-                        e.preventDefault(); 
-                        setResumeFile(null); 
-                        setDraftCandidate(null); 
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setResumeFile(null);
+                        setDraftCandidate(null);
                       }}
                       className="text-xs font-medium text-red-600 hover:text-red-700 mt-2 bg-red-50 px-3 py-1 rounded-md transition-colors"
                     >
@@ -774,7 +774,7 @@ export default function CandidatesPage() {
 
             <div className="mt-8 flex items-center justify-between border-t border-gray-100 pt-8">
               <Button variant="outline" onClick={handleBack} className="border-gray-200 text-gray-600 hover:bg-gray-50">Back</Button>
-              <Button 
+              <Button
                 onClick={async () => {
                   if (draftCandidate) {
                     setActiveStep(3);
@@ -782,7 +782,7 @@ export default function CandidatesPage() {
                     const success = await handleUploadResume();
                     if (success) setActiveStep(3);
                   }
-                }} 
+                }}
                 disabled={uploading || !resumeFile}
                 className="min-w-[120px] bg-[#FF5A1F] text-white hover:bg-[#E54E1A]"
               >
@@ -808,16 +808,16 @@ export default function CandidatesPage() {
                 <p className="text-sm font-medium text-gray-700">Select Multiple Resumes</p>
                 <p className="text-xs text-gray-500 mt-1">PDF or DOCX files</p>
               </label>
-              <input 
+              <input
                 id="bulk-file-input"
-                type="file" 
-                multiple 
-                accept=".pdf,.docx" 
+                type="file"
+                multiple
+                accept=".pdf,.docx"
                 onChange={(e) => {
                   if (e.target.files) {
                     setBulkFiles(Array.from(e.target.files));
                   }
-                }} 
+                }}
                 className="hidden"
               />
 
@@ -833,7 +833,7 @@ export default function CandidatesPage() {
                         <span className="truncate text-sm text-gray-700 max-w-[250px]">{item.name}</span>
                         <div className="flex items-center gap-2 ml-4">
                           {item.status === "parsing" && <span className="text-xs text-blue-600">Parsing...</span>}
-                          {item.status === "success" && <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Done</span>}
+                          {item.status === "success" && <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Done</span>}
                           {item.status === "duplicate" && <span className="text-xs text-amber-600">Duplicate</span>}
                           {item.status === "error" && <span className="text-xs text-red-600">Failed</span>}
                           {item.status === "pending" && <span className="text-xs text-gray-400">Waiting</span>}
@@ -851,7 +851,7 @@ export default function CandidatesPage() {
                     <span className="text-sm text-[#FF5A1F] font-medium">{bulkProgress}%</span>
                   </div>
                   <div className="h-2 w-full bg-orange-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-[#FF5A1F] transition-all duration-300" style={{width: `${bulkProgress}%`}} />
+                    <div className="h-full bg-[#FF5A1F] transition-all duration-300" style={{ width: `${bulkProgress}%` }} />
                   </div>
                 </div>
               )}
@@ -861,15 +861,15 @@ export default function CandidatesPage() {
               <Button variant="outline" onClick={handleBack} className="border-gray-200 text-gray-600 hover:bg-gray-50">Back</Button>
               <div className="flex items-center gap-3">
                 {bulkFiles.length > 0 && !bulkCreating && bulkStatus.filter(s => s.status === 'success').length === 0 && (
-                  <Button 
-                    onClick={handleBulkResumeUpload} 
+                  <Button
+                    onClick={handleBulkResumeUpload}
                     className="bg-slate-900 hover:bg-slate-800 text-white"
                   >
                     Start AI Parsing
                   </Button>
                 )}
                 {((bulkJob && bulkJob.status === 'completed') || (bulkStatus.length > 0 && !bulkCreating && bulkStatus.some(s => s.status === 'success'))) && (
-                  <Button 
+                  <Button
                     onClick={() => setActiveStep(4)}
                     className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white"
                   >
@@ -901,9 +901,9 @@ export default function CandidatesPage() {
               ].map((f) => (
                 <div key={f.label} className="space-y-2">
                   <label className="text-sm font-medium text-gray-700">{f.label}</label>
-                  <Input 
-                    value={f.value} 
-                    onChange={(e) => setDraftCandidate(p => p ? {...p, [f.key as keyof CandidateDraft]: e.target.value} : p)}
+                  <Input
+                    value={f.value}
+                    onChange={(e) => setDraftCandidate(p => p ? { ...p, [f.key as keyof CandidateDraft]: e.target.value } : p)}
                     type={f.type || "text"}
                     className="h-10 border-gray-200 focus:border-[#FF5A1F] focus:ring-[#FF5A1F]/20"
                   />
@@ -913,11 +913,11 @@ export default function CandidatesPage() {
 
             <div className="flex items-center justify-between pt-8 mt-8 border-t border-gray-100">
               <Button variant="outline" onClick={handleBack} className="border-gray-200 text-gray-600 hover:bg-gray-50">Back</Button>
-              <Button 
+              <Button
                 onClick={async () => {
                   const success = await handleSaveReviewedCandidate();
                   if (success) setActiveStep(4);
-                }} 
+                }}
                 disabled={savingReview}
                 className="bg-[#FF5A1F] hover:bg-[#E54E1A] text-white min-w-[120px]"
               >
@@ -934,10 +934,10 @@ export default function CandidatesPage() {
             </div>
             <h2 className="text-2xl font-semibold text-gray-900">Candidate Added!</h2>
             <p className="text-gray-500 mt-2 max-w-sm mx-auto">The candidate profile has been successfully created.</p>
-            
+
             <div className="flex justify-center gap-4 pt-8">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => {
                   setActiveStep(1);
                   setDraftCandidate(null);

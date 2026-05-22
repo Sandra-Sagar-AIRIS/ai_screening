@@ -12,27 +12,29 @@ import { getInvites, resendInvite, createInvite } from "@/lib/api/invites";
 import { listOrganizationRoles } from "@/lib/api/roles";
 import type { InviteListItem } from "@/lib/api/types";
 
-function getInviteStatus(invite: InviteListItem) {
-  const normalized = invite.status.toLowerCase();
-  if (normalized === "accepted") return "accepted";
-  if (normalized === "pending") {
-    if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
-      return "expired";
-    }
-    return "pending";
+// F-INV-05: derive display status — server-side status is the source of truth,
+// but client can lazily infer 'expired' for 'sent'/'opened' past their expiry.
+function getInviteStatus(invite: InviteListItem): string {
+  const s = invite.status.toLowerCase();
+  if (s === "accepted" || s === "expired") return s;
+  if ((s === "sent" || s === "opened") && invite.expires_at && new Date(invite.expires_at) < new Date()) {
+    return "expired";
   }
-  return normalized;
+  return s;
 }
 
 function StatusBadge({ status }: { status: string }) {
   const normalized = status.toLowerCase();
   let className = "bg-slate-100 text-slate-500";
   let dotColor = "bg-slate-400";
-  
+
   if (normalized === "accepted") {
     className = "bg-emerald-50 text-emerald-600 border border-emerald-100";
     dotColor = "bg-emerald-500";
-  } else if (normalized === "pending") {
+  } else if (normalized === "opened") {
+    className = "bg-blue-50 text-blue-600 border border-blue-100";
+    dotColor = "bg-blue-500";
+  } else if (normalized === "sent") {
     className = "bg-amber-50 text-amber-600 border border-amber-100";
     dotColor = "bg-amber-500";
   } else if (normalized === "expired") {
@@ -156,9 +158,6 @@ export default function InvitesPage() {
       // Refresh invites
       const data = await getInvites();
       setInvites(data);
-      if (activeTab === "pending") {
-         setActiveTab("all");
-      }
     } catch (err) {
       if (err instanceof ApiError) {
         setFormError(err.message);
@@ -173,7 +172,8 @@ export default function InvitesPage() {
 
   const totalInvites = invites.length;
   const acceptedInvites = invites.filter(i => getInviteStatus(i) === "accepted").length;
-  const pendingInvites = invites.filter(i => getInviteStatus(i) === "pending").length;
+  // F-INV-05: 'pending' tab covers both 'sent' and 'opened' (not yet terminal)
+  const pendingInvites = invites.filter(i => ["sent", "opened"].includes(getInviteStatus(i))).length;
   const expiredInvites = invites.filter(i => getInviteStatus(i) === "expired").length;
 
   const acceptanceRate = totalInvites ? Math.round((acceptedInvites / totalInvites) * 100) : 0;
@@ -181,7 +181,8 @@ export default function InvitesPage() {
   const filteredInvites = useMemo(() => {
     return invites.filter(invite => {
       const status = getInviteStatus(invite);
-      if (activeTab === "pending" && status !== "pending") return false;
+      // F-INV-05: 'pending' tab shows sent + opened (active, not yet terminal)
+      if (activeTab === "pending" && !["sent", "opened"].includes(status)) return false;
       if (statusFilter !== "all" && status !== statusFilter) return false;
       if (roleFilter !== "all" && invite.role !== roleFilter) return false;
       if (searchQuery) {
@@ -329,13 +330,14 @@ export default function InvitesPage() {
                   onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1); }}
                 />
               </div>
-              <select 
+              <select
                 className="h-10 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[13px] font-medium text-slate-600 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-100 focus-visible:border-orange-300 transition-all sm:w-40"
                 value={statusFilter}
                 onChange={e => { setStatusFilter(e.target.value); setCurrentPage(1); }}
               >
                 <option value="all">All Status</option>
-                <option value="pending">Pending</option>
+                <option value="sent">Sent</option>
+                <option value="opened">Opened</option>
                 <option value="accepted">Accepted</option>
                 <option value="expired">Expired</option>
               </select>
@@ -361,6 +363,7 @@ export default function InvitesPage() {
                   <th className="px-6 py-4">Role</th>
                   <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4">Invited On</th>
+                  <th className="px-6 py-4">Opened At</th>
                   <th className="px-6 py-4">Accepted On</th>
                   <th className="px-6 py-4 text-center">Actions</th>
                 </tr>
@@ -368,7 +371,7 @@ export default function InvitesPage() {
               <tbody className="divide-y divide-slate-100/80">
                 {loading ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-[13px] font-medium text-slate-400">
+                    <td colSpan={7} className="px-6 py-12 text-center text-[13px] font-medium text-slate-400">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <RefreshCw className="h-5 w-5 animate-spin text-slate-300" />
                         <span>Loading invites...</span>
@@ -377,7 +380,7 @@ export default function InvitesPage() {
                   </tr>
                 ) : paginatedInvites.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-[13px] font-medium text-slate-400">
+                    <td colSpan={7} className="px-6 py-12 text-center text-[13px] font-medium text-slate-400">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <Mail className="h-6 w-6 text-slate-300" />
                         <span>No invites found matching your criteria.</span>
@@ -389,7 +392,9 @@ export default function InvitesPage() {
                     const status = getInviteStatus(invite);
                     const isAccepted = status === "accepted";
                     const dateOptions: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: 'numeric' };
-                    
+                    const fmtDate = (ts: string | null) =>
+                      ts ? new Date(ts).toLocaleString('en-US', dateOptions) : "—";
+
                     return (
                       <tr key={invite.id} className="hover:bg-slate-50/60 transition-colors group cursor-default">
                         <td className="px-6 py-4 font-medium text-[14px] text-slate-700 group-hover:text-[#FF5A1F] transition-colors">{invite.email}</td>
@@ -400,10 +405,15 @@ export default function InvitesPage() {
                           <StatusBadge status={status} />
                         </td>
                         <td className="px-6 py-4 text-[12px] font-medium text-slate-500">
-                          {new Date(invite.created_at).toLocaleString('en-US', dateOptions)}
+                          {fmtDate(invite.sent_at ?? invite.created_at)}
                         </td>
+                        {/* F-INV-05: opened_at timestamp */}
                         <td className="px-6 py-4 text-[12px] font-medium text-slate-500">
-                          {isAccepted ? new Date(invite.created_at).toLocaleString('en-US', dateOptions) : "—"}
+                          {fmtDate(invite.opened_at)}
+                        </td>
+                        {/* F-INV-05: accepted_at timestamp (was incorrectly using created_at) */}
+                        <td className="px-6 py-4 text-[12px] font-medium text-slate-500">
+                          {isAccepted ? fmtDate(invite.accepted_at) : "—"}
                         </td>
                         <td className="px-6 py-4 text-center">
                           <div className="flex items-center justify-center gap-2">

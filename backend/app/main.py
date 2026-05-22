@@ -14,6 +14,7 @@ from app.candidate_management.api import router as candidate_management_router
 from app.routes.auth import router as auth_router
 from app.routes.ats import router as ats_router
 from app.routes.candidate import router as candidate_router
+from app.routes.candidate_notes import router as candidate_notes_router
 from app.routes.client import router as client_router
 from app.routes.health import router as health_router
 from app.routes.interview import router as interview_router
@@ -246,6 +247,7 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(me_router, prefix="/api/v1")
 app.include_router(candidate_router, prefix="/api/v1")
+app.include_router(candidate_notes_router, prefix="/api/v1")
 app.include_router(candidate_management_router, prefix="/api/v1/candidate-management")
 app.include_router(client_router, prefix="/api/v1")
 app.include_router(job_router, prefix="/api/v1")

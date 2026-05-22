@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -20,6 +21,11 @@ class InviteResponse(BaseModel):
     status: str
     expires_at: datetime
     created_at: datetime
+    # F-INV-05: lifecycle timestamps
+    sent_at: Optional[datetime] = None
+    opened_at: Optional[datetime] = None
+    accepted_at: Optional[datetime] = None
+    expired_at: Optional[datetime] = None
 
 
 class InviteCreateResponse(BaseModel):
@@ -35,6 +41,11 @@ class InviteListItem(BaseModel):
     status: str
     created_at: datetime
     expires_at: datetime
+    # F-INV-05: lifecycle timestamps (optional — only present after transition)
+    sent_at: Optional[datetime] = None
+    opened_at: Optional[datetime] = None
+    accepted_at: Optional[datetime] = None
+    expired_at: Optional[datetime] = None
 
 
 class InviteResendResponse(BaseModel):

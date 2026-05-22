@@ -1,12 +1,11 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentCard } from "@/components/documents/DocumentCard";
-import { ApiError } from "@/lib/api/client";
+import { ApiError, invalidateApiCache } from "@/lib/api/client";
 import {
-  addCandidateInteraction,
   createCommunicationTemplate,
   createCandidateCommunicationReminder,
   duplicateCommunicationTemplate,
@@ -15,6 +14,7 @@ import {
   disconnectCommunicationProvider,
   getCandidateCommunicationMessages,
   getCandidateCommunicationReminders,
+  addCandidateInteraction,
   getCandidateById,
   getCandidateInteractions,
   getCandidateInterviews,
@@ -46,6 +46,19 @@ import { getJobs, submitCandidateToJob } from "@/lib/api/jobs";
 import { getPipelines, transitionPipelineStage } from "@/lib/api/pipeline";
 import { PipelineStageHistoryPanel } from "@/components/pipeline/PipelineStageHistoryPanel";
 import { RejectCandidateModal } from "@/components/pipeline/RejectCandidateModal";
+import { PlacementHistoryTab } from "@/components/candidates/PlacementHistoryTab";
+import { CandidateNotesPanel } from "@/components/candidates/CandidateNotesPanel";
+import { CommunicationLogModal } from "@/components/candidates/CommunicationLogModal";
+import {
+  buildUnifiedTimelineEvents,
+  getMessageStatusBadgeClass,
+  groupTimelineByDate,
+  summarizeTimelineEvents,
+  type TimelineDateFilter,
+  type TimelineEventTypeFilter,
+  type UnifiedTimelineEvent,
+} from "@/lib/communication/timeline";
+import { useAuthStore } from "@/store/auth-store";
 import {
   atsAwaitingSemanticEnrichment,
   getCandidateMatchesAts,
@@ -81,12 +94,6 @@ import {
   Brain,
   CornerDownLeft,
   Paperclip,
-  Bold,
-  Italic,
-  Underline,
-  List as ListIcon,
-  ListOrdered,
-  Link as LinkIcon,
   Search,
   ChevronDown,
   Maximize2,
@@ -99,6 +106,7 @@ import {
   MoreHorizontal,
   CheckCircle2,
   Eye,
+  StickyNote,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -137,9 +145,9 @@ export default function CandidateDetailPage() {
   const [location, setLocation] = useState("");
   const [role, setRole] = useState("");
   const [yearsExperience, setYearsExperience] = useState("");
-  const [newNote, setNewNote] = useState("");
   const [selectedRecruiterId, setSelectedRecruiterId] = useState("");
-  const [addingNote, setAddingNote] = useState(false);
+  const userRole = useAuthStore((s) => s.role);
+  const isNotesAdmin = userRole === "admin" || userRole === "agency_admin";
   const [submitJobId, setSubmitJobId] = useState("");
   const [submittingToJob, setSubmittingToJob] = useState(false);
   const [updatingPipelineId, setUpdatingPipelineId] = useState<string | null>(null);
@@ -149,6 +157,7 @@ export default function CandidateDetailPage() {
   const [atsRescoreBusy, setAtsRescoreBusy] = useState(false);
   const [atsHint, setAtsHint] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState(initialTab);
+  const [placementRefreshToken, setPlacementRefreshToken] = useState(0);
   const [activeCommunicationTab, setActiveCommunicationTab] = useState<"timeline" | "email" | "whatsapp" | "templates">("timeline");
   const [communicationConnections, setCommunicationConnections] = useState<CommunicationConnection[]>([]);
   const [communicationTemplates, setCommunicationTemplates] = useState<CommunicationTemplate[]>([]);
@@ -157,7 +166,14 @@ export default function CandidateDetailPage() {
   const [communicationLoading, setCommunicationLoading] = useState(false);
   const [communicationError, setCommunicationError] = useState<string | null>(null);
   const [timelineChannelFilter, setTimelineChannelFilter] = useState<"all" | "email" | "whatsapp">("all");
-  const [timelineStatusFilter, setTimelineStatusFilter] = useState<"all" | "draft" | "queued" | "sent" | "delivered" | "read" | "replied" | "failed">("all");
+  const [timelineEventTypeFilter, setTimelineEventTypeFilter] = useState<TimelineEventTypeFilter>("all");
+  const [timelineDateFilter, setTimelineDateFilter] = useState<TimelineDateFilter>("all");
+  const [timelineMessageStatusFilter, setTimelineMessageStatusFilter] = useState<
+    "all" | "draft" | "queued" | "sent" | "delivered" | "read" | "replied" | "failed"
+  >("all");
+  const [communicationLogKind, setCommunicationLogKind] = useState<"call" | "meeting" | null>(null);
+  const [savingCommunicationLog, setSavingCommunicationLog] = useState(false);
+  const [communicationLogError, setCommunicationLogError] = useState<string | null>(null);
   const [selectedEmailProvider, setSelectedEmailProvider] = useState<"gmail" | "outlook">("gmail");
   const [selectedWhatsappTemplateId, setSelectedWhatsappTemplateId] = useState("");
   const [whatsappBody, setWhatsappBody] = useState("");
@@ -343,7 +359,7 @@ export default function CandidateDetailPage() {
           usersResult,
           atsResult,
         ] = await Promise.all([
-          getCandidateInteractions(candidateId, 100, 0).catch(() => null),
+          getCandidateInteractions(candidateId, 100, 0, { skipCache: true }).catch(() => null),
           getPipelines(50, 0, undefined, candidateId).catch(() => [] as Pipeline[]),
           getInterviews({ candidate_id: candidateId, limit: 100 }).catch(() => [] as Interview[]),
           getJobs(50, 0).catch(() => [] as Job[]),
@@ -433,16 +449,20 @@ export default function CandidateDetailPage() {
       setCommunicationLoading(true);
       setCommunicationError(null);
       try {
-        const [connections, templates, messages, reminders] = await Promise.all([
+        const [connections, templates, messages, reminders, timeline] = await Promise.all([
           getCommunicationConnections(),
           loadCommunicationTemplates(),
           getCandidateCommunicationMessages(params.candidateId, 50),
           getCandidateCommunicationReminders(params.candidateId),
+          getCandidateInteractions(params.candidateId, 100, 0, { skipCache: true }).catch(
+            () => [] as CandidateInteraction[]
+          ),
         ]);
         setCommunicationConnections(connections);
         setCommunicationTemplates(templates);
         setCommunicationMessages(messages);
         setCommunicationReminders(reminders);
+        setInteractions(timeline);
       } catch (err) {
         setCommunicationError(err instanceof Error ? err.message : "Unable to load communication data.");
       } finally {
@@ -467,110 +487,57 @@ export default function CandidateDetailPage() {
     return meta;
   }, [interactions]);
 
-  const orderedTimeline = useMemo(
+  const actorNameByUserId = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const u of users) {
+      map[u.id] = u.email || u.role;
+    }
+    return map;
+  }, [users]);
+
+  const jobTitleById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const j of jobs) {
+      if (j.id) map[j.id] = j.title;
+    }
+    return map;
+  }, [jobs]);
+
+  const unifiedTimelineEvents = useMemo(
     () =>
-      [...interactions].sort(
-        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      ),
-    [interactions]
+      buildUnifiedTimelineEvents({
+        interactions,
+        messages: communicationMessages,
+        candidateEmail: candidate?.email,
+        actorNameByUserId,
+        eventTypeFilter: timelineEventTypeFilter,
+        channelFilter: timelineChannelFilter,
+        messageStatusFilter: timelineMessageStatusFilter,
+        dateFilter: timelineDateFilter,
+        includeHiddenNotes: isNotesAdmin,
+      }),
+    [
+      interactions,
+      communicationMessages,
+      candidate?.email,
+      actorNameByUserId,
+      timelineEventTypeFilter,
+      timelineChannelFilter,
+      timelineMessageStatusFilter,
+      timelineDateFilter,
+      isNotesAdmin,
+    ]
   );
 
-  const unifiedTimelineEvents = useMemo(() => {
-    type UnifiedEvent = {
-      id: string;
-      type: "email" | "whatsapp" | "interview" | "note" | "status_change" | "call" | "reply" | "profile";
-      title: string;
-      subtitle?: string;
-      content?: string;
-      status?: string;
-      timestamp: Date;
-      metadata?: any;
-    };
-    const events: UnifiedEvent[] = [];
+  const groupedUnifiedTimeline = useMemo(
+    () => groupTimelineByDate(unifiedTimelineEvents),
+    [unifiedTimelineEvents]
+  );
 
-    // Add communication messages
-    for (const msg of communicationMessages) {
-      if (timelineChannelFilter !== "all" && msg.channel !== timelineChannelFilter) continue;
-      if (timelineStatusFilter !== "all" && msg.status !== timelineStatusFilter) continue;
-
-      const isReply = (msg.status as string) === "replied";
-      events.push({
-        id: `msg-${msg.id}`,
-        type: isReply ? "reply" : (msg.channel === "whatsapp" ? "whatsapp" : "email"),
-        title: isReply ? `Candidate replied to ${msg.channel}` : `${msg.channel === "whatsapp" ? "WhatsApp message" : "Email"} ${(msg.status as string) === "draft" ? "drafted" : "sent"}`,
-        subtitle: isReply ? (msg.subject ? `Re: ${msg.subject}` : undefined) : (msg.channel === "whatsapp" ? (msg.body || undefined) : (msg.subject ? `Subject: ${msg.subject}` : undefined)),
-        content: isReply ? undefined : (msg.channel === "email" ? `To: ${msg.to_address || candidate?.email}` : undefined),
-        status: msg.status,
-        timestamp: new Date(msg.created_at),
-        metadata: msg,
-      });
-    }
-
-    // Add interactions
-    for (const inter of interactions) {
-      if (timelineChannelFilter !== "all") continue; // if filtered to email/whatsapp, hide other interactions
-
-      let type: UnifiedEvent["type"] = inter.interaction_type === "note" ? "note" : inter.interaction_type === "interview" ? "interview" : (inter.interaction_type as string) === "call" ? "call" : (inter.interaction_type as string) === "status_change" ? "status_change" : "profile";
-
-      if (inter.title?.toLowerCase().includes("profile added") || (inter.interaction_type as any) === "profile") type = "profile";
-
-      let subtitle = inter.body;
-      let content = undefined;
-
-      if (type === "interview") {
-        const d = inter.metadata?.scheduled_at ? new Date(inter.metadata.scheduled_at as string) : null;
-        if (d) {
-          content = d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" }) + ", " + d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-        }
-        if (inter.metadata?.interview_type) {
-          subtitle = `${inter.metadata.interview_type} Round`;
-        }
-      }
-
-      events.push({
-        id: `inter-${inter.id}`,
-        type,
-        title: inter.title || "",
-        subtitle: subtitle || undefined,
-        content: content || undefined,
-        timestamp: new Date(inter.created_at),
-        metadata: inter,
-      });
-    }
-
-    events.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-    return events;
-  }, [communicationMessages, interactions, timelineChannelFilter, timelineStatusFilter, candidate?.email]);
-
-  const groupedUnifiedTimeline = useMemo(() => {
-    return unifiedTimelineEvents.reduce<Record<string, typeof unifiedTimelineEvents>>((acc, event) => {
-      const d = event.timestamp;
-      const today = new Date();
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-
-      let key = "";
-      if (d.toDateString() === today.toDateString()) {
-        key = "Today";
-      } else if (d.toDateString() === yesterday.toDateString()) {
-        key = "Yesterday";
-      } else {
-        key = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-      }
-
-      acc[key] = acc[key] || [];
-      acc[key].push(event);
-      return acc;
-    }, {});
-  }, [unifiedTimelineEvents]);
-
-  const communicationSummary = useMemo(() => {
-    const total = communicationMessages.length;
-    const emails = communicationMessages.filter((m) => m.channel === "email").length;
-    const whatsapp = communicationMessages.filter((m) => m.channel === "whatsapp").length;
-    const replies = communicationMessages.filter((m) => (m.status as string) === "replied").length;
-    return { total, emails, whatsapp, replies };
-  }, [communicationMessages]);
+  const communicationSummary = useMemo(
+    () => summarizeTimelineEvents(unifiedTimelineEvents),
+    [unifiedTimelineEvents]
+  );
 
   useEffect(() => {
     if (!communicationNotice) return;
@@ -705,13 +672,6 @@ export default function CandidateDetailPage() {
     }
   }, [communicationConnections]);
 
-  function previewTemplateText(raw: string) {
-    return raw.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key: string) => {
-      const value = templateMergeValues[key as keyof typeof templateMergeValues];
-      return value === undefined || value === null || value === "" ? match : String(value);
-    });
-  }
-
   if (error) {
     return <p className="text-sm text-red-600">{error}</p>;
   }
@@ -773,29 +733,10 @@ export default function CandidateDetailPage() {
     );
   }
 
-  async function handleAddNote() {
-    if (!params.candidateId || !newNote.trim()) return;
-    setAddingNote(true);
-    try {
-      await addCandidateInteraction(params.candidateId, {
-        interaction_type: "note",
-        title: "Candidate note",
-        body: newNote.trim(),
-      });
-      const timeline = await getCandidateInteractions(params.candidateId, 100, 0);
-      setInteractions(timeline);
-      setNewNote("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to add note.");
-    } finally {
-      setAddingNote(false);
-    }
-  }
-
   async function refreshInterviewData() {
     if (!params.candidateId) return;
     const [timeline, interviewList] = await Promise.all([
-      getCandidateInteractions(params.candidateId, 100, 0),
+      getCandidateInteractions(params.candidateId, 100, 0, { skipCache: true }),
       getInterviews({ candidate_id: params.candidateId, limit: 100 }).catch(() => [] as Interview[]),
     ]);
     setInteractions(timeline);
@@ -825,6 +766,8 @@ export default function CandidateDetailPage() {
     setSubmittingToJob(true);
     try {
       await submitCandidateToJob(submitJobId, candidate.id);
+      invalidateApiCache(`/candidates/${candidate.id}/placements`);
+      setPlacementRefreshToken((t) => t + 1);
       try {
         const linkedPipelines = await getPipelines(200, 0, undefined, candidate.id);
         setPipelines(linkedPipelines);
@@ -838,6 +781,7 @@ export default function CandidateDetailPage() {
         // ATS can lag behind async scoring briefly.
       }
       setSubmitJobId("");
+      await refreshInterviewData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to submit candidate to job.");
     } finally {
@@ -854,6 +798,7 @@ export default function CandidateDetailPage() {
       await transitionPipelineStage(pipelineId, { stage: nextStage });
       const linkedPipelines = await getPipelines(200, 0, undefined, candidate.id);
       setPipelines(linkedPipelines);
+      await refreshInterviewData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to advance pipeline stage.");
     } finally {
@@ -867,6 +812,11 @@ export default function CandidateDetailPage() {
       prev.map((p) => (p.id === updated.id ? updated : p))
     );
     setRejectTargetPipeline(null);
+    if (candidate?.id) {
+      invalidateApiCache(`/candidates/${candidate.id}/placements`);
+      setPlacementRefreshToken((t) => t + 1);
+      void refreshInterviewData();
+    }
   }
 
   async function handleRescoreAts(scopedJobId?: string) {
@@ -928,16 +878,65 @@ export default function CandidateDetailPage() {
 
   async function refreshCommunicationPanel() {
     if (!params.candidateId) return;
-    const [connections, templates, messages, reminders] = await Promise.all([
+    const [connections, templates, messages, reminders, timeline] = await Promise.all([
       getCommunicationConnections(),
       loadCommunicationTemplates(),
       getCandidateCommunicationMessages(params.candidateId, 50),
       getCandidateCommunicationReminders(params.candidateId),
+      getCandidateInteractions(params.candidateId, 100, 0, { skipCache: true }).catch(
+        () => [] as CandidateInteraction[]
+      ),
     ]);
     setCommunicationConnections(connections);
     setCommunicationTemplates(templates);
     setCommunicationMessages(messages);
     setCommunicationReminders(reminders);
+    setInteractions(timeline);
+  }
+
+  async function handleSaveCommunicationLog(payload: {
+    title: string;
+    body: string;
+    durationMinutes?: number;
+  }) {
+    if (!params.candidateId || !communicationLogKind) return;
+    const kind = communicationLogKind;
+    setSavingCommunicationLog(true);
+    setCommunicationLogError(null);
+    try {
+      const metadata: Record<string, unknown> = {};
+      if (payload.durationMinutes !== undefined) {
+        metadata.duration_minutes = payload.durationMinutes;
+      }
+      const saved = await addCandidateInteraction(params.candidateId, {
+        interaction_type: kind,
+        title: payload.title,
+        body: payload.body,
+        interaction_metadata: Object.keys(metadata).length ? metadata : undefined,
+      });
+      setCommunicationLogKind(null);
+      setTimelineChannelFilter("all");
+      setTimelineDateFilter("all");
+      setTimelineEventTypeFilter(kind);
+      setTimelineMessageStatusFilter("all");
+      if (saved?.id) {
+        setInteractions((prev) => {
+          const exists = prev.some((row) => row.id === saved.id);
+          if (exists) return prev;
+          return [saved, ...prev];
+        });
+      }
+      await refreshCommunicationPanel();
+      setCommunicationNotice(
+        kind === "call"
+          ? "Phone call saved — see it in the timeline (Calls filter)."
+          : "Meeting saved — see it in the timeline (Meetings filter)."
+      );
+    } catch (err) {
+      setCommunicationLogError(err instanceof Error ? err.message : "Unable to save log.");
+    } finally {
+      setSavingCommunicationLog(false);
+    }
   }
 
   async function handleConnectProvider(provider: "gmail" | "outlook") {
@@ -1144,6 +1143,12 @@ export default function CandidateDetailPage() {
 
   return (
     <section className="mx-auto max-w-[1240px] space-y-6 pb-12">
+      {candidate.status === "deleted" ? (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          This candidate is archived. They are hidden from the main list; an admin can restore them from the Candidates page.
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-between mb-2">
         <Link href="/candidates" className="text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors flex items-center gap-2">
           <ArrowLeft className="w-4 h-4" /> Back to Candidates
@@ -1237,6 +1242,20 @@ export default function CandidateDetailPage() {
             >
               Profile Details
               {activeTab === "profile" && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#FF5A1F]" />
+              )}
+            </button>
+            <button
+              type="button"
+              data-testid="candidate-tab-placements"
+              onClick={() => setActiveTab("placements")}
+              className={cn(
+                "px-6 py-3 text-sm font-semibold transition-colors relative",
+                activeTab === "placements" ? "text-[#FF5A1F]" : "text-gray-500 hover:text-gray-700"
+              )}
+            >
+              Placement History
+              {activeTab === "placements" && (
                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#FF5A1F]" />
               )}
             </button>
@@ -1451,6 +1470,26 @@ export default function CandidateDetailPage() {
                   </div>
                 </div>
 
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="border-b border-gray-100 bg-gray-50/50 p-5">
+                    <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                      <StickyNote className="w-4 h-4 text-[#FF5A1F]" /> Candidate Notes
+                    </h2>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Shared with everyone who can access this candidate. Admins can soft-hide notes from the team.
+                    </p>
+                  </div>
+                  <div className="p-5">
+                    {params.candidateId ? (
+                      <CandidateNotesPanel
+                        candidateId={params.candidateId}
+                        isAdmin={isNotesAdmin}
+                        onTimelineActivity={refreshInterviewData}
+                      />
+                    ) : null}
+                  </div>
+                </div>
+
                 {/* Rejection modal */}
                 {rejectTargetPipeline && (
                   <RejectCandidateModal
@@ -1460,6 +1499,15 @@ export default function CandidateDetailPage() {
                     onCancel={() => setRejectTargetPipeline(null)}
                   />
                 )}
+              </div>
+            )}
+
+            {activeTab === "placements" && params.candidateId && (
+              <div className="animate-in fade-in slide-in-from-bottom-2">
+                <PlacementHistoryTab
+                  candidateId={params.candidateId}
+                  refreshToken={placementRefreshToken}
+                />
               </div>
             )}
 
@@ -1576,31 +1624,68 @@ export default function CandidateDetailPage() {
                           <div className="lg:col-span-4 rounded-xl border border-gray-200 p-4 space-y-3 bg-white">
                             <div className="flex items-center justify-between gap-2">
                               <h3 className="text-sm font-semibold text-gray-900">Communication Timeline</h3>
-                              <select className="rounded-md border border-gray-200 px-2 py-1.5 text-xs" value={timelineStatusFilter} onChange={(e) => setTimelineStatusFilter(e.target.value as "all" | "draft" | "queued" | "sent" | "delivered" | "read" | "replied" | "failed")}>
-                                <option value="all">All Types</option>
-                                <option value="draft">Draft</option>
-                                <option value="queued">Queued</option>
-                                <option value="sent">Sent</option>
-                                <option value="delivered">Delivered</option>
-                                <option value="read">Read</option>
-                                <option value="replied">Replied</option>
-                                <option value="failed">Failed</option>
+                              <select
+                                className="rounded-md border border-gray-200 px-2 py-1.5 text-xs max-w-[9rem]"
+                                value={timelineEventTypeFilter}
+                                onChange={(e) => setTimelineEventTypeFilter(e.target.value as TimelineEventTypeFilter)}
+                                title="Filter by event type (calls, meetings, email, etc.)"
+                              >
+                                <option value="all">All types</option>
+                                <option value="note">Notes</option>
+                                <option value="email">Email</option>
+                                <option value="whatsapp">WhatsApp</option>
+                                <option value="stage_change">Stage changes</option>
+                                <option value="interview">Interviews</option>
+                                <option value="call">Calls</option>
+                                <option value="meeting">Meetings</option>
                               </select>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
-                              <select className="rounded-md border border-gray-200 px-3 py-2 text-sm" value={timelineChannelFilter} onChange={(e) => setTimelineChannelFilter(e.target.value as "all" | "email" | "whatsapp")}>
+                              <select
+                                className="rounded-md border border-gray-200 px-3 py-2 text-sm"
+                                value={timelineChannelFilter}
+                                onChange={(e) => setTimelineChannelFilter(e.target.value as "all" | "email" | "whatsapp")}
+                                title="Email and WhatsApp only"
+                              >
                                 <option value="all">All channels</option>
                                 <option value="email">Email</option>
                                 <option value="whatsapp">WhatsApp</option>
                               </select>
-                              <div className="rounded-md border border-gray-200 px-3 py-2 text-xs text-gray-500">Recent activity</div>
+                              <select
+                                className="rounded-md border border-gray-200 px-3 py-2 text-sm"
+                                value={timelineDateFilter}
+                                onChange={(e) => setTimelineDateFilter(e.target.value as TimelineDateFilter)}
+                              >
+                                <option value="all">All dates</option>
+                                <option value="today">Today</option>
+                                <option value="7d">Last 7 days</option>
+                                <option value="30d">Last 30 days</option>
+                              </select>
                             </div>
+                            <select
+                              className="w-full rounded-md border border-gray-200 px-3 py-2 text-xs text-gray-600"
+                              value={timelineMessageStatusFilter}
+                              onChange={(e) =>
+                                setTimelineMessageStatusFilter(
+                                  e.target.value as "all" | "draft" | "queued" | "sent" | "delivered" | "read" | "replied" | "failed"
+                                )
+                              }
+                            >
+                              <option value="all">All message statuses</option>
+                              <option value="draft">Draft</option>
+                              <option value="queued">Queued</option>
+                              <option value="sent">Sent</option>
+                              <option value="delivered">Delivered</option>
+                              <option value="read">Read</option>
+                              <option value="replied">Replied</option>
+                              <option value="failed">Failed</option>
+                            </select>
                             <div className="max-h-[520px] overflow-y-auto pr-2 pb-4">
                               {Object.entries(groupedUnifiedTimeline).length === 0 ? (
                                 <div className="rounded-lg border border-dashed border-gray-200 p-4 text-sm text-gray-500 bg-gray-50 text-center">
                                   No communication activity yet.
                                 </div>
-                              ) : Object.entries(groupedUnifiedTimeline).map(([dateKey, items]) => (
+                              ) : (Object.entries(groupedUnifiedTimeline) as [string, UnifiedTimelineEvent[]][]).map(([dateKey, items]) => (
                                 <div key={dateKey} className="mb-6 last:mb-0">
                                   <p className="text-sm font-bold text-gray-900 mb-4">{dateKey}</p>
                                   <div className="relative border-l border-gray-200 ml-3 space-y-6">
@@ -1620,10 +1705,23 @@ export default function CandidateDetailPage() {
                                       } else if (event.type === "profile") {
                                         emoji = "👤";
                                         dotColor = "border-gray-200 bg-gray-50";
-                                      } else if (event.type === "note" || event.type === "status_change") {
+                                      } else if (event.type === "note") {
                                         emoji = "📝";
                                         dotColor = "border-gray-200 bg-gray-50";
+                                      } else if (event.type === "stage_change") {
+                                        emoji = "🔀";
+                                        dotColor = "border-amber-200 bg-amber-50";
+                                      } else if (event.type === "call") {
+                                        emoji = "📞";
+                                        dotColor = "border-sky-200 bg-sky-50";
+                                      } else if (event.type === "meeting") {
+                                        emoji = "🤝";
+                                        dotColor = "border-indigo-200 bg-indigo-50";
                                       }
+
+                                      const jobLabel = event.relatedJobId
+                                        ? jobTitleById[event.relatedJobId] || "Job application"
+                                        : null;
 
                                       return (
                                         <div key={event.id} className="relative pl-8">
@@ -1632,22 +1730,33 @@ export default function CandidateDetailPage() {
                                           </div>
                                           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
                                             <div>
-                                              <div className="flex items-center gap-2">
+                                              <div className="flex flex-wrap items-center gap-2">
                                                 <p className="text-sm font-semibold text-gray-900">{event.title}</p>
                                                 {event.status && (
-                                                  <span className={cn(
-                                                    "rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium uppercase",
-                                                    event.status === "sent" ? "bg-green-100 text-green-700" :
-                                                      event.status === "delivered" ? "bg-emerald-100 text-emerald-700" :
-                                                        event.status === "replied" ? "bg-blue-100 text-blue-700" :
-                                                          event.status === "failed" ? "bg-red-100 text-red-700" :
-                                                            "bg-gray-100 text-gray-600"
-                                                  )}>
+                                                  <span
+                                                    className={cn(
+                                                      "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase",
+                                                      getMessageStatusBadgeClass(event.status)
+                                                    )}
+                                                  >
                                                     {event.status}
                                                   </span>
                                                 )}
+                                                {jobLabel ? (
+                                                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                                                    {jobLabel}
+                                                  </span>
+                                                ) : null}
+                                                {event.relatedInterviewId ? (
+                                                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                                                    Interview
+                                                  </span>
+                                                ) : null}
                                               </div>
-                                              {event.subtitle && <p className="text-sm text-gray-600 mt-0.5">{event.subtitle}</p>}
+                                              {event.actorLabel ? (
+                                                <p className="text-xs text-gray-400 mt-0.5">By {event.actorLabel}</p>
+                                              ) : null}
+                                              {event.subtitle && <p className="text-sm text-gray-600 mt-0.5 whitespace-pre-line">{event.subtitle}</p>}
                                               {event.content && <p className="text-sm text-gray-600 mt-0.5">{event.content}</p>}
                                             </div>
                                             <div className="text-xs text-gray-400 font-medium whitespace-nowrap pt-0.5">
@@ -1752,6 +1861,8 @@ export default function CandidateDetailPage() {
                                 <button className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg transition-colors" onClick={() => setActiveCommunicationTab("whatsapp")}><MessageSquare className="w-4 h-4 text-gray-400" /> Send WhatsApp</button>
                                 <button className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg transition-colors" onClick={() => setReminderChannel("email")}><Calendar className="w-4 h-4 text-gray-400" /> Schedule Reminder</button>
                                 <button className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg transition-colors" onClick={() => setActiveCommunicationTab("templates")}><FileText className="w-4 h-4 text-gray-400" /> Add Note / Template</button>
+                                <button className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg transition-colors" onClick={() => { setCommunicationLogError(null); setCommunicationLogKind("call"); }}><Phone className="w-4 h-4 text-gray-400" /> Log phone call</button>
+                                <button className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg transition-colors" onClick={() => { setCommunicationLogError(null); setCommunicationLogKind("meeting"); }}><User className="w-4 h-4 text-gray-400" /> Log meeting</button>
                               </div>
                             </div>
                             <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
@@ -1798,6 +1909,19 @@ export default function CandidateDetailPage() {
                             </div>
                           </div>
                         </div>
+                        <CommunicationLogModal
+                          kind={communicationLogKind ?? "call"}
+                          open={communicationLogKind !== null}
+                          saving={savingCommunicationLog}
+                          error={communicationLogError}
+                          onClose={() => {
+                            if (!savingCommunicationLog) {
+                              setCommunicationLogKind(null);
+                              setCommunicationLogError(null);
+                            }
+                          }}
+                          onSave={handleSaveCommunicationLog}
+                        />
                       </div>
                     ) : activeCommunicationTab === "email" ? (
                       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -1824,8 +1948,20 @@ export default function CandidateDetailPage() {
                                   <div className="min-w-0 flex-1">
                                     <p className="text-sm font-bold text-gray-900 truncate">{msg.subject || "No Subject"}</p>
                                     <p className="text-xs text-gray-500 truncate mt-1">{msg.body}</p>
+                                    {msg.status === "failed" && msg.failure_reason ? (
+                                      <p className="text-xs text-red-600 mt-1 line-clamp-2" title={msg.failure_reason}>
+                                        {msg.failure_reason}
+                                      </p>
+                                    ) : null}
                                     <div className="flex items-center justify-between mt-3">
-                                      <span className={cn("text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded", (msg.status as string) === "sent" ? "bg-green-100 text-green-700" : (msg.status as string) === "replied" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-700")}>{msg.status as string}</span>
+                                      <span
+                                        className={cn(
+                                          "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded",
+                                          getMessageStatusBadgeClass(msg.status)
+                                        )}
+                                      >
+                                        {msg.status}
+                                      </span>
                                       <span className="text-[10px] font-medium text-gray-500">{new Date(msg.created_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>
                                     </div>
                                   </div>
@@ -1879,17 +2015,6 @@ export default function CandidateDetailPage() {
                               <p className="px-6 pt-2 text-xs font-medium text-[#FF5A1F]">Loading template content...</p>
                             )}
 
-                            <div className="flex items-center gap-1.5 px-6 py-2 border-b border-gray-100 bg-gray-50/50">
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Bold"><Bold className="w-4 h-4" /></button>
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Italic"><Italic className="w-4 h-4" /></button>
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Underline"><Underline className="w-4 h-4" /></button>
-                              <div className="w-px h-5 bg-gray-200 mx-1" />
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Bullet List"><ListIcon className="w-4 h-4" /></button>
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Numbered List"><ListOrdered className="w-4 h-4" /></button>
-                              <div className="w-px h-5 bg-gray-200 mx-1" />
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Link"><LinkIcon className="w-4 h-4" /></button>
-                            </div>
-
                             <div className="px-6 py-4 flex-1 flex flex-col min-h-[200px]">
                               <textarea className="w-full h-full text-sm outline-none resize-none bg-transparent text-gray-800 leading-relaxed font-medium" placeholder="Write your email here..." value={emailBody} onChange={(e) => setEmailBody(e.target.value)} />
                             </div>
@@ -1924,13 +2049,6 @@ export default function CandidateDetailPage() {
                                 <span>Attach File</span>
                                 <input type="file" className="hidden" onChange={(e) => void handleAttachmentSelected(e.target.files?.[0] ?? null)} />
                               </label>
-                              <button
-                                className="text-xs text-red-500 font-medium hover:text-red-600 transition-colors"
-                                type="button"
-                                onClick={() => void handleDisconnectProvider(selectedEmailProvider)}
-                              >
-                                Disconnect {selectedEmailProvider}
-                              </button>
                             </div>
                             <div className="flex items-center gap-3">
                               <Button variant="outline" className="h-10 text-sm font-semibold text-gray-700 bg-white border-gray-200 hover:bg-gray-50 hover:text-gray-900 shadow-sm" onClick={() => void handleSendEmail(true, "save_draft")} disabled={emailDraftDisabled}>
@@ -1986,7 +2104,7 @@ export default function CandidateDetailPage() {
                               {emailTemplates.length > 0 ? emailTemplates.slice(0, 6).map(tpl => (
                                 <div key={tpl.id} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-gray-50 border border-transparent hover:border-gray-100 cursor-pointer transition-colors group" onClick={() => setSelectedTemplateId(tpl.id)}>
                                   <span className="text-xs font-semibold text-gray-700 truncate pr-2 group-hover:text-[#FF5A1F] transition-colors">{tpl.name}</span>
-                                  <span className="text-[9px] font-bold px-2 py-0.5 bg-green-50 text-green-700 rounded uppercase tracking-wider shrink-0 border border-green-100">Email</span>
+                                  <span className="text-[9px] font-bold px-2 py-0.5 bg-orange-50 text-[#FF5A1F] rounded uppercase tracking-wider shrink-0 border border-orange-100">Email</span>
                                 </div>
                               )) : (
                                 <p className="text-xs text-gray-500 text-center py-4">No templates found.</p>
@@ -2021,8 +2139,20 @@ export default function CandidateDetailPage() {
                                   <div className="min-w-0 flex-1">
                                     <p className="text-sm font-bold text-gray-900 truncate">{msg.subject || "Message"}</p>
                                     <p className="text-xs text-gray-500 truncate mt-1">{msg.body}</p>
+                                    {msg.status === "failed" && msg.failure_reason ? (
+                                      <p className="text-xs text-red-600 mt-1 line-clamp-2" title={msg.failure_reason}>
+                                        {msg.failure_reason}
+                                      </p>
+                                    ) : null}
                                     <div className="flex items-center justify-between mt-3">
-                                      <span className={cn("text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded", msg.status === "sent" ? "bg-green-100 text-green-700" : (msg.status as string) === "replied" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-700")}>{msg.status as string}</span>
+                                      <span
+                                        className={cn(
+                                          "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded",
+                                          getMessageStatusBadgeClass(msg.status)
+                                        )}
+                                      >
+                                        {msg.status}
+                                      </span>
                                       <span className="text-[10px] font-medium text-gray-500">{new Date(msg.created_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>
                                     </div>
                                   </div>
@@ -2076,17 +2206,6 @@ export default function CandidateDetailPage() {
                                 {templatePreview}
                               </div>
                             ) : null}
-
-                            <div className="flex items-center gap-1.5 px-6 py-2 border-b border-gray-100 bg-gray-50/50">
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Bold"><Bold className="w-4 h-4" /></button>
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Italic"><Italic className="w-4 h-4" /></button>
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Underline"><Underline className="w-4 h-4" /></button>
-                              <div className="w-px h-5 bg-gray-200 mx-1" />
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Bullet List"><ListIcon className="w-4 h-4" /></button>
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Numbered List"><ListOrdered className="w-4 h-4" /></button>
-                              <div className="w-px h-5 bg-gray-200 mx-1" />
-                              <button className="p-1.5 rounded-md hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-sm text-gray-600 transition-all" title="Link"><LinkIcon className="w-4 h-4" /></button>
-                            </div>
 
                             <div className="px-6 py-4 flex-1 flex flex-col min-h-[200px] relative">
                               <textarea className="w-full h-full text-sm outline-none resize-none bg-transparent text-gray-800 leading-relaxed font-medium pb-6" placeholder="Write WhatsApp message..." value={whatsappBody} onChange={(e) => setWhatsappBody(e.target.value)} />
@@ -2188,7 +2307,7 @@ export default function CandidateDetailPage() {
                               <option value="email">Email</option>
                               <option value="whatsapp">WhatsApp</option>
                             </select>
-                            <button className="flex items-center gap-2 px-4 py-2 bg-[#1A1F2C] text-white rounded-lg hover:bg-[#2A2F3C] transition-all font-bold text-[13px] shadow-sm w-full justify-center" onClick={() => { setSelectedTemplateId(""); setIsEditingTemplate(false); setNewTemplateName(""); setNewTemplateBody(""); setNewTemplateSubject(""); }}>
+                            <button className="flex items-center gap-2 px-4 py-2 bg-[#FF5A1F] text-white rounded-lg hover:bg-[#E54E1A] transition-all font-bold text-[13px] shadow-sm w-full justify-center" onClick={() => { setSelectedTemplateId(""); setIsEditingTemplate(false); setNewTemplateName(""); setNewTemplateBody(""); setNewTemplateSubject(""); }}>
                               <Plus className="w-4 h-4" /> New Template
                             </button>
                           </div>
@@ -2202,7 +2321,7 @@ export default function CandidateDetailPage() {
                                     <div className="flex items-center gap-2">
                                       {tpl.channel === "whatsapp" || (tpl.name || "").toLowerCase().includes("whatsapp") ? <MessageSquare className={cn("w-4 h-4 shrink-0", selectedTemplateId === tpl.id ? "text-[#25D366]" : "text-[#25D366]/70")} /> : <Mail className={cn("w-4 h-4 shrink-0", selectedTemplateId === tpl.id ? "text-[#FF5A1F]" : "text-[#FF5A1F]/70")} />}
                                       <span className={cn("text-[13px] font-bold truncate", selectedTemplateId === tpl.id ? "text-gray-900" : "text-gray-700")}>{tpl.name}</span>
-                                      <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0", tpl.channel === "whatsapp" || (tpl.name || "").toLowerCase().includes("whatsapp") ? "bg-green-50 text-green-700" : "bg-green-50 text-green-700")}>{tpl.channel === "whatsapp" || (tpl.name || "").toLowerCase().includes("whatsapp") ? "WhatsApp" : "Email"}</span>
+                                      <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0 border", tpl.channel === "whatsapp" || (tpl.name || "").toLowerCase().includes("whatsapp") ? "bg-green-50 text-green-700 border-green-100" : "bg-orange-50 text-[#FF5A1F] border-orange-100")}>{tpl.channel === "whatsapp" || (tpl.name || "").toLowerCase().includes("whatsapp") ? "WhatsApp" : "Email"}</span>
                                     </div>
                                     <button className="text-gray-400 hover:text-gray-600 transition-colors"><MoreVertical className="w-4 h-4" /></button>
                                   </div>
@@ -2236,10 +2355,20 @@ export default function CandidateDetailPage() {
                                   )}
                                 </div>
                                 <div className="flex items-center gap-3">
-                                  <span className="px-2 py-0.5 bg-green-50 text-green-600 text-[10px] font-bold uppercase tracking-wider rounded border border-green-100 flex items-center gap-1">
-                                    {(selectedTemplateId && !isEditingTemplate) ? communicationTemplates.find(t => t.id === selectedTemplateId)?.channel : (newTemplateCategory)}
-                                  </span>
-                                  <span className="text-[11px] text-gray-400 font-medium">Auto-saved Just now</span>
+                                  {(() => {
+                                    const channel = (selectedTemplateId && !isEditingTemplate)
+                                      ? communicationTemplates.find(t => t.id === selectedTemplateId)?.channel
+                                      : newTemplateCategory;
+                                    const isWhatsapp = channel === "whatsapp";
+                                    return (
+                                      <span className={cn(
+                                        "px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border flex items-center gap-1",
+                                        isWhatsapp ? "bg-green-50 text-green-700 border-green-100" : "bg-orange-50 text-[#FF5A1F] border-orange-100"
+                                      )}>
+                                        {isWhatsapp ? "WhatsApp" : "Email"}
+                                      </span>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                             </div>
@@ -2249,11 +2378,10 @@ export default function CandidateDetailPage() {
                             </div>
                           </div>
 
-                          {/* Main Content: Split Grid */}
+                          {/* Main Content */}
                           <div className="flex-1 overflow-y-auto p-8 bg-gray-50/30">
-                            <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 h-full min-h-0">
-                              {/* Editor Column */}
-                              <div className="lg:col-span-7 flex flex-col gap-6">
+                            <div className="max-w-4xl mx-auto flex flex-col gap-6 h-full min-h-0">
+                              <div className="flex flex-col gap-6">
                                 <div className="grid grid-cols-2 gap-4">
                                   <div className="space-y-1.5">
                                     <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider ml-1">Template name</label>
@@ -2301,10 +2429,6 @@ export default function CandidateDetailPage() {
                                   <div className="flex-1 flex flex-col border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden">
                                     <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50/50 flex items-center gap-1">
                                       <button className="p-1.5 rounded-md hover:bg-white hover:shadow-sm border border-transparent hover:border-gray-200 text-[#FF5A1F] transition-all flex items-center gap-1.5 text-[11px] font-bold mr-2" onClick={() => insertVariable("{{candidate_name}}")}><Plus className="w-3.5 h-3.5" /> Variable</button>
-                                      <div className="w-px h-5 bg-gray-200 mx-2" />
-                                      <button className="p-1.5 rounded-md hover:bg-white hover:shadow-sm border border-transparent hover:border-gray-200 text-gray-600 transition-all"><Bold className="w-3.5 h-3.5" /></button>
-                                      <button className="p-1.5 rounded-md hover:bg-white hover:shadow-sm border border-transparent hover:border-gray-200 text-gray-600 transition-all"><Italic className="w-3.5 h-3.5" /></button>
-                                      <button className="p-1.5 rounded-md hover:bg-white hover:shadow-sm border border-transparent hover:border-gray-200 text-gray-600 transition-all"><Underline className="w-3.5 h-3.5" /></button>
                                     </div>
                                     <textarea
                                       ref={templateEditorRef}
@@ -2317,48 +2441,20 @@ export default function CandidateDetailPage() {
                                   </div>
                                 </div>
 
+                                <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                                  <h3 className="text-[13px] font-bold text-gray-900 mb-3 tracking-tight">Insert variables</h3>
+                                  <div className="flex flex-wrap gap-2">
+                                    {["{{candidate_name}}", "{{job_title}}", "{{interview_date}}", "{{interview_time}}", "{{company_name}}"].map((field) => (
+                                      <button key={field} onClick={() => insertVariable(field)} className="px-3 py-1.5 rounded-md border border-gray-200 bg-white shadow-sm text-[11px] font-mono font-medium text-gray-600 hover:border-[#FF5A1F] hover:text-[#FF5A1F] hover:bg-orange-50/50 transition-colors">{field}</button>
+                                    ))}
+                                  </div>
+                                </div>
+
                                 <div className="flex items-center justify-end gap-3 shrink-0">
                                   <Button variant="outline" className="h-9 px-6 text-xs font-bold border-gray-200 text-gray-700 hover:bg-gray-50 rounded-lg" onClick={() => { setSelectedTemplateId(""); setIsEditingTemplate(false); }}>Cancel</Button>
                                   <Button className="h-9 px-6 text-xs font-bold bg-[#FF5A1F] hover:bg-[#E54E1A] text-white shadow-sm rounded-lg" onClick={() => (selectedTemplateId && !isEditingTemplate) ? handleUseSelectedTemplate() : void handleSaveTemplate()}>
                                     {(selectedTemplateId && !isEditingTemplate) ? "Use Template" : (isEditingTemplate ? "Update Template" : "Save Template")}
                                   </Button>
-                                </div>
-                              </div>
-
-                              {/* Preview Column */}
-                              <div className="lg:col-span-5 flex flex-col gap-6">
-                                <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-                                  <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-white shrink-0">
-                                    <h3 className="text-[13px] font-bold text-gray-900 tracking-tight">Preview</h3>
-                                    <div className="flex items-center bg-gray-100/80 rounded-md p-0.5 border border-gray-200/50">
-                                      <button className="px-3 py-1.5 text-[11px] font-bold text-gray-500 hover:text-gray-700 transition-colors rounded-sm" onClick={() => { if (selectedTemplateId && !isEditingTemplate) handleEditExistingTemplate(); else templateEditorRef.current?.focus(); }}>Edit</button>
-                                      <button className="px-3 py-1.5 text-[11px] font-bold bg-white text-[#FF5A1F] rounded-sm shadow-sm border border-gray-200">Preview</button>
-                                    </div>
-                                  </div>
-                                  <div className="flex-1 overflow-y-auto p-6 bg-white">
-                                    {(() => {
-                                      const rawBody = (selectedTemplateId && !isEditingTemplate)
-                                        ? communicationTemplates.find(t => t.id === selectedTemplateId)?.body_template || ""
-                                        : newTemplateBody;
-
-                                      if (!rawBody) return <p className="text-sm text-gray-400 italic">No preview available. Start typing to see a preview.</p>;
-
-                                      const replacedBody = previewTemplateText(rawBody);
-
-                                      return (
-                                        <pre className="text-[13px] text-gray-800 font-sans whitespace-pre-wrap leading-relaxed">{replacedBody}</pre>
-                                      );
-                                    })()}
-                                  </div>
-                                </div>
-
-                                <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-                                  <h3 className="text-[13px] font-bold text-gray-900 mb-3 tracking-tight">Recently used variables</h3>
-                                  <div className="flex flex-wrap gap-2 mb-4">
-                                    {["{{candidate_name}}", "{{job_title}}", "{{interview_date}}", "{{interview_time}}", "{{company_name}}"].map((field) => (
-                                      <button key={field} onClick={() => insertVariable(field)} className="px-3 py-1.5 rounded-md border border-gray-200 bg-white shadow-sm text-[11px] font-mono font-medium text-gray-600 hover:border-[#FF5A1F] hover:text-[#FF5A1F] transition-colors">{field}</button>
-                                    ))}
-                                  </div>
                                 </div>
                               </div>
                             </div>

@@ -17,7 +17,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_any_permissions
@@ -88,6 +88,66 @@ def _trend(recent: int, previous: int) -> int:
     return round(((recent - previous) / previous) * 100)
 
 
+def _candidate_belongs_to_org(org_id: UUID):
+    """Match legacy (organization_id) and candidate-management (org_id) rows."""
+    return or_(
+        Candidate.organization_id == org_id,
+        Candidate.org_id == org_id,
+    )
+
+
+def _candidate_is_active():
+    """Active under legacy is_deleted or candidate-management deleted_at."""
+    return and_(
+        Candidate.is_deleted.is_(False),
+        Candidate.deleted_at.is_(None),
+    )
+
+
+def _candidate_where_clauses(
+    org_id: UUID,
+    *,
+    scope: AccessScopeService,
+    current_user: CurrentUser,
+) -> list:
+    clauses = [_candidate_belongs_to_org(org_id), _candidate_is_active()]
+    if scope.is_client_user(current_user):
+        clauses.append(
+            Candidate.id.in_(
+                select(Pipeline.candidate_id).where(
+                    Pipeline.job_id.in_(scope.allowed_job_ids_subquery(current_user))
+                )
+            )
+        )
+    elif scope.is_vendor_user(current_user):
+        clauses.append(Candidate.created_by == UUID(current_user.user_id))
+    return clauses
+
+
+def _pipeline_where_clauses(
+    org_id: UUID,
+    *,
+    scope: AccessScopeService,
+    current_user: CurrentUser,
+) -> list:
+    clauses = [Pipeline.organization_id == org_id]
+    if scope.is_scoped_user(current_user):
+        clauses.append(Pipeline.job_id.in_(scope.allowed_job_ids_subquery(current_user)))
+    return clauses
+
+
+def _job_where_clauses(
+    org_id: UUID,
+    *,
+    scope: AccessScopeService,
+    current_user: CurrentUser,
+) -> list:
+    clauses = [Job.organization_id == org_id]
+    if scope.is_scoped_user(current_user):
+        clauses.append(Job.id.in_(scope.allowed_job_ids_subquery(current_user)))
+    return clauses
+
+
 # ── Endpoint ──────────────────────────────────────────────────────────────────
 
 @router.get("/summary", response_model=DashboardSummary)
@@ -127,27 +187,20 @@ def get_dashboard_summary(
     candidates_trend = 0
 
     if can_candidates:
-        cand_base = select(func.count()).select_from(Candidate).where(
-            Candidate.organization_id == org_id,
-            Candidate.is_deleted.is_(False),
-        )
-        if scope.is_vendor_user(current_user):
-            cand_base = cand_base.where(
-                Candidate.created_by == UUID(current_user.user_id)
-            )
-
-        total_candidates = db.scalar(cand_base) or 0
-
-        recent_cands = db.scalar(
-            cand_base.where(Candidate.created_at >= t7)
-        ) or 0
-        prev_cands = db.scalar(
-            cand_base.where(
-                Candidate.created_at >= t14,
-                Candidate.created_at < t7,
-            )
-        ) or 0
-        candidates_trend = _trend(recent_cands, prev_cands)
+        cand_where = _candidate_where_clauses(org_id, scope=scope, current_user=current_user)
+        cand_counts = db.execute(
+            select(
+                func.count(Candidate.id).label("total"),
+                func.count(Candidate.id)
+                .filter(Candidate.created_at >= t7)
+                .label("recent"),
+                func.count(Candidate.id)
+                .filter(and_(Candidate.created_at >= t14, Candidate.created_at < t7))
+                .label("previous"),
+            ).where(*cand_where)
+        ).one()
+        total_candidates = int(cand_counts.total or 0)
+        candidates_trend = _trend(int(cand_counts.recent or 0), int(cand_counts.previous or 0))
 
     # ── Jobs ──────────────────────────────────────────────────────────────────
     active_jobs = 0
@@ -155,37 +208,26 @@ def get_dashboard_summary(
     recent_jobs: list[RecentJob] = []
 
     if can_jobs:
-        job_base = select(Job).where(Job.organization_id == org_id)
-        if scope.is_scoped_user(current_user):
-            job_base = job_base.where(
-                Job.id.in_(scope.allowed_job_ids_subquery(current_user))
-            )
+        job_where = _job_where_clauses(org_id, scope=scope, current_user=current_user)
 
         active_jobs = db.scalar(
-            select(func.count()).select_from(job_base.where(
-                Job.status == "open"
-            ).subquery())
+            select(func.count(Job.id)).where(*job_where, Job.status == "open")
         ) or 0
 
-        # Trends: count jobs created in each window
-        job_count_base = select(func.count()).select_from(Job).where(
-            Job.organization_id == org_id
-        )
-        recent_jobs_count = db.scalar(
-            job_count_base.where(Job.created_at >= t7)
-        ) or 0
-        prev_jobs_count = db.scalar(
-            job_count_base.where(
-                Job.created_at >= t14,
-                Job.created_at < t7,
-            )
-        ) or 0
-        jobs_trend = _trend(recent_jobs_count, prev_jobs_count)
+        job_trends = db.execute(
+            select(
+                func.count(Job.id).filter(Job.created_at >= t7).label("recent"),
+                func.count(Job.id)
+                .filter(and_(Job.created_at >= t14, Job.created_at < t7))
+                .label("previous"),
+            ).where(*job_where)
+        ).one()
+        jobs_trend = _trend(int(job_trends.recent or 0), int(job_trends.previous or 0))
 
         # Recent jobs table: 5 most recent, with candidate count per job
         job_rows = db.execute(
             select(Job)
-            .where(Job.organization_id == org_id)
+            .where(*job_where)
             .order_by(Job.created_at.desc())
             .limit(5)
         ).scalars().all()
@@ -228,13 +270,7 @@ def get_dashboard_summary(
     activities: list[ActivityItem] = []
 
     if can_pipeline:
-        pipe_base_where = [
-            Pipeline.organization_id == org_id,
-        ]
-        if scope.is_scoped_user(current_user):
-            pipe_base_where.append(
-                Pipeline.job_id.in_(scope.allowed_job_ids_subquery(current_user))
-            )
+        pipe_where = _pipeline_where_clauses(org_id, scope=scope, current_user=current_user)
 
         # Stage counts (single aggregation query)
         stage_rows = db.execute(
@@ -243,7 +279,7 @@ def get_dashboard_summary(
                 Pipeline.status,
                 func.count(Pipeline.id).label("cnt"),
             )
-            .where(*pipe_base_where)
+            .where(*pipe_where)
             .group_by(Pipeline.stage, Pipeline.status)
         ).all()
 
@@ -269,31 +305,30 @@ def get_dashboard_summary(
             if st == "active" and s not in ("placed", "rejected")
         )
 
-        # Pipeline trends
-        recent_pipe = db.scalar(
-            select(func.count(Pipeline.id))
-            .where(*pipe_base_where, Pipeline.created_at >= t7)
-        ) or 0
-        prev_pipe = db.scalar(
-            select(func.count(Pipeline.id))
-            .where(*pipe_base_where, Pipeline.created_at >= t14, Pipeline.created_at < t7)
-        ) or 0
-        pipeline_trend = _trend(recent_pipe, prev_pipe)
-
-        recent_placed = db.scalar(
-            select(func.count(Pipeline.id))
-            .where(*pipe_base_where, Pipeline.stage == "placed", Pipeline.updated_at >= t7)
-        ) or 0
-        prev_placed = db.scalar(
-            select(func.count(Pipeline.id))
-            .where(
-                *pipe_base_where,
-                Pipeline.stage == "placed",
-                Pipeline.updated_at >= t14,
-                Pipeline.updated_at < t7,
-            )
-        ) or 0
-        placements_trend = _trend(recent_placed, prev_placed)
+        pipe_trends = db.execute(
+            select(
+                func.count(Pipeline.id)
+                .filter(Pipeline.created_at >= t7)
+                .label("recent_pipe"),
+                func.count(Pipeline.id)
+                .filter(and_(Pipeline.created_at >= t14, Pipeline.created_at < t7))
+                .label("prev_pipe"),
+                func.count(Pipeline.id)
+                .filter(and_(Pipeline.stage == "placed", Pipeline.updated_at >= t7))
+                .label("recent_placed"),
+                func.count(Pipeline.id)
+                .filter(
+                    and_(
+                        Pipeline.stage == "placed",
+                        Pipeline.updated_at >= t14,
+                        Pipeline.updated_at < t7,
+                    )
+                )
+                .label("prev_placed"),
+            ).where(*pipe_where)
+        ).one()
+        pipeline_trend = _trend(int(pipe_trends.recent_pipe or 0), int(pipe_trends.prev_pipe or 0))
+        placements_trend = _trend(int(pipe_trends.recent_placed or 0), int(pipe_trends.prev_placed or 0))
 
         # Activity feed: 20 most recent pipeline moves, enriched with names
         activity_rows = db.execute(
@@ -307,7 +342,7 @@ def get_dashboard_summary(
             )
             .join(Candidate, Candidate.id == Pipeline.candidate_id)
             .join(Job, Job.id == Pipeline.job_id)
-            .where(*pipe_base_where)
+            .where(*pipe_where)
             .order_by(Pipeline.updated_at.desc())
             .limit(15)
         ).all()

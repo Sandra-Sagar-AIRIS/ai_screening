@@ -8,9 +8,10 @@
  */
 
 import { useEffect, useState } from "react";
-import { CheckCircle, ChevronDown, ChevronUp, Clock, XCircle } from "lucide-react";
+import { ChevronDown, ChevronUp, Clock, XCircle } from "lucide-react";
 import { getPipelineStageHistory } from "@/lib/api/pipeline";
 import type { PipelineStageHistory } from "@/lib/api/types";
+import { cn } from "@/lib/utils";
 
 const STAGE_LABELS: Record<string, string> = {
   applied: "Applied",
@@ -23,19 +24,24 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const STAGE_COLOR: Record<string, string> = {
-  applied: "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300",
-  screening: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300",
-  ai_screening: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
-  interview: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
-  offer: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
-  placed: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300",
-  rejected: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
+  applied: "bg-violet-50 text-violet-700 border-violet-200",
+  screening: "bg-sky-50 text-sky-700 border-sky-200",
+  ai_screening: "bg-orange-50 text-orange-700 border-orange-200",
+  interview: "bg-blue-50 text-blue-700 border-blue-200",
+  offer: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  placed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  rejected: "bg-red-50 text-red-700 border-red-200",
 };
 
 function StageBadge({ stage }: { stage: string }) {
-  const color = STAGE_COLOR[stage] ?? "bg-gray-100 text-gray-700";
+  const color = STAGE_COLOR[stage] ?? "bg-gray-50 text-gray-700 border-gray-200";
   return (
-    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${color}`}>
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+        color
+      )}
+    >
       {STAGE_LABELS[stage] ?? stage}
     </span>
   );
@@ -77,94 +83,80 @@ export function PipelineStageHistoryPanel({ pipelineId, defaultExpanded = false 
   }, [pipelineId, expanded]);
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-      {/* Header / toggle */}
+    <div className="mt-2 rounded-md border border-gray-100 bg-gray-50/60">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors"
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-gray-600 hover:bg-gray-100/80 rounded-md transition-colors"
       >
-        <span className="flex items-center gap-2">
-          <Clock className="h-4 w-4 text-gray-400" />
-          Stage History
-          {history.length > 0 && (
-            <span className="ml-1 rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs font-semibold text-gray-600 dark:text-gray-300">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Clock className="h-3.5 w-3.5 shrink-0 text-[#FF5A1F]" />
+          <span className="truncate">Stage history</span>
+          {history.length > 0 ? (
+            <span className="shrink-0 rounded-full bg-white border border-gray-200 px-1.5 py-0.5 text-[10px] font-semibold text-gray-500">
               {history.length}
             </span>
-          )}
+          ) : null}
         </span>
         {expanded ? (
-          <ChevronUp className="h-4 w-4 text-gray-400" />
+          <ChevronUp className="h-3.5 w-3.5 shrink-0 text-gray-400" />
         ) : (
-          <ChevronDown className="h-4 w-4 text-gray-400" />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" />
         )}
       </button>
 
-      {expanded && (
-        <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
-          {loading && (
-            <p className="text-xs text-gray-400 animate-pulse">Loading history…</p>
-          )}
+      {expanded ? (
+        <div className="border-t border-gray-100 px-3 py-2">
+          {loading ? (
+            <p className="text-[11px] text-gray-400 animate-pulse">Loading…</p>
+          ) : null}
 
-          {error && (
-            <p className="text-xs text-red-500">{error}</p>
-          )}
+          {error ? <p className="text-[11px] text-red-600">{error}</p> : null}
 
-          {!loading && !error && history.length === 0 && (
-            <p className="text-xs text-gray-400">No stage transitions recorded yet.</p>
-          )}
+          {!loading && !error && history.length === 0 ? (
+            <p className="text-[11px] text-gray-400">No stage transitions yet.</p>
+          ) : null}
 
-          {!loading && !error && history.length > 0 && (
-            <ol className="relative space-y-0">
-              {history.map((row, i) => {
+          {!loading && !error && history.length > 0 ? (
+            <ul className="divide-y divide-gray-100">
+              {history.map((row) => {
                 const isRejection = row.new_stage === "rejected";
-                const isLast = i === history.length - 1;
-
                 return (
-                  <li key={row.id} className="relative flex gap-3 pb-4 last:pb-0">
-                    {/* Timeline spine */}
-                    {!isLast && (
-                      <div className="absolute left-[9px] top-5 bottom-0 w-px bg-gray-200 dark:bg-gray-700" />
-                    )}
-
-                    {/* Dot */}
-                    <div className="mt-1 shrink-0">
+                  <li key={row.id} className="flex gap-2 py-2 first:pt-0 last:pb-0">
+                    <div className="mt-0.5 shrink-0">
                       {isRejection ? (
-                        <XCircle className="h-5 w-5 text-red-400" />
+                        <XCircle className="h-4 w-4 text-red-400" />
                       ) : (
-                        <CheckCircle className="h-5 w-5 text-emerald-400" />
+                        <span className="block h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-emerald-100" />
                       )}
                     </div>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5 text-sm">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
                         {row.previous_stage ? (
                           <>
                             <StageBadge stage={row.previous_stage} />
-                            <span className="text-gray-400">→</span>
+                            <span className="text-[10px] text-gray-400">→</span>
                           </>
                         ) : null}
                         <StageBadge stage={row.new_stage} />
+                        <span className="text-[10px] text-gray-400">·</span>
+                        <span className="text-[10px] text-gray-500 whitespace-nowrap">
+                          {formatDate(row.transitioned_at)}
+                        </span>
                       </div>
-
-                      {row.reason && (
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 italic">
+                      {row.reason ? (
+                        <p className="text-[11px] text-gray-600 leading-snug">
                           &ldquo;{row.reason}&rdquo;
                         </p>
-                      )}
-
-                      <p className="mt-0.5 text-xs text-gray-400">
-                        {formatDate(row.transitioned_at)}
-                      </p>
+                      ) : null}
                     </div>
                   </li>
                 );
               })}
-            </ol>
-          )}
+            </ul>
+          ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

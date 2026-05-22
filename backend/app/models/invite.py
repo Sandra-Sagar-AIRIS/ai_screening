@@ -10,6 +10,19 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
+# F-INV-05: full invite lifecycle statuses
+INVITE_STATUS_SENT = "sent"
+INVITE_STATUS_OPENED = "opened"
+INVITE_STATUS_ACCEPTED = "accepted"
+INVITE_STATUS_EXPIRED = "expired"
+
+INVITE_STATUSES = (
+    INVITE_STATUS_SENT,
+    INVITE_STATUS_OPENED,
+    INVITE_STATUS_ACCEPTED,
+    INVITE_STATUS_EXPIRED,
+)
+
 
 class Invite(Base):
     __tablename__ = "invites"
@@ -31,10 +44,16 @@ class Invite(Base):
     )
     role: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     token: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default=sa.text("'pending'"))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default=sa.text("'sent'"))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
     )
+
+    # F-INV-05: per-transition timestamps
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

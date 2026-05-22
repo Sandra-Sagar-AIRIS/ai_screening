@@ -63,13 +63,21 @@ export type InviteAcceptResponse = {
   message: string;
 };
 
+export type InviteStatus = "sent" | "opened" | "accepted" | "expired";
+
 export type InviteListItem = {
   id: string;
   email: string;
   role: string;
-  status: "pending" | "accepted";
+  /** F-INV-05: full lifecycle status */
+  status: InviteStatus;
   created_at: string;
   expires_at: string;
+  /** F-INV-05: per-transition timestamps (null until transition occurs) */
+  sent_at: string | null;
+  opened_at: string | null;
+  accepted_at: string | null;
+  expired_at: string | null;
 };
 
 export type InviteResendResponse = {

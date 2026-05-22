@@ -37,11 +37,13 @@ from app.candidate_management.schemas import (
     CandidateSkillInput,
     CandidateUpdate,
     InteractionCreate,
+    InteractionTypeSchema,
     MergeCandidatesRequest,
     ResumeParseResult,
     ResumeUploadRequest,
 )
 from app.models.pipeline import Pipeline
+from app.services.candidate_pipeline_withdrawal import withdraw_active_pipelines_for_candidate
 from app.models.application import Application
 from app.models.job import Job
 from app.services.task_runner import dispatch_task
@@ -364,7 +366,13 @@ class CandidateManagementService:
         return self._require_candidate(org_id=org_id, workspace_id=workspace_id, candidate_id=candidate.id), parse_result
 
     def get_candidate(self, *, org_id: UUID, workspace_id: UUID, candidate_id: UUID) -> Candidate:
-        return self._require_candidate(org_id=org_id, workspace_id=workspace_id, candidate_id=candidate_id)
+        """Detail/profile read — includes archived (soft-deleted) candidates."""
+        return self._require_candidate(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            candidate_id=candidate_id,
+            include_archived=True,
+        )
 
     def list_candidates(
         self,
@@ -485,6 +493,76 @@ class CandidateManagementService:
         self.db.commit()
         return self._require_candidate(org_id=org_id, workspace_id=workspace_id, candidate_id=candidate.id)
 
+    def _apply_soft_delete(
+        self,
+        *,
+        org_id: UUID,
+        workspace_id: UUID,
+        candidate: Candidate,
+        actor_user_id: UUID | None,
+        actor_role: str | None,
+    ) -> None:
+        """AIR-510/512/513: archive (soft-delete) one candidate, withdraw pipelines, audit."""
+        deleted_at_before = candidate.deleted_at
+        self.repository.soft_delete_candidate(candidate=candidate, deleted_by=actor_user_id)
+        self.repository.update_candidate_fields(
+            candidate,
+            {"status": CandidateStatus.DELETED, "updated_by": actor_user_id},
+        )
+        withdraw_active_pipelines_for_candidate(
+            self.db,
+            candidate_id=candidate.id,
+            organization_id=org_id,
+            actor_user_id=actor_user_id,
+            reason="Candidate removed",
+        )
+        self._insert_audit_log(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            candidate_id=candidate.id,
+            actor_user_id=actor_user_id,
+            actor_role=actor_role,
+            action="candidate_archived",
+            field_name="is_deleted",
+            old_value={"is_deleted": False, "deleted_at": deleted_at_before.isoformat() if deleted_at_before else None},
+            new_value={
+                "is_deleted": True,
+                "deleted_at": candidate.deleted_at.isoformat() if candidate.deleted_at else None,
+            },
+        )
+        self.repository.create_interaction(
+            CandidateInteraction(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                candidate_id=candidate.id,
+                interaction_type=InteractionType.SYSTEM,
+                title="Candidate archived",
+                interaction_metadata={"action": "archive"},
+                actor_user_id=actor_user_id,
+                actor_role=actor_role,
+            )
+        )
+
+    def archive_candidate(
+        self,
+        *,
+        org_id: UUID,
+        workspace_id: UUID,
+        candidate_id: UUID,
+        actor_user_id: UUID | None,
+        actor_role: str | None,
+    ) -> None:
+        """AIR-510: Archive (soft-delete) — sets is_deleted, deleted_at, deleted_by."""
+        candidate = self._require_candidate(org_id=org_id, workspace_id=workspace_id, candidate_id=candidate_id)
+        self._apply_soft_delete(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            candidate=candidate,
+            actor_user_id=actor_user_id,
+            actor_role=actor_role,
+        )
+        self.db.commit()
+
     def soft_delete_candidate(
         self,
         *,
@@ -494,21 +572,71 @@ class CandidateManagementService:
         actor_user_id: UUID | None,
         actor_role: str | None,
     ) -> None:
-        candidate = self._require_candidate(org_id=org_id, workspace_id=workspace_id, candidate_id=candidate_id)
-        self.repository.soft_delete_candidate(candidate=candidate, deleted_by=actor_user_id)
-        self.repository.update_candidate_fields(candidate, {"status": CandidateStatus.DELETED, "updated_by": actor_user_id})
+        """Backward-compatible alias for archive_candidate."""
+        self.archive_candidate(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            candidate_id=candidate_id,
+            actor_user_id=actor_user_id,
+            actor_role=actor_role,
+        )
+
+    def restore_candidate(
+        self,
+        *,
+        org_id: UUID,
+        workspace_id: UUID,
+        candidate_id: UUID,
+        actor_user_id: UUID | None,
+        actor_role: str | None,
+    ) -> Candidate:
+        """AIR-512: Admin restore — clears soft-delete flags (is_deleted / deleted_at)."""
+        if not self._is_admin_role(actor_role):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required.")
+        candidate = self.repository.get_candidate_by_id(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            candidate_id=candidate_id,
+            include_deleted=True,
+        )
+        if candidate is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found.")
+        if candidate.deleted_at is None and str(candidate.status) != CandidateStatus.DELETED.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Candidate is not deleted.",
+            )
+        deleted_at_before = candidate.deleted_at.isoformat() if candidate.deleted_at else None
+        self.repository.restore_candidate(candidate=candidate)
+        self.repository.update_candidate_fields(
+            candidate,
+            {"status": CandidateStatus.ACTIVE, "updated_by": actor_user_id},
+        )
         self._insert_audit_log(
             org_id=org_id,
             workspace_id=workspace_id,
             candidate_id=candidate.id,
             actor_user_id=actor_user_id,
             actor_role=actor_role,
-            action="candidate_soft_deleted",
-            field_name="deleted_at",
-            old_value=None,
-            new_value={"value": candidate.deleted_at.isoformat() if candidate.deleted_at else None},
+            action="candidate_restored",
+            field_name="is_deleted",
+            old_value={"is_deleted": True, "deleted_at": deleted_at_before},
+            new_value={"is_deleted": False, "deleted_at": None},
+        )
+        self.repository.create_interaction(
+            CandidateInteraction(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                candidate_id=candidate.id,
+                interaction_type=InteractionType.SYSTEM,
+                title="Candidate restored",
+                interaction_metadata={"action": "restore"},
+                actor_user_id=actor_user_id,
+                actor_role=actor_role,
+            )
         )
         self.db.commit()
+        return self._require_candidate(org_id=org_id, workspace_id=workspace_id, candidate_id=candidate.id)
 
     def hard_delete_candidate(
         self,
@@ -653,22 +781,12 @@ class CandidateManagementService:
         deleted = 0
         for candidate_id in payload.candidate_ids:
             candidate = self._require_candidate(org_id=org_id, workspace_id=workspace_id, candidate_id=candidate_id)
-            self.repository.soft_delete_candidate(candidate=candidate, deleted_by=actor_user_id)
-            self.repository.update_candidate_fields(
-                candidate,
-                {"status": CandidateStatus.DELETED, "updated_by": actor_user_id},
-            )
-            self.repository.create_interaction(
-                CandidateInteraction(
-                    org_id=org_id,
-                    workspace_id=workspace_id,
-                    candidate_id=candidate.id,
-                    interaction_type=InteractionType.SYSTEM,
-                    title="Candidate soft deleted",
-                    interaction_metadata={"action": "bulk_soft_delete"},
-                    actor_user_id=actor_user_id,
-                    actor_role=actor_role,
-                )
+            self._apply_soft_delete(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                candidate=candidate,
+                actor_user_id=actor_user_id,
+                actor_role=actor_role,
             )
             deleted += 1
         self.db.commit()
@@ -735,6 +853,8 @@ class CandidateManagementService:
         actor_role: str | None,
         payload: CandidateBulkDeleteRequest,
     ) -> int:
+        if not self._is_admin_role(actor_role):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required.")
         unarchived = 0
         for candidate_id in payload.candidate_ids:
             candidate = self.repository.get_candidate_by_id(
@@ -745,10 +865,24 @@ class CandidateManagementService:
             )
             if candidate is None:
                 continue
+            if candidate.deleted_at is None and str(candidate.status) != CandidateStatus.DELETED.value:
+                continue
+            deleted_at_before = candidate.deleted_at.isoformat() if candidate.deleted_at else None
             self.repository.restore_candidate(candidate=candidate)
             self.repository.update_candidate_fields(
                 candidate,
                 {"status": CandidateStatus.ACTIVE, "updated_by": actor_user_id},
+            )
+            self._insert_audit_log(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                candidate_id=candidate.id,
+                actor_user_id=actor_user_id,
+                actor_role=actor_role,
+                action="candidate_restored",
+                field_name="is_deleted",
+                old_value={"is_deleted": True, "deleted_at": deleted_at_before},
+                new_value={"is_deleted": False, "deleted_at": None},
             )
             self.repository.create_interaction(
                 CandidateInteraction(
@@ -756,7 +890,7 @@ class CandidateManagementService:
                     workspace_id=workspace_id,
                     candidate_id=candidate.id,
                     interaction_type=InteractionType.SYSTEM,
-                    title="Candidate unarchived",
+                    title="Candidate restored",
                     interaction_metadata={"action": "bulk_unarchive"},
                     actor_user_id=actor_user_id,
                     actor_role=actor_role,
@@ -885,6 +1019,7 @@ class CandidateManagementService:
             workspace_id=workspace_id,
             candidate_id=candidate_id,
             with_skills=False,
+            include_archived=True,
         )
         return self.repository.list_interactions(
             org_id=org_id,
@@ -892,6 +1027,163 @@ class CandidateManagementService:
             candidate_id=candidate_id,
             limit=limit,
             offset=offset,
+        )
+
+    # -------------------------------
+    # Candidate notes (AIR-38) — note interactions with optional soft-hide
+    # -------------------------------
+
+    @staticmethod
+    def _interaction_is_note(interaction: CandidateInteraction) -> bool:
+        t = interaction.interaction_type
+        if isinstance(t, InteractionType):
+            return t == InteractionType.NOTE
+        return str(t).lower() == InteractionType.NOTE.value
+
+    @staticmethod
+    def _note_is_hidden(metadata: dict[str, Any] | None) -> bool:
+        return bool(isinstance(metadata, dict) and metadata.get("hidden") is True)
+
+    @staticmethod
+    def _is_admin_role(role: str | None) -> bool:
+        return (role or "").strip().lower() in {"admin", "agency_admin"}
+
+    def _interaction_to_note(
+        self,
+        interaction: CandidateInteraction,
+        *,
+        author_email: str | None = None,
+    ) -> dict[str, Any]:
+        from app.candidate_management.schemas import NoteResponse
+
+        meta = interaction.interaction_metadata if isinstance(interaction.interaction_metadata, dict) else {}
+        return NoteResponse(
+            id=interaction.id,
+            candidate_id=interaction.candidate_id,
+            content=(interaction.body or "").strip(),
+            author_user_id=interaction.actor_user_id,
+            author_email=author_email,
+            author_role=interaction.actor_role,
+            created_at=interaction.created_at,
+            hidden=self._note_is_hidden(meta),
+        ).model_dump()
+
+    def _author_emails_for_notes(
+        self,
+        interactions: list[CandidateInteraction],
+        *,
+        org_id: UUID,
+    ) -> dict[UUID, str]:
+        from app.models.profile import Profile
+
+        user_ids = {i.actor_user_id for i in interactions if i.actor_user_id is not None}
+        if not user_ids:
+            return {}
+        rows = self.db.execute(
+            select(Profile.id, Profile.email).where(
+                Profile.organization_id == org_id,
+                Profile.id.in_(user_ids),
+            )
+        ).all()
+        return {row[0]: row[1] for row in rows}
+
+    def add_note(
+        self,
+        *,
+        org_id: UUID,
+        workspace_id: UUID,
+        candidate_id: UUID,
+        actor_user_id: UUID,
+        actor_role: str | None,
+        content: str,
+    ) -> dict[str, Any]:
+        text = content.strip()
+        if not text:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Note content cannot be empty.",
+            )
+        interaction = self.add_interaction(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            candidate_id=candidate_id,
+            actor_user_id=actor_user_id,
+            actor_role=actor_role,
+            payload=InteractionCreate(
+                interaction_type=InteractionTypeSchema.NOTE,
+                title="Candidate note",
+                body=text,
+            ),
+        )
+        email_map = self._author_emails_for_notes([interaction], org_id=org_id)
+        return self._interaction_to_note(
+            interaction,
+            author_email=email_map.get(interaction.actor_user_id) if interaction.actor_user_id else None,
+        )
+
+    def list_notes(
+        self,
+        *,
+        org_id: UUID,
+        workspace_id: UUID,
+        candidate_id: UUID,
+        viewer_role: str | None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        interactions = self.repository.list_interactions(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            candidate_id=candidate_id,
+            limit=500,
+            offset=0,
+        )
+        notes_only = [i for i in interactions if self._interaction_is_note(i)]
+        include_hidden = self._is_admin_role(viewer_role)
+        if not include_hidden:
+            notes_only = [i for i in notes_only if not self._note_is_hidden(i.interaction_metadata)]
+        email_map = self._author_emails_for_notes(notes_only, org_id=org_id)
+        items = [
+            self._interaction_to_note(
+                i,
+                author_email=email_map.get(i.actor_user_id) if i.actor_user_id else None,
+            )
+            for i in notes_only
+        ]
+        total = len(items)
+        page = items[offset : offset + limit]
+        return page, total
+
+    def soft_hide_note(
+        self,
+        *,
+        org_id: UUID,
+        workspace_id: UUID,
+        candidate_id: UUID,
+        note_id: UUID,
+        actor_user_id: UUID,
+    ) -> dict[str, Any]:
+        """AIR-508: Admin-only soft-hide — sets metadata.hidden on the note interaction."""
+        interaction = self.repository.get_interaction_by_id(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            candidate_id=candidate_id,
+            interaction_id=note_id,
+        )
+        if interaction is None or not self._interaction_is_note(interaction):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found.")
+        meta = dict(interaction.interaction_metadata or {})
+        meta["hidden"] = True
+        meta["hidden_at"] = datetime.now(timezone.utc).isoformat()
+        meta["hidden_by"] = str(actor_user_id)
+        interaction.interaction_metadata = meta
+        self.db.add(interaction)
+        self.db.commit()
+        self.db.refresh(interaction)
+        email_map = self._author_emails_for_notes([interaction], org_id=org_id)
+        return self._interaction_to_note(
+            interaction,
+            author_email=email_map.get(interaction.actor_user_id) if interaction.actor_user_id else None,
         )
 
     # -------------------------------
@@ -1272,12 +1564,13 @@ class CandidateManagementService:
         workspace_id: UUID,
         candidate_id: UUID,
         with_skills: bool = True,
+        include_archived: bool = False,
     ) -> Candidate:
         candidate = self.repository.get_candidate_by_id(
             org_id=org_id,
             workspace_id=workspace_id,
             candidate_id=candidate_id,
-            include_deleted=False,
+            include_deleted=include_archived,
             with_skills=with_skills,
         )
         if candidate is None:

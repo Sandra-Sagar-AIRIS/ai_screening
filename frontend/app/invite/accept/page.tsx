@@ -1,12 +1,12 @@
 "use client";
 
-import { FormEvent, Suspense, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { PasswordField } from "@/components/auth/password-field";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api/client";
-import { acceptInvite } from "@/lib/api/invites";
+import { acceptInvite, openInvite } from "@/lib/api/invites";
 
 function AcceptInviteForm() {
   const router = useRouter();
@@ -15,6 +15,13 @@ function AcceptInviteForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // F-INV-05: mark invite as 'opened' when recipient lands on this page
+  useEffect(() => {
+    if (token) {
+      void openInvite(token);
+    }
+  }, [token]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
