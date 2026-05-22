@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Loader2,
   Mic,
+  MicOff,
   RefreshCw,
   Send,
   Sparkles,
@@ -265,9 +266,21 @@ export function CopilotPanel({ interviewId }: { interviewId: string }) {
   const [transcriptSpeaker, setTranscriptSpeaker] = useState<"interviewer" | "candidate">("interviewer");
   const [addingSegment, setAddingSegment] = useState(false);
 
+  // Auto-transcription (Web Speech API)
+  const [autoTranscribeOn, setAutoTranscribeOn] = useState(false);
+  const [autoTranscribeError, setAutoTranscribeError] = useState<string | null>(null);
+
   const wsRef = useRef<WebSocket | null>(null);
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Ref to track auto-transcribe state inside event handler closures
+  const autoTranscribeOnRef = useRef(false);
+  // Refs to cancel in-flight suggestion/summary polling loops
+  const suggestPollRef = useRef<{ cancelled: boolean } | null>(null);
+  const summaryPollRef = useRef<{ cancelled: boolean } | null>(null);
+  // Ref to the active SpeechRecognition instance
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   // ── Load session + initial data ───────────────────────────────────────────
 
@@ -347,20 +360,58 @@ export function CopilotPanel({ interviewId }: { interviewId: string }) {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcript]);
 
+  // Keep ref in sync so SpeechRecognition's onend can check without stale closure
+  useEffect(() => {
+    autoTranscribeOnRef.current = autoTranscribeOn;
+  }, [autoTranscribeOn]);
+
+  // Cancel in-flight polls and stop recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (suggestPollRef.current) suggestPollRef.current.cancelled = true;
+      if (summaryPollRef.current) summaryPollRef.current.cancelled = true;
+      recognitionRef.current?.stop();
+    };
+  }, []);
+
   // ── Actions ───────────────────────────────────────────────────────────────
 
   const handleRequestSuggestions = async () => {
     setSuggestLoading(true);
+    const prevCount = suggestions.length;
     try {
       await requestSuggestions(interviewId, { count: 3 });
-      // Poll after short delay (background task takes ~1-3s)
-      setTimeout(async () => {
-        const updated = await getSuggestions(interviewId).catch(() => []);
-        setSuggestions(updated);
-        setSuggestLoading(false);
-      }, 3000);
     } catch {
       setSuggestLoading(false);
+      return;
+    }
+
+    // Cancel any existing poll loop then start a new one.
+    // Poll every 2s up to 10 times (20s total). Stop as soon as new
+    // suggestions appear — the WS event will usually beat the timer.
+    if (suggestPollRef.current) suggestPollRef.current.cancelled = true;
+    const poll = { cancelled: false };
+    suggestPollRef.current = poll;
+
+    for (let i = 0; i < 10 && !poll.cancelled; i++) {
+      await new Promise<void>((r) => setTimeout(r, 2000));
+      if (poll.cancelled) return;
+      const updated = await getSuggestions(interviewId).catch(() => null);
+      if (poll.cancelled) return;
+      if (updated !== null && updated.length > prevCount) {
+        setSuggestions(updated);
+        setSuggestLoading(false);
+        suggestPollRef.current = null;
+        return;
+      }
+    }
+
+    // Timed out — do a final fetch so the list is at least up to date
+    if (!poll.cancelled) {
+      const final = await getSuggestions(interviewId).catch(() => [] as typeof suggestions);
+      setSuggestions(final);
+      setSuggestLoading(false);
+      suggestPollRef.current = null;
     }
   };
 
@@ -381,6 +432,82 @@ export function CopilotPanel({ interviewId }: { interviewId: string }) {
       // silent
     }
   };
+
+  // ── Auto-transcription (Web Speech API) ────────────────────────────────────
+
+  function toggleAutoTranscribe() {
+    if (autoTranscribeOn) {
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+      setAutoTranscribeOn(false);
+      setAutoTranscribeError(null);
+      return;
+    }
+
+    // Cross-browser constructor (Chrome/Edge ship it as webkitSpeechRecognition)
+    type SpeechRecognitionCtor = new () => SpeechRecognition;
+    const Ctor: SpeechRecognitionCtor | undefined =
+      (typeof window !== "undefined" &&
+        ((window as unknown as { SpeechRecognition?: SpeechRecognitionCtor }).SpeechRecognition ??
+          (window as unknown as { webkitSpeechRecognition?: SpeechRecognitionCtor }).webkitSpeechRecognition)) ||
+      undefined;
+
+    if (!Ctor) {
+      setAutoTranscribeError("Speech recognition is not supported in this browser. Use Chrome or Edge.");
+      return;
+    }
+
+    setAutoTranscribeError(null);
+    const recognition = new Ctor();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          const text = event.results[i][0].transcript.trim();
+          if (!text) continue;
+          // Fire-and-forget: save to backend and append to local state
+          void (async () => {
+            try {
+              const seg = await addTranscriptSegment(interviewId, {
+                speaker: "interviewer",
+                content: text,
+                source: "speech",
+              });
+              setTranscript((prev) => [...prev, seg]);
+            } catch {
+              // silent — transcript still shown locally via interim state
+            }
+          })();
+        }
+      }
+    };
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      if (event.error === "no-speech") return; // not a real error — browser stopped on silence
+      setAutoTranscribeOn(false);
+      autoTranscribeOnRef.current = false;
+      recognitionRef.current = null;
+      setAutoTranscribeError(
+        event.error === "not-allowed"
+          ? "Microphone access denied. Allow mic permission and try again."
+          : `Speech recognition error: ${event.error}`,
+      );
+    };
+
+    recognition.onend = () => {
+      // Browser stops recognition after silence; restart automatically if still active
+      if (autoTranscribeOnRef.current && recognitionRef.current) {
+        try { recognition.start(); } catch { /* already running or page hidden */ }
+      }
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+    setAutoTranscribeOn(true);
+  }
 
   const handleAddTranscript = async () => {
     if (!transcriptInput.trim()) return;
@@ -404,14 +531,37 @@ export function CopilotPanel({ interviewId }: { interviewId: string }) {
     setSummaryLoading(true);
     try {
       await requestSummary(interviewId);
-      // Poll after delay
-      setTimeout(async () => {
-        const sess = await startCopilotSession(interviewId).catch(() => null);
-        if (sess) setSession(sess);
-        setSummaryLoading(false);
-      }, 5000);
     } catch {
       setSummaryLoading(false);
+      return;
+    }
+
+    // Cancel any existing poll loop then start a new one.
+    // Poll every 3s up to 12 times (36s total). Stop as soon as the summary
+    // appears — the WS event will usually beat the timer.
+    if (summaryPollRef.current) summaryPollRef.current.cancelled = true;
+    const poll = { cancelled: false };
+    summaryPollRef.current = poll;
+
+    for (let i = 0; i < 12 && !poll.cancelled; i++) {
+      await new Promise<void>((r) => setTimeout(r, 3000));
+      if (poll.cancelled) return;
+      const sess = await startCopilotSession(interviewId).catch(() => null);
+      if (poll.cancelled) return;
+      if (sess?.summary) {
+        setSession(sess);
+        setSummaryLoading(false);
+        summaryPollRef.current = null;
+        return;
+      }
+    }
+
+    // Timed out — do a final fetch anyway
+    if (!poll.cancelled) {
+      const sess = await startCopilotSession(interviewId).catch(() => null);
+      if (sess) setSession(sess);
+      setSummaryLoading(false);
+      summaryPollRef.current = null;
     }
   };
 
@@ -584,6 +734,36 @@ export function CopilotPanel({ interviewId }: { interviewId: string }) {
 
             {/* Add segment form */}
             <div className="shrink-0 border-t border-gray-100 p-2 space-y-2 bg-gray-50">
+              {/* Auto-transcribe toggle */}
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-gray-400">Auto-transcribe your mic</span>
+                <button
+                  onClick={toggleAutoTranscribe}
+                  className={`flex items-center gap-1 rounded px-2 py-1 text-[10px] font-semibold transition-colors ${
+                    autoTranscribeOn
+                      ? "bg-red-500 text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                  title={autoTranscribeOn ? "Stop auto-transcription" : "Start auto-transcription (mic → transcript)"}
+                >
+                  {autoTranscribeOn ? (
+                    <>
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                      <MicOff className="w-3 h-3" />
+                      Stop
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="w-3 h-3" />
+                      Live
+                    </>
+                  )}
+                </button>
+              </div>
+              {autoTranscribeError && (
+                <p className="text-[10px] text-red-500 leading-tight">{autoTranscribeError}</p>
+              )}
+
               <div className="flex gap-1">
                 {(["interviewer", "candidate"] as const).map((sp) => (
                   <button

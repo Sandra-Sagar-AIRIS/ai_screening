@@ -63,13 +63,21 @@ export type InviteAcceptResponse = {
   message: string;
 };
 
+export type InviteStatus = "sent" | "opened" | "accepted" | "expired";
+
 export type InviteListItem = {
   id: string;
   email: string;
   role: string;
-  status: "pending" | "accepted";
+  /** F-INV-05: full lifecycle status */
+  status: InviteStatus;
   created_at: string;
   expires_at: string;
+  /** F-INV-05: per-transition timestamps (null until transition occurs) */
+  sent_at: string | null;
+  opened_at: string | null;
+  accepted_at: string | null;
+  expired_at: string | null;
 };
 
 export type InviteResendResponse = {
@@ -1055,4 +1063,29 @@ export type OfferRespondPayload = {
   response: OfferResponseStatus;
   decline_reason?: string;
   revert_to_previous_stage?: boolean;
+};
+
+// ── AI-003: Interview question generation ─────────────────────────────────────
+
+export type InterviewQuestionCategory = "technical" | "behavioural" | "situational";
+
+export type InterviewQuestion = {
+  category: InterviewQuestionCategory;
+  question_text: string;
+  follow_up_probe: string | null;
+  ideal_answer_traits: string[];
+};
+
+export type GenerateQuestionsRequest = {
+  job_title: string;
+  job_description: string;
+  required_skills: string[];
+};
+
+export type GenerateQuestionsResponse = {
+  questions: InterviewQuestion[];
+  questions_by_category: Record<InterviewQuestionCategory, number>;
+  provider_used: string;
+  fallback_used: boolean;
+  duration_ms: number;
 };

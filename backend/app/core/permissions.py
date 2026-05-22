@@ -47,6 +47,8 @@ AI_SCREENING_UPDATE = "ai_screening:update"
 AI_SCREENING_DELETE = "ai_screening:delete"
 AI_SCREENING_EVALUATE = "ai_screening:evaluate"
 
+AI_INTERVIEW_QUESTIONS_GENERATE = "ai_interview_questions:generate"
+
 # Vendor-scoped permissions.
 SUBMISSIONS_CREATE = "submissions:create"
 SUBMISSIONS_READ_OWN = "submissions:read_own"
@@ -91,6 +93,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     AI_SCREENING_EVALUATE,
     SUBMISSIONS_CREATE,
     SUBMISSIONS_READ_OWN,
+    AI_INTERVIEW_QUESTIONS_GENERATE,
 )
 
 

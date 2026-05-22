@@ -43,6 +43,8 @@ _RECRUITER_DEFAULTS: tuple[str, ...] = (
     "interviews:claim",
     "interviews:panel",
     "interviews:copilot",
+    # AI Interview Questions (AI-003)
+    "ai_interview_questions:generate",
     # Client workspace (WS-002)
     "clients:create",
     "clients:read",

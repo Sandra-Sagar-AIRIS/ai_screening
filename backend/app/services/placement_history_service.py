@@ -166,6 +166,94 @@ class PlacementHistoryService:
                 reasons[job_id] = text
         return reasons
 
+    def _enrich_from_active_pipelines(
+        self,
+        *,
+        candidate_id: UUID,
+        organization_id: UUID,
+        items: list[CandidatePlacementResponse],
+    ) -> list[CandidatePlacementResponse]:
+        """Show current pipeline stage per job when no placement row exists yet (legacy pipelines)."""
+        jobs_with_rows = {item.job_id for item in items}
+        stmt = (
+            select(Pipeline, Job.title)
+            .join(Job, Job.id == Pipeline.job_id)
+            .where(
+                Pipeline.candidate_id == candidate_id,
+                Pipeline.organization_id == organization_id,
+                Job.organization_id == organization_id,
+            )
+        )
+        for pipeline, job_title in self.db.execute(stmt).all():
+            if pipeline.job_id in jobs_with_rows:
+                continue
+            normalized = (pipeline.stage or "").strip().lower()
+            if normalized not in PLACEMENT_OUTCOMES:
+                continue
+            try:
+                outcome = PlacementOutcome(normalized)
+            except ValueError:
+                continue
+            when = pipeline.stage_updated_at or pipeline.updated_at or pipeline.created_at
+            items.append(
+                CandidatePlacementResponse(
+                    id=pipeline.id,
+                    candidate_id=candidate_id,
+                    job_id=pipeline.job_id,
+                    job_title=job_title or "Unknown Job",
+                    outcome=outcome,
+                    placement_date=when,
+                    created_at=pipeline.created_at,
+                )
+            )
+            jobs_with_rows.add(pipeline.job_id)
+        return items
+
+    def _enrich_from_stage_history(
+        self,
+        *,
+        candidate_id: UUID,
+        organization_id: UUID,
+        items: list[CandidatePlacementResponse],
+    ) -> list[CandidatePlacementResponse]:
+        """Backfill display rows from immutable pipeline_stage_history when placement rows are missing."""
+        seen: set[tuple[UUID, str]] = {(item.job_id, item.outcome.value) for item in items}
+        stmt = (
+            select(PipelineStageHistory, Pipeline.job_id, Job.title)
+            .join(Pipeline, PipelineStageHistory.pipeline_id == Pipeline.id)
+            .join(Job, Job.id == Pipeline.job_id)
+            .where(
+                Pipeline.candidate_id == candidate_id,
+                Pipeline.organization_id == organization_id,
+                Job.organization_id == organization_id,
+            )
+            .order_by(PipelineStageHistory.transitioned_at.desc())
+        )
+        for history_row, job_id, job_title in self.db.execute(stmt).all():
+            normalized = (history_row.new_stage or "").strip().lower()
+            if normalized not in PLACEMENT_OUTCOMES:
+                continue
+            key = (job_id, normalized)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                outcome = PlacementOutcome(normalized)
+            except ValueError:
+                continue
+            items.append(
+                CandidatePlacementResponse(
+                    id=history_row.id,
+                    candidate_id=candidate_id,
+                    job_id=job_id,
+                    job_title=job_title or "Unknown Job",
+                    outcome=outcome,
+                    placement_date=history_row.transitioned_at,
+                    created_at=history_row.transitioned_at,
+                )
+            )
+        return items
+
     def list_for_candidate(
         self,
         *,
@@ -230,5 +318,20 @@ class PlacementHistoryService:
                 else item
                 for item in items
             ]
+
+        items = self._enrich_from_stage_history(
+            candidate_id=candidate_id,
+            organization_id=organization_id,
+            items=items,
+        )
+        items = self._enrich_from_active_pipelines(
+            candidate_id=candidate_id,
+            organization_id=organization_id,
+            items=items,
+        )
+        items.sort(
+            key=lambda row: (row.placement_date, row.created_at),
+            reverse=True,
+        )
 
         return CandidatePlacementListResponse(data=items, total=len(items))

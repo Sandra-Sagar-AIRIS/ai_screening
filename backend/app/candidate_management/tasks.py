@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from celery import Celery
 from sqlalchemy.orm import Session
 
 from app.candidate_management.ai_adapter import HttpAIService
@@ -13,16 +11,8 @@ from app.candidate_management.models import BulkUploadItemStatus, BulkUploadStat
 from app.candidate_management.repository import CandidateRepository
 from app.candidate_management.schemas import ResumeUploadRequest
 from app.candidate_management.service import CandidateManagementService
+from app.celery_app import QUEUE_AI, celery_app  # INFRA-006: use shared app
 from app.db.session import SessionLocal
-
-
-def _build_celery_app() -> Celery:
-    broker_url = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
-    backend_url = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
-    return Celery("candidate_management", broker=broker_url, backend=backend_url)
-
-
-celery_app = _build_celery_app()
 
 
 def _now_utc() -> datetime:
@@ -55,7 +45,7 @@ def _set_job_completed_if_finished(
     )
 
 
-@celery_app.task(name="candidate_management.process_bulk_upload_item", bind=True, max_retries=3, default_retry_delay=10)
+@celery_app.task(name="candidate_management.process_bulk_upload_item", bind=True, max_retries=3, default_retry_delay=10, queue=QUEUE_AI)
 def process_bulk_upload_item(
     self,
     *,
@@ -198,10 +188,13 @@ class CeleryTaskEnqueuer:
     """Service adapter that enqueues per-item bulk upload tasks."""
 
     def enqueue_bulk_upload_item(self, *, job_id: UUID, item_id: UUID, org_id: UUID, workspace_id: UUID) -> None:
-        process_bulk_upload_item.delay(
-            job_id=str(job_id),
-            item_id=str(item_id),
-            org_id=str(org_id),
-            workspace_id=str(workspace_id),
+        process_bulk_upload_item.apply_async(
+            kwargs={
+                "job_id": str(job_id),
+                "item_id": str(item_id),
+                "org_id": str(org_id),
+                "workspace_id": str(workspace_id),
+            },
+            queue=QUEUE_AI,
         )
 

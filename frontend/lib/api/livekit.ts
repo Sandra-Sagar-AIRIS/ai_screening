@@ -30,3 +30,21 @@ export async function getLiveKitToken(
     0, // no cache — tokens must always be fresh
   );
 }
+
+/**
+ * Request a guest LiveKit token for a candidate to join the meeting.
+ * No authentication required — open endpoint keyed only by the interview UUID.
+ */
+export async function getLiveKitGuestToken(
+  interviewId: string,
+  name: string,
+): Promise<LiveKitTokenResponse> {
+  return apiRequest<LiveKitTokenResponse>(
+    `/interviews/${interviewId}/livekit/guest-token`,
+    {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    },
+    0,
+  );
+}

@@ -1,0 +1,47 @@
+# INFRA-006: Development services for AIRIS async job processing.
+#
+# Starts:
+#   redis   — Celery broker (DB 0) + result backend (DB 1)
+#   flower  — Celery task monitor UI at http://localhost:5555
+#
+# Usage:
+#   docker compose up -d
+#   # Then in a separate terminal launch the Celery worker:
+#   celery -A app.celery_app.celery_app worker --loglevel=info -Q ai,email,notifications,integrations,background -c 4
+#   # And optionally the beat scheduler:
+#   celery -A app.celery_app.celery_app beat --loglevel=info
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: airis-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+
+  flower:
+    image: mher/flower:2.0
+    container_name: airis-flower
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "5555:5555"
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      FLOWER_BASIC_AUTH: ""          # Set to "user:password" to enable auth
+      FLOWER_PORT: "5555"
+    command: celery --broker=redis://redis:6379/0 flower --port=5555
+
+volumes:
+  redis_data:

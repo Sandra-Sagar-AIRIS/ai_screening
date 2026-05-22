@@ -242,6 +242,22 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ASSEMBLYAI_API_KEY", "assemblyai_api_key"),
     )
 
+    # ── Celery / Redis (INFRA-006) ────────────────────────────────────────────
+    celery_broker_url: str = Field(
+        default="redis://localhost:6379/0",
+        validation_alias=AliasChoices("CELERY_BROKER_URL", "celery_broker_url"),
+    )
+    celery_result_backend: str = Field(
+        default="redis://localhost:6379/1",
+        validation_alias=AliasChoices("CELERY_RESULT_BACKEND", "celery_result_backend"),
+    )
+    # Set to "true" to route tasks through Celery workers instead of the
+    # in-process ThreadPoolExecutor fallback. Keep false in dev without Redis.
+    celery_dispatch_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("CELERY_DISPATCH_ENABLED", "celery_dispatch_enabled"),
+    )
+
     # ── API Documentation ─────────────────────────────────────────────────────
     # Override default env-based docs visibility.
     # True  → always serve /docs and /redoc.

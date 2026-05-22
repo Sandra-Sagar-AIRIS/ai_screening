@@ -796,6 +796,8 @@ export default function CandidateDetailPage() {
     setUpdatingPipelineId(pipelineId);
     try {
       await transitionPipelineStage(pipelineId, { stage: nextStage });
+      invalidateApiCache(`/candidates/${candidate.id}/placements`);
+      setPlacementRefreshToken((t) => t + 1);
       const linkedPipelines = await getPipelines(200, 0, undefined, candidate.id);
       setPipelines(linkedPipelines);
       await refreshInterviewData();

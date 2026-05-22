@@ -32,3 +32,18 @@ export async function resendInvite(inviteId: string) {
     method: "POST",
   });
 }
+
+/**
+ * F-INV-05: Mark an invite as 'opened' when the recipient visits the accept page.
+ * Fires GET /invites/open?token=<token>. Returns 204. Safe to ignore errors.
+ */
+export async function openInvite(token: string): Promise<void> {
+  try {
+    await apiRequest<void>(`/invites/open?token=${encodeURIComponent(token)}`, {
+      method: "GET",
+      auth: false,
+    });
+  } catch {
+    // Non-critical — lifecycle tracking failure should not block the UI
+  }
+}

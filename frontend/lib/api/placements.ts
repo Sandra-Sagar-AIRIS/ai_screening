@@ -36,6 +36,6 @@ export async function getCandidatePlacements(
   return apiRequest<CandidatePlacementListResponse>(
     path,
     { silentErrors: true },
-    options?.skipCache ? 0 : undefined
+    0
   );
 }
