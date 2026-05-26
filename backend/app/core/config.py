@@ -242,6 +242,15 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ASSEMBLYAI_API_KEY", "assemblyai_api_key"),
     )
 
+    # ── Transcription provider selection ────────────────────────────────────────
+    # Controls which backend is used for the /copilot/transcribe-audio endpoint.
+    # "whisper"  (default) — OpenAI Whisper; requires OPENAI_API_KEY.
+    # Future values: "assemblyai-batch", "deepgram", etc.
+    transcription_provider: str = Field(
+        default="whisper",
+        validation_alias=AliasChoices("TRANSCRIPTION_PROVIDER", "transcription_provider"),
+    )
+
     # ── Celery / Redis (INFRA-006) ────────────────────────────────────────────
     celery_broker_url: str = Field(
         default="redis://localhost:6379/0",
