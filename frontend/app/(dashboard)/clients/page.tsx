@@ -95,7 +95,7 @@ export default function ClientsPage() {
             </button>
           </div>
           <ClientWorkspaceForm
-            onSubmit={handleCreate as (p: ClientCreatePayload) => Promise<void>}
+            onSubmit={handleCreate as any}
             onCancel={() => setShowForm(false)}
           />
         </div>

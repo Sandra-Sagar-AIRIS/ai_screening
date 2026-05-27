@@ -1094,3 +1094,27 @@ export type GenerateQuestionsResponse = {
   fallback_used: boolean;
   duration_ms: number;
 };
+
+// Analytics Dashboard
+export interface JobStatusCount { status: string; count: number; }
+export interface ClientJobCount { client_name: string; count: number; }
+export interface RecentJobDto { id: string; title: string; client_name: string; status: string; created_at: string; }
+export interface OpenJobsResponse { total_active: number; by_status: JobStatusCount[]; by_client: ClientJobCount[]; recent_jobs: RecentJobDto[]; }
+
+export interface StageCount { stage: string; count: number; }
+export interface SourceCount { source: string; count: number; }
+export interface PipelineOverviewResponse { total_candidates: number; by_stage: StageCount[]; by_source: SourceCount[]; }
+
+export interface RecruiterActivityMetric { recruiter_name: string; submissions: number; interviews: number; placements: number; }
+export interface RecruiterActivityResponse { total_submissions: number; total_interviews: number; total_placements: number; by_recruiter: RecruiterActivityMetric[]; }
+export interface TimeToShortlistResponse { average_days: number; fastest_days: number; slowest_days: number; }
+export interface PlacementMetric { name: string; count: number; }
+export interface PlacementTrackingResponse { total_placements: number; by_recruiter: PlacementMetric[]; by_client: PlacementMetric[]; }
+
+export interface DashboardSummaryResponse {
+  open_jobs: OpenJobsResponse;
+  pipeline: PipelineOverviewResponse;
+  recruiter_activity: RecruiterActivityResponse;
+  time_to_shortlist: TimeToShortlistResponse;
+  placement_tracking: PlacementTrackingResponse;
+}
