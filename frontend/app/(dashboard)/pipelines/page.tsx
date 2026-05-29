@@ -1000,6 +1000,10 @@ export default function PipelineWorkspacePage() {
         offset,
         jobId: filterJobId || undefined,
         candidateId: filterCandidateId || undefined,
+        // Pass client_id to backend for server-side filtering (table view).
+        // This ensures admin and recruiter both get correct client-scoped results
+        // without client-side guessing.
+        clientId: selectedClientId || undefined,
         stage: (filterStage as PipelineStage) || undefined,
         status: (filterStatus as PipelineStatus) || undefined,
         sortBy,
@@ -1014,7 +1018,7 @@ export default function PipelineWorkspacePage() {
     } finally {
       setTableLoading(false);
     }
-  }, [limit, offset, filterJobId, filterCandidateId, filterStage, filterStatus, sortBy, sortDir]);
+  }, [limit, offset, filterJobId, filterCandidateId, selectedClientId, filterStage, filterStatus, sortBy, sortDir]);
 
   useEffect(() => {
     if (view === "table") {
@@ -1023,16 +1027,47 @@ export default function PipelineWorkspacePage() {
   }, [view, loadTablePipelines]);
 
   // ── Derived: client filter options ───────────────────────────────────────────
+  // Built from three sources (in priority order):
+  //  1. pipeline.client_name/client_id — embedded by the backend list endpoint
+  //  2. job.client_name — embedded in the jobs response
+  //  3. clientNameById — separately fetched via listAllClients()
+  // Using all three sources ensures client options appear even when the jobs list
+  // is scoped (e.g. a recruiter who doesn't directly see Default Client jobs but
+  // whose pipelines still reference them).
   const clientFilterOptions = useMemo(() => {
-    const ids = Array.from(
-      new Set(jobs.map((j) => j.client_id).filter((id): id is string => Boolean(id)))
-    );
-    return ids
-      .map((id) => ({ id, label: clientNameById[id]?.trim() || "Unknown client" }))
-      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
-  }, [jobs, clientNameById]);
+    const seen = new Map<string, string>();
 
-  const hasClients = jobs.some((j) => j.client_id);
+    // Source 1: pipeline entries from both table and kanban views.
+    for (const p of [...tablePipelines, ...kanbanPipelines]) {
+      const cid = p.client_id;
+      if (!cid) continue;
+      const label =
+        p.client_name?.trim() ||
+        clientNameById[cid]?.trim() ||
+        `Client ${cid.slice(0, 8)}`;
+      seen.set(cid, label);
+    }
+
+    // Source 2: jobs list (recruiter-scoped but includes Default Client jobs via backend fix).
+    for (const j of jobs) {
+      if (!j.client_id) continue;
+      if (seen.has(j.client_id)) continue; // already set from pipeline — higher fidelity
+      const label =
+        j.client_name?.trim() ||
+        clientNameById[j.client_id]?.trim() ||
+        `Client ${j.client_id.slice(0, 8)}`;
+      seen.set(j.client_id, label);
+    }
+
+    return Array.from(seen.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+  }, [jobs, clientNameById, tablePipelines, kanbanPipelines]);
+
+  const hasClients =
+    jobs.some((j) => j.client_id) ||
+    tablePipelines.some((p) => p.client_id) ||
+    kanbanPipelines.some((p) => p.client_id);
 
   // ── Derived: kanban grouped board ────────────────────────────────────────────
   const candidateMap = useMemo(
@@ -1543,18 +1578,34 @@ export default function PipelineWorkspacePage() {
                             </Link>
                           </td>
                           <td className="px-5 py-3.5">
-                            {job ? (
-                              <Link
-                                href={`/jobs/${pipeline.job_id}`}
-                                className="text-[13px] font-medium text-slate-700 hover:text-[#FF5A1F] transition-colors truncate block max-w-[200px]"
-                              >
-                                {job.title}
-                              </Link>
-                            ) : (
-                              <span className="font-mono text-[11px] text-slate-400">
-                                {pipeline.job_id.slice(0, 8)}…
-                              </span>
-                            )}
+                            <div className="min-w-0">
+                              {(pipeline.client_name || (job && (job.client_name || clientNameById[job.client_id ?? ""]))) && (
+                                <p className="truncate text-[10px] font-semibold text-orange-500 uppercase tracking-wide mb-0.5">
+                                  {pipeline.client_name ||
+                                    job?.client_name ||
+                                    (job?.client_id ? clientNameById[job.client_id] : null)}
+                                </p>
+                              )}
+                              {job ? (
+                                <Link
+                                  href={`/jobs/${pipeline.job_id}`}
+                                  className="text-[13px] font-medium text-slate-700 hover:text-[#FF5A1F] transition-colors truncate block max-w-[200px]"
+                                >
+                                  {job.title}
+                                </Link>
+                              ) : pipeline.job_title ? (
+                                <Link
+                                  href={`/jobs/${pipeline.job_id}`}
+                                  className="text-[13px] font-medium text-slate-700 hover:text-[#FF5A1F] transition-colors truncate block max-w-[200px]"
+                                >
+                                  {pipeline.job_title}
+                                </Link>
+                              ) : (
+                                <span className="font-mono text-[11px] text-slate-400">
+                                  {pipeline.job_id.slice(0, 8)}…
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-5 py-3.5">
                             <StageBadge stage={pipeline.stage} />
