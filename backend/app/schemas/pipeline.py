@@ -77,6 +77,12 @@ class PipelineResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Denormalized job + client context — batch-loaded by the route layer.
+    # These fields are always None on single-pipeline fetches; populated on list responses.
+    job_title: str | None = None
+    client_id: UUID | None = None
+    client_name: str | None = None
+
     model_config = ConfigDict(from_attributes=True)
 
 

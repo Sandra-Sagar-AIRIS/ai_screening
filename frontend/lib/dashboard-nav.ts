@@ -14,6 +14,7 @@ export const NAV_PERMISSION_CODES = {
   INTERVIEWS_READ: "interviews:read",
   SUBMISSIONS_READ_OWN: "submissions:read_own",
   CLIENTS_READ: "clients:read",
+  CLIENTS_ASSIGN: "clients:assign",
 } as const;
 
 export type SidebarNavItem = {
@@ -69,10 +70,10 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     showInSidebar: false,
   },
   {
-    name: "Pipeline Intelligence",
+    name: "Pipeline Analytics",
     path: "/pipeline-analytics",
     anyOfPermissions: [NAV_PERMISSION_CODES.PIPELINE_READ],
-    showInSidebar: false,
+    adminMayAccess: true,
   },
   {
     name: "Analytics",
@@ -171,8 +172,14 @@ function normalizeRole(role: string | null | undefined) {
   return (role ?? "").trim().toLowerCase();
 }
 
+/**
+ * Returns true for any variant of the admin role key.
+ * Handles "admin", "superadmin", "org_admin", "administrator", and "super_admin"
+ * so that RBAC gating works regardless of how the role was originally seeded.
+ */
 export function isAdminRole(role: string | null | undefined) {
-  return normalizeRole(role) === "admin";
+  const r = normalizeRole(role);
+  return r === "admin" || r === "superadmin" || r === "org_admin" || r === "administrator" || r === "super_admin";
 }
 
 /** Whether the user may see this sidebar entry. */
