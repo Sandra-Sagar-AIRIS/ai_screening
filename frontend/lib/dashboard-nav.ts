@@ -142,9 +142,9 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     anyOfPermissions: [NAV_PERMISSION_CODES.CANDIDATES_READ],
     adminMayAccess: true,
   },
-  // ── AI Screening section ───────────────────────────────────────────────
+  // ── AI Interview section ───────────────────────────────────────────────
   {
-    name: "AI Screenings",
+    name: "AI Interview",
     path: "/ai-screenings",
     anyOfPermissions: [NAV_PERMISSION_CODES.CANDIDATES_READ],
     adminMayAccess: true,

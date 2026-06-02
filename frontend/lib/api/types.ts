@@ -146,7 +146,7 @@ export type Candidate = {
   phone: string | null;
   location: string | null;
   role: string | null;
-  stage?: "applied" | "screening" | "shortlisted" | "interview" | "offered" | "hired" | "rejected";
+  stage?: "applied" | "ai_interview" | "shortlisted" | "interview" | "offered" | "hired" | "rejected";
   job_id?: string | null;
   recruiter_id?: string | null;
   resume_s3_key?: string | null;
@@ -442,7 +442,7 @@ export type AtsPairStatusResponse = {
   enqueue_delay_ms?: number | null;
 };
 
-export type PipelineStage = "applied" | "screening" | "ai_screening" | "interview" | "offer" | "placed" | "rejected";
+export type PipelineStage = "applied" | "ai_interview" | "interview" | "offer" | "placed" | "rejected";
 export type PipelineStatus = "active" | "on_hold" | "withdrawn" | "closed";
 
 export type Pipeline = {
