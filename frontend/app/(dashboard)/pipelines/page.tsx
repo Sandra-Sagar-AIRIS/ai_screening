@@ -83,8 +83,7 @@ type ViewMode = "table" | "kanban";
 // Kanban uses a slightly different stage vocabulary for display.
 type BoardStage =
   | "applied"
-  | "screening"
-  | "ai_screening"
+  | "ai_interview"
   | "interview"
   | "offered"
   | "hired"
@@ -94,8 +93,7 @@ type BoardStage =
 
 const STAGE_LABELS_TABLE: Record<PipelineStage, string> = {
   applied: "Applied",
-  screening: "Screening",
-  ai_screening: "AI Screening",
+  ai_interview: "AI Screening Interview",
   interview: "Interview",
   offer: "Offer",
   placed: "Placed",
@@ -104,8 +102,7 @@ const STAGE_LABELS_TABLE: Record<PipelineStage, string> = {
 
 const STAGE_BADGE: Record<PipelineStage, string> = {
   applied: "bg-violet-50 text-violet-700 border-violet-100",
-  screening: "bg-sky-50 text-sky-700 border-sky-100",
-  ai_screening: "bg-orange-50 text-orange-700 border-orange-100",
+  ai_interview: "bg-orange-50 text-orange-700 border-orange-100",
   interview: "bg-emerald-50 text-emerald-700 border-emerald-100",
   offer: "bg-amber-50 text-amber-700 border-amber-100",
   placed: "bg-cyan-50 text-cyan-700 border-cyan-100",
@@ -128,8 +125,7 @@ const STATUS_LABELS: Record<PipelineStatus, string> = {
 
 const ALL_STAGES: PipelineStage[] = [
   "applied",
-  "screening",
-  "ai_screening",
+  "ai_interview",
   "interview",
   "offer",
   "placed",
@@ -149,8 +145,7 @@ const PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 
 const BOARD_STAGES: BoardStage[] = [
   "applied",
-  "screening",
-  "ai_screening",
+  "ai_interview",
   "interview",
   "offered",
   "hired",
@@ -159,8 +154,7 @@ const BOARD_STAGES: BoardStage[] = [
 
 const BOARD_STAGE_LABELS: Record<BoardStage, string> = {
   applied: "Applied",
-  screening: "Screening",
-  ai_screening: "AI Screening",
+  ai_interview: "AI Screening Interview",
   interview: "Interview",
   offered: "Offered",
   hired: "Hired",
@@ -169,8 +163,7 @@ const BOARD_STAGE_LABELS: Record<BoardStage, string> = {
 
 const BOARD_STAGE_ACCENT: Record<BoardStage, string> = {
   applied: "bg-violet-400",
-  screening: "bg-sky-400",
-  ai_screening: "bg-orange-400",
+  ai_interview: "bg-orange-400",
   interview: "bg-emerald-400",
   offered: "bg-amber-400",
   hired: "bg-cyan-400",
@@ -179,9 +172,8 @@ const BOARD_STAGE_ACCENT: Record<BoardStage, string> = {
 
 // Mirrors backend VALID_TRANSITIONS — prevents guaranteed 422s.
 const VALID_TRANSITIONS: Record<string, ReadonlySet<string>> = {
-  applied: new Set(["screening", "rejected"]),
-  screening: new Set(["interview", "rejected"]),
-  ai_screening: new Set(["interview", "rejected"]),
+  applied: new Set(["ai_interview", "rejected"]),
+  ai_interview: new Set(["interview", "rejected"]),
   interview: new Set(["offer", "rejected"]),
   offer: new Set(["placed", "rejected"]),
   placed: new Set(),

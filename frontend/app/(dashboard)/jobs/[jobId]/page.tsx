@@ -593,7 +593,7 @@ export default function JobDetailPage() {
   const pipelineSummary = {
     total: pipelines.length,
     applied: pipelines.filter((item) => item.stage === "applied").length,
-    screening: pipelines.filter((item) => item.stage === "screening").length,
+    aiInterview: pipelines.filter((item) => item.stage === "ai_interview").length,
     interview: pipelines.filter((item) => item.stage === "interview").length,
     offered: pipelines.filter((item) => item.stage === "offer").length,
     hired: pipelines.filter((item) => item.stage === "placed").length,

@@ -33,9 +33,8 @@ logger = logging.getLogger(__name__)
 # ── PIPE-002: Valid stage transitions ─────────────────────────────────────────
 # Terminal stages (placed, rejected) have no outgoing transitions.
 VALID_TRANSITIONS: dict[str, frozenset[str]] = {
-    PipelineStage.APPLIED.value:      frozenset({PipelineStage.SCREENING.value, PipelineStage.REJECTED.value}),
-    PipelineStage.SCREENING.value:    frozenset({PipelineStage.INTERVIEW.value, PipelineStage.REJECTED.value}),
-    PipelineStage.AI_SCREENING.value: frozenset({PipelineStage.INTERVIEW.value, PipelineStage.REJECTED.value}),
+    PipelineStage.APPLIED.value:      frozenset({PipelineStage.AI_INTERVIEW.value, PipelineStage.REJECTED.value}),
+    PipelineStage.AI_INTERVIEW.value: frozenset({PipelineStage.INTERVIEW.value, PipelineStage.REJECTED.value}),
     PipelineStage.INTERVIEW.value:    frozenset({PipelineStage.OFFER.value, PipelineStage.REJECTED.value}),
     PipelineStage.OFFER.value:        frozenset({PipelineStage.PLACED.value, PipelineStage.REJECTED.value}),
     PipelineStage.PLACED.value:       frozenset(),
@@ -467,6 +466,25 @@ class PipelineService:
             new_stage,
             current_user.user_id,
         )
+
+        # ── AI Interview: auto-create when candidate enters AI interview stage ──
+        if new_stage == PipelineStage.AI_INTERVIEW.value:
+            try:
+                from app.services.ai_screening_service import AIScreeningService
+                AIScreeningService(self.db).auto_create_for_pipeline(
+                    org_id=organization_id,
+                    candidate_id=pipeline.candidate_id,
+                    job_id=pipeline.job_id,
+                    pipeline_id=pipeline.id,
+                    created_by=UUID(current_user.user_id) if current_user.user_id else None,
+                )
+            except Exception:
+                logger.warning(
+                    "pipeline.ai_interview_auto_create.failed pipeline_id=%s — suppressed",
+                    pipeline_id,
+                    exc_info=True,
+                )
+
         return pipeline
 
     def get_stage_history(
