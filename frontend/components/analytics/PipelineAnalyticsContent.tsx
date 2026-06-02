@@ -115,6 +115,7 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
   if (!canRead) return null;
 
   // ── Derived metrics ───────────────────────────────────────────────────────────
+  const hasDurations = (analytics?.stage_durations?.length ?? 0) > 0;
   const totalAvgDays = analytics?.stage_durations.reduce((acc, d) => acc + d.avg_days, 0) ?? 0;
 
   const funnel = analytics?.funnel ?? [];
@@ -319,7 +320,7 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
             <KpiCard label="Placed"           value={analytics.total_placed} />
             <KpiCard label="Rejected"         value={analytics.total_rejected} />
             <KpiCard label="Placement Rate"   value={`${analytics.overall_placement_rate.toFixed(1)}%`} />
-            <KpiCard label="Avg. Pipeline Time" value={totalAvgDays > 0 ? `${totalAvgDays.toFixed(1)}d` : "—"} />
+            <KpiCard label="Avg. Pipeline Time" value={hasDurations ? `${totalAvgDays.toFixed(1)}d` : "—"} />
           </div>
 
           {/* ── Conversion Funnel ─────────────────────────────────────────────── */}

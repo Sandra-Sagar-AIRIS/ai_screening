@@ -78,6 +78,16 @@ class PipelineResponse(BaseModel):
     candidate_id: UUID
     job_id: UUID
     stage: PipelineStage
+
+    @field_validator("stage", mode="before")
+    @classmethod
+    def normalize_db_stages(cls, value: object) -> object:
+        if isinstance(value, str):
+            val = value.strip().lower()
+            if val == "ai_interview":
+                return "ai_screening"
+            return val
+        return value
     status: PipelineStatus
     notes: str | None
     stage_updated_at: datetime | None = None

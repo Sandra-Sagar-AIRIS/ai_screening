@@ -129,7 +129,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   isCollapsed && "justify-center px-0"
                 )}
               >
-                <Icon className={cn("w-4 h-4", isActive ? "text-orange-500" : "text-slate-400")} />
+                {isCollapsed && (
+                  <Icon className={cn("w-4 h-4 flex-shrink-0", isActive ? "text-orange-500" : "text-slate-400")} />
+                )}
                 {!isCollapsed && item.name}
               </Link>
             );
@@ -199,7 +201,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               isCollapsed && "justify-center px-0"
             )}
           >
-            <LogOut className="w-4 h-4" />
+            {isCollapsed && <LogOut className="w-4 h-4 flex-shrink-0" />}
             {!isCollapsed && "Logout"}
           </button>
         </div>
