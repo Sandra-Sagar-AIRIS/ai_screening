@@ -70,7 +70,7 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     showInSidebar: false,
   },
   {
-    name: "Pipeline Analytics",
+    name: "Pipeline Intelligence",
     path: "/pipeline-analytics",
     anyOfPermissions: [NAV_PERMISSION_CODES.PIPELINE_READ],
     adminMayAccess: true,
