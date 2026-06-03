@@ -70,7 +70,7 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     showInSidebar: false,
   },
   {
-    name: "Pipeline Intelligence",
+    name: "Pipeline Analytics",
     path: "/pipeline-analytics",
     anyOfPermissions: [NAV_PERMISSION_CODES.PIPELINE_READ],
     adminMayAccess: true,
@@ -143,9 +143,9 @@ export const SIDEBAR_NAV_ITEMS: readonly SidebarNavItem[] = [
     anyOfPermissions: [NAV_PERMISSION_CODES.CANDIDATES_READ],
     adminMayAccess: true,
   },
-  // ── AI Interview section ───────────────────────────────────────────────
+  // ── AI Interview Screening section ─────────────────────────────────────
   {
-    name: "AI Interview",
+    name: "AI Interview Screening",
     path: "/ai-screenings",
     anyOfPermissions: [NAV_PERMISSION_CODES.CANDIDATES_READ],
     adminMayAccess: true,

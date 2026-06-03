@@ -134,7 +134,7 @@ export default function DashboardPage() {
 
   const pipelineStageData = [
     { name: "Sourced", value: data?.pipeline_stages?.sourced || 0, color: chartColors[0] },
-    { name: "Screening", value: data?.pipeline_stages?.screening || 0, color: chartColors[1] },
+    { name: "AI Interview Screening", value: data?.pipeline_stages?.ai_interview || 0, color: chartColors[1] },
     { name: "Interview", value: data?.pipeline_stages?.interview || 0, color: chartColors[2] },
     { name: "Offer", value: data?.pipeline_stages?.offer || 0, color: chartColors[3] },
     { name: "Placed", value: data?.pipeline_stages?.placed || 0, color: chartColors[4] },
@@ -194,7 +194,7 @@ export default function DashboardPage() {
             <div className="absolute top-[3.8rem] left-16 right-16 h-[1px] border-b border-dashed border-orange-200 z-0" />
             <div className="flex items-center justify-between relative z-10 w-full px-4 gap-2">
               {(() => {
-                const allStages = ['applied', 'screening', 'ai_screening', 'interview', 'offer', 'placed', 'rejected'];
+                const allStages = ['applied', 'ai_interview', 'interview', 'offer', 'placed', 'rejected'];
 
                 return allStages.map(s => {
                   let finalCount = 0;
@@ -208,11 +208,11 @@ export default function DashboardPage() {
                   }
 
                   // Hide unsupported/zero-count stages
-                  if (!finalCount && ['ai_screening', 'rejected'].includes(s)) return null;
+                  if (!finalCount && ['rejected'].includes(s)) return null;
 
                   let displayTitle = s.charAt(0).toUpperCase() + s.slice(1);
                   if (s === 'applied') displayTitle = 'Sourced';
-                  if (s === 'ai_screening') displayTitle = 'AI Screen';
+                  if (s === 'ai_interview') displayTitle = 'AI Interview Screening';
 
                   return (
                     <PipelineStageTooltipWrapper

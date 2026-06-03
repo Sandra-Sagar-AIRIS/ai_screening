@@ -130,12 +130,12 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
   const dropOffs = [
     {
       from: "Applied",
-      to: "AI Interview",
+      to: "AI Interview Screening",
       drop: Math.max(0, appliedCount - aiInterviewCount),
       rate: appliedCount > 0 ? ((appliedCount - aiInterviewCount) / appliedCount) * 100 : 0,
     },
     {
-      from: "AI Interview",
+      from: "AI Interview Screening",
       to: "Interview",
       drop: Math.max(0, aiInterviewCount - interviewCount),
       rate: aiInterviewCount > 0 ? ((aiInterviewCount - interviewCount) / aiInterviewCount) * 100 : 0,
@@ -338,7 +338,7 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
               <div className="space-y-3.5">
                 {[
                   { label: "Applied", val: appliedCount },
-                  { label: "AI Interview", val: aiInterviewCount },
+                  { label: "AI Interview Screening", val: aiInterviewCount },
                   { label: "Interview", val: interviewCount },
                   { label: "Offer", val: offerCount },
                   { label: "Placed", val: placedCount },

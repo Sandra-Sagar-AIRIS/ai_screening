@@ -9,7 +9,7 @@ interface ConversionFunnelChartProps {
 
 const STAGES = [
   { key: "applied",    label: "Applied",    color: "#FF5A1F" },
-  { key: "ai_interview", label: "AI Interview", color: "#FF5A1F" },
+  { key: "ai_interview", label: "AI Interview Screening", color: "#FF5A1F" },
   { key: "interview",  label: "Interview",  color: "#FF5A1F" },
   { key: "offer",      label: "Offer",      color: "#FF5A1F" },
   { key: "placed",     label: "Placed",     color: "#10B981" },
