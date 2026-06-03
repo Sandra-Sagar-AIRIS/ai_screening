@@ -520,7 +520,11 @@ class AIScreeningService:
         current_user: CurrentUser,
         candidate_id: UUID,
         job_id: UUID | None = None,
-        max_questions: int = 15,
+        max_questions: int = 12,
+        interview_duration_minutes: int = 20,
+        expires_at: "datetime | None" = None,
+        custom_instructions: str | None = None,
+        invitation_email: str | None = None,
     ) -> AIScreening:
         """Create a live-interview screening session with a candidate join token."""
         import secrets
@@ -547,6 +551,11 @@ class AIScreeningService:
             screening_type="live_interview",
             interview_mode="live",
             session_token=session_token,
+            max_questions=max_questions,
+            interview_duration_minutes=interview_duration_minutes,
+            expires_at=expires_at,
+            custom_instructions=custom_instructions,
+            invitation_email=invitation_email,
             livekit_room_name=livekit_room,
             candidate_name_snapshot=candidate_name,
             job_title_snapshot=job_title,
@@ -561,10 +570,127 @@ class AIScreeningService:
         return screening
 
     def get_screening_by_token(self, token: str) -> AIScreening | None:
-        """Look up a live interview session by its candidate join token."""
-        return self.db.scalar(
+        """Look up a live interview session by its candidate join token.
+
+        Returns None when the token does not exist OR the invite has expired.
+        Expired means expires_at is set and is in the past.
+        """
+        screening = self.db.scalar(
             select(AIScreening).where(AIScreening.session_token == token)
         )
+        if screening is None:
+            return None
+        # Enforce expiry — completed interviews are still viewable
+        if (
+            screening.expires_at is not None
+            and screening.status not in ("completed", "in_progress")
+        ):
+            now = datetime.now(UTC)
+            if screening.expires_at < now:
+                logger.info(
+                    "ai_screening.token_expired screening=%s expires_at=%s",
+                    screening.id, screening.expires_at.isoformat(),
+                )
+                return None
+        return screening
+
+    def send_invite(
+        self,
+        org_id: UUID,
+        current_user: "CurrentUser",
+        candidate_id: UUID,
+        job_id: UUID | None,
+        *,
+        expires_at: "datetime | None" = None,
+        max_questions: int = 12,
+        interview_duration_minutes: int = 20,
+        custom_instructions: str | None = None,
+        pipeline_id: UUID | None = None,
+    ) -> AIScreening:
+        """Create a live interview session and email the candidate the invite link.
+
+        Idempotent — if a pending/in_progress session already exists for this
+        candidate × job pair we reuse it and re-send the email.
+        """
+        from app.models.candidate import Candidate
+        from app.models.job import Job
+        from app.services.ai_screening_email import send_ai_screening_invite
+
+        candidate = self.db.get(Candidate, candidate_id)
+        if candidate is None:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Candidate not found")
+
+        job = self.db.get(Job, job_id) if job_id else None
+        candidate_email = candidate.email
+        if not candidate_email:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=422, detail="Candidate has no email address")
+
+        candidate_name = f"{candidate.first_name} {candidate.last_name}"
+        job_title = job.title if job else "Unknown Role"
+
+        # Reuse existing pending/not-started session if present
+        existing = self.db.scalar(
+            select(AIScreening).where(
+                AIScreening.candidate_id == candidate_id,
+                AIScreening.organization_id == org_id,
+                AIScreening.interview_mode == "live",
+                AIScreening.status.in_(["pending", "in_progress"]),
+            ).order_by(AIScreening.created_at.desc())
+        )
+
+        if existing:
+            screening = existing
+            # Refresh expiry / config if recruiter resends
+            screening.expires_at = expires_at
+            screening.max_questions = max_questions
+            screening.interview_duration_minutes = interview_duration_minutes
+            screening.custom_instructions = custom_instructions
+            self.db.add(screening)
+        else:
+            screening = self.create_live_interview(
+                org_id=org_id,
+                current_user=current_user,
+                candidate_id=candidate_id,
+                job_id=job_id,
+                max_questions=max_questions,
+                interview_duration_minutes=interview_duration_minutes,
+                expires_at=expires_at,
+                custom_instructions=custom_instructions,
+                invitation_email=candidate_email,
+            )
+            if pipeline_id:
+                screening.pipeline_id = pipeline_id
+
+        # Send the email
+        try:
+            send_ai_screening_invite(
+                to_email=candidate_email,
+                candidate_name=candidate_name,
+                job_title=job_title,
+                token=screening.session_token,
+                duration_minutes=interview_duration_minutes,
+                expires_at=expires_at,
+            )
+            screening.invitation_sent_at = datetime.now(UTC)
+            screening.invitation_email = candidate_email
+        except Exception as exc:
+            logger.error(
+                "ai_screening.invite_email_failed candidate=%s job=%s: %s",
+                candidate_id, job_id, exc,
+            )
+            # Don't block — session still created, recruiter can copy link manually
+        finally:
+            self.db.add(screening)
+            self.db.commit()
+            self.db.refresh(screening)
+
+        logger.info(
+            "ai_screening.invite_sent screening=%s candidate=%s email=%s",
+            screening.id, candidate_name, candidate_email,
+        )
+        return screening
 
     def start_live_session(self, screening_id: UUID, org_id: UUID) -> tuple[AIScreening, str]:
         """Mark session in_progress, persist and return the opening question."""
@@ -657,8 +783,8 @@ class AIScreeningService:
             len([w for w in transcript.split() if w.strip()]),
         )
 
-        # Should we end?
-        max_q = 15  # hard cap
+        # Should we end? Use per-session config, falling back to module default.
+        max_q = (screening.max_questions or 12)
         should_end = q_count >= max_q or _auto_end_heuristic(transcript, q_count)
         if should_end:
             self.db.commit()
@@ -703,13 +829,21 @@ class AIScreeningService:
         return next_q, False
 
     def end_live_interview(self, screening_id: UUID, org_id: UUID) -> AIScreening:
-        """End the live interview session, generate assessment, and auto-advance pipeline."""
+        """End the live interview session and generate assessment.
+
+        Pipeline advancement is intentionally NOT performed here.
+        The candidate stays in the ai_interview stage with status=review_pending
+        until a recruiter explicitly reviews the results and makes a decision via
+        submit_review_decision().
+        """
         screening = self.get_screening(org_id, screening_id)
         now = datetime.now(UTC)
 
         if screening.started_at:
             screening.duration_seconds = int((now - screening.started_at).total_seconds())
 
+        # Mark as completed so the assessment generator can run, then flip to
+        # review_pending so the recruiter sees it as awaiting their review.
         screening.status = "completed"
         screening.ended_at = now
         self.db.add(screening)
@@ -722,26 +856,71 @@ class AIScreeningService:
 
         self.db.refresh(screening)
 
-        # Auto-advance the pipeline — only when the interview completed with a
-        # valid recommendation (not incomplete, not failed, not empty)
-        if (
-            screening.status == "completed"
-            and screening.recommendation
-            and screening.job_id
-        ):
+        # Flip to review_pending (leave incomplete/failed statuses alone — those
+        # signal a problem and should not silently become review_pending).
+        if screening.status == "completed":
+            screening.status = "review_pending"
+            self.db.add(screening)
+            self.db.commit()
+            self.db.refresh(screening)
+            logger.info(
+                "live_interview.awaiting_review id=%s recommendation=%s",
+                screening_id, screening.recommendation,
+            )
+
+        return screening
+
+    def submit_review_decision(
+        self,
+        org_id: UUID,
+        screening_id: UUID,
+        decision: str,     # "advance" | "reject" | "hold"
+        notes: str | None,
+    ) -> AIScreening:
+        """Recruiter makes a final decision on a completed AI screening.
+
+        advance → moves the candidate pipeline to the interview stage
+        reject  → moves the candidate pipeline to rejected
+        hold    → leaves the candidate in ai_interview, records the decision
+
+        In all cases the screening status is set to "completed" and the
+        recruiter decision + notes are persisted.
+        """
+        screening = self.get_screening(org_id, screening_id)
+
+        if screening.status not in ("review_pending", "incomplete"):
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot submit review decision for screening with status='{screening.status}'. "
+                       "Only review_pending or incomplete screenings can be decided.",
+            )
+
+        screening.recruiter_decision = decision
+        screening.recruiter_notes = notes
+        screening.status = "completed"
+        self.db.add(screening)
+        self.db.commit()
+
+        if decision in ("advance", "reject") and screening.job_id:
             try:
                 self.advance_pipeline_from_screening(
                     org_id=org_id,
                     candidate_id=screening.candidate_id,
                     job_id=screening.job_id,
-                    recommendation=screening.recommendation,
+                    recommendation=decision,   # "advance" → interview, "reject" → rejected
                 )
             except Exception:
                 logger.warning(
-                    "live_interview.pipeline_advance_failed id=%s — suppressed",
-                    screening_id, exc_info=True,
+                    "submit_review_decision.pipeline_move_failed id=%s decision=%s",
+                    screening_id, decision, exc_info=True,
                 )
 
+        self.db.refresh(screening)
+        logger.info(
+            "live_interview.review_submitted id=%s decision=%s",
+            screening_id, decision,
+        )
         return screening
 
     def get_live_messages(self, screening_id: UUID) -> list:
@@ -812,48 +991,68 @@ class AIScreeningService:
             screening_id, q_asked, q_answered, candidate_words, duration_secs,
         )
 
-        # ── Completeness gate ─────────────────────────────────────────────────
-        reasons = []
-        if q_answered < _MIN_ANSWERED_QUESTIONS:
-            reasons.append(
-                f"only {q_answered} of {_MIN_ANSWERED_QUESTIONS} required questions answered"
+        # ── Hard gates (truly insufficient data) ─────────────────────────────
+        # Only question coverage and word count block scoring.
+        # Duration is a soft signal — a candidate who answered all questions
+        # with sufficient detail should receive a score even if the interview
+        # ended slightly early.
+
+        min_answers_required = max(1, int(q_asked * _MIN_ANSWER_COVERAGE)) if q_asked > 0 else 1
+        hard_fails = []
+
+        if q_answered < min_answers_required:
+            hard_fails.append(
+                f"only {q_answered} of {min_answers_required} required questions answered "
+                f"({int(_MIN_ANSWER_COVERAGE * 100)}% of {q_asked} asked)"
             )
         if candidate_words < _MIN_CANDIDATE_WORDS:
-            reasons.append(
+            hard_fails.append(
                 f"only {candidate_words} words spoken ({_MIN_CANDIDATE_WORDS} required)"
             )
-        if duration_secs < _MIN_DURATION_SECONDS:
-            reasons.append(
-                f"interview lasted only {duration_secs}s ({_MIN_DURATION_SECONDS}s / 5 min required)"
-            )
 
-        if reasons:
-            reason_text = "; ".join(reasons)
+        if hard_fails:
+            reason_text = "; ".join(hard_fails)
             screening.status            = "incomplete"
             screening.incomplete_reason = f"Interview incomplete — {reason_text}"
-            # Explicitly clear any partial scores so nothing leaks through
             screening.overall_score       = None
             screening.communication_score = None
             screening.experience_score    = None
             screening.confidence_score    = None
             screening.culture_fit_score   = None
+            screening.leadership_score    = None
             screening.recommendation      = None
             screening.strengths           = []
             screening.concerns            = []
-            screening.ai_summary          = (
+            screening.ai_summary = (
                 f"Interview incomplete — insufficient response data. "
                 f"Reason: {reason_text}. "
-                f"Questions answered: {q_answered}/{_MIN_ANSWERED_QUESTIONS}. "
-                f"Words spoken: {candidate_words}/{_MIN_CANDIDATE_WORDS}. "
-                f"Duration: {duration_secs}s/{_MIN_DURATION_SECONDS}s."
+                f"Questions answered: {q_answered}/{min_answers_required}. "
+                f"Words spoken: {candidate_words}/{_MIN_CANDIDATE_WORDS}."
             )
             self.db.add(screening)
             self.db.commit()
-            logger.warning(
-                "live_interview.incomplete id=%s reason=%s",
-                screening_id, reason_text,
-            )
+            logger.warning("live_interview.incomplete id=%s reason=%s", screening_id, reason_text)
             return
+
+        # ── Soft duration check ───────────────────────────────────────────────
+        # Duration below the recommended threshold reduces confidence but does
+        # not block scoring.  The warning is included in the Groq context so
+        # the model can calibrate its output, and stored in incomplete_reason
+        # so the recruiter review page can surface it as a warning badge.
+        short_duration = duration_secs > 0 and duration_secs < _RECOMMENDED_DURATION_SECS
+        duration_warning = (
+            f"Interview completed with shorter-than-recommended duration "
+            f"({duration_secs}s; recommended {_RECOMMENDED_DURATION_SECS}s). "
+            f"Scores generated with reduced confidence."
+            if short_duration else ""
+        )
+
+        if short_duration:
+            screening.incomplete_reason = duration_warning
+            logger.info(
+                "live_interview.short_duration id=%s duration=%ds — scoring with reduced confidence",
+                screening_id, duration_secs,
+            )
 
         metrics["scoring_eligible"] = True
         logger.info("live_interview.scoring_eligible id=%s metrics=%s", screening_id, metrics)
@@ -867,7 +1066,9 @@ class AIScreeningService:
             f"Role: {screening.job_title_snapshot or 'Not specified'}\n"
             f"Candidate: {screening.candidate_name_snapshot or 'Unknown'}\n"
             f"Questions asked: {q_asked} | Candidate answers: {q_answered} | "
-            f"Candidate words: {candidate_words} | Duration: {duration_secs}s\n\n"
+            f"Candidate words: {candidate_words} | Duration: {duration_secs}s\n"
+            + (f"NOTE: {duration_warning}\n" if duration_warning else "")
+            + "\n"
         )
 
         groq_messages = [
@@ -920,6 +1121,7 @@ class AIScreeningService:
         screening.experience_score       = _score(data.get("experience_score"))
         screening.confidence_score       = _score(data.get("confidence_score"))
         screening.culture_fit_score      = _score(data.get("culture_fit_score"))
+        screening.leadership_score       = _score(data.get("leadership_score"))
         screening.overall_score          = _score(data.get("overall_score"))
         screening.recommendation         = data.get("recommendation") or "consider"
         screening.strengths              = _parse_evidence_list(data.get("strengths"))
@@ -1117,7 +1319,12 @@ class AIScreeningService:
         )
 
     def advance_pipeline_from_screening(self, org_id, candidate_id, job_id, recommendation):
-        """After AI interview: advance to interview stage or reject."""
+        """Move the candidate's pipeline entry after a recruiter decision.
+
+        recommendation values accepted:
+          "advance" | anything except "reject"  → interview stage
+          "reject"                               → rejected
+        """
         from app.models.pipeline import Pipeline
         from datetime import UTC, datetime
 
@@ -1198,11 +1405,12 @@ Routing rules:
 # These are enforced in Python BEFORE calling Groq. The LLM never sees
 # insufficient data — it cannot hallucinate scores for a partial transcript.
 
-_MIN_ANSWERED_QUESTIONS = 5   # candidate must have responded at least 5 times
-_MIN_CANDIDATE_WORDS    = 200  # total words across all candidate messages
-_MIN_DURATION_SECONDS   = 300  # 5 minutes minimum interview duration
-_MIN_TURN_WORDS         = 3    # minimum words required to treat an answer as real
-_MIN_TURN_CHARS         = 12   # avoid progressing on filler like "yes" / "ok"
+_MIN_CANDIDATE_WORDS       = 200   # total words across all candidate messages — hard gate
+_MIN_ANSWER_COVERAGE       = 0.80  # candidate must answer ≥ 80% of questions asked — hard gate
+_RECOMMENDED_DURATION_SECS = 300   # 5 min — below this a low-confidence warning is added but
+                                   # scoring is NOT blocked; duration alone never fails an interview
+_MIN_TURN_WORDS            = 3     # minimum words to treat one turn as a real answer
+_MIN_TURN_CHARS            = 12    # avoid progressing on filler like "yes" / "ok"
 
 _ASSESSMENT_SYSTEM_PROMPT = """\
 You are an expert HR analytics engine evaluating a completed screening interview.
@@ -1222,6 +1430,7 @@ OUTPUT FORMAT (return ONLY valid JSON, no prose, no markdown):
   "experience_score": <0-100 integer, based on concrete examples given>,
   "confidence_score": <0-100 integer, based on decisiveness and specificity>,
   "culture_fit_score": <0-100 integer, based on collaboration/values signals>,
+  "leadership_score": <0-100 integer, based on evidence of leadership, team management, or initiative; score 40 if no evidence>,
   "overall_score": <0-100 integer, weighted composite>,
   "recommendation": "<strong_hire|hire|consider|reject>",
   "strengths": [

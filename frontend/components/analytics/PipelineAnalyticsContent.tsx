@@ -115,6 +115,7 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
   if (!canRead) return null;
 
   // ── Derived metrics ───────────────────────────────────────────────────────────
+  const hasDurations = (analytics?.stage_durations?.length ?? 0) > 0;
   const totalAvgDays = analytics?.stage_durations.reduce((acc, d) => acc + d.avg_days, 0) ?? 0;
 
   const funnel = analytics?.funnel ?? [];
@@ -129,12 +130,12 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
   const dropOffs = [
     {
       from: "Applied",
-      to: "AI Interview",
+      to: "AI Interview Screening",
       drop: Math.max(0, appliedCount - aiInterviewCount),
       rate: appliedCount > 0 ? ((appliedCount - aiInterviewCount) / appliedCount) * 100 : 0,
     },
     {
-      from: "AI Interview",
+      from: "AI Interview Screening",
       to: "Interview",
       drop: Math.max(0, aiInterviewCount - interviewCount),
       rate: aiInterviewCount > 0 ? ((aiInterviewCount - interviewCount) / aiInterviewCount) * 100 : 0,
@@ -319,7 +320,7 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
             <KpiCard label="Placed"           value={analytics.total_placed} />
             <KpiCard label="Rejected"         value={analytics.total_rejected} />
             <KpiCard label="Placement Rate"   value={`${analytics.overall_placement_rate.toFixed(1)}%`} />
-            <KpiCard label="Avg. Pipeline Time" value={totalAvgDays > 0 ? `${totalAvgDays.toFixed(1)}d` : "—"} />
+            <KpiCard label="Avg. Pipeline Time" value={hasDurations ? `${totalAvgDays.toFixed(1)}d` : "—"} />
           </div>
 
           {/* ── Conversion Funnel ─────────────────────────────────────────────── */}
@@ -337,7 +338,7 @@ export function PipelineAnalyticsContent({ hideHeader = false }: { hideHeader?: 
               <div className="space-y-3.5">
                 {[
                   { label: "Applied", val: appliedCount },
-                  { label: "AI Interview", val: aiInterviewCount },
+                  { label: "AI Interview Screening", val: aiInterviewCount },
                   { label: "Interview", val: interviewCount },
                   { label: "Offer", val: offerCount },
                   { label: "Placed", val: placedCount },
