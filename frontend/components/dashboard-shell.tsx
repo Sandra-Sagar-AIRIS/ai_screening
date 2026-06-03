@@ -120,6 +120,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.name}
                 href={item.path}
+                prefetch={true}
                 title={isCollapsed ? item.name : undefined}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",

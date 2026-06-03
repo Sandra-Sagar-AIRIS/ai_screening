@@ -352,13 +352,11 @@ function KpiCard({
 }
 
 function PipelineStage({
-  title, value, loading, highlight = false, isSuccess = false,
+  title, value, loading
 }: {
   title: string;
   value: number | undefined;
   loading: boolean;
-  highlight?: boolean;
-  isSuccess?: boolean;
 }) {
   const display = loading ? "…" : value === undefined ? "0" : value;
 
@@ -370,10 +368,6 @@ function PipelineStage({
       <p className="text-[28px] leading-none font-bold text-slate-900 mb-2 group-hover:text-[#FF5A1F] transition-colors duration-300">
         {display}
       </p>
-      <div className="h-2 flex items-center justify-center">
-        {highlight && <div className="w-1.5 h-1.5 bg-purple-500 rounded-full" />}
-        {isSuccess && <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />}
-      </div>
     </div>
   );
 }
