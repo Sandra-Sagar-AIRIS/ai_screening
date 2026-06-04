@@ -76,10 +76,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-CORS_HEADERS = {
-    "Access-Control-Allow-Origin": get_cors_origins(settings.cors_origins)[0],
-    "Access-Control-Allow-Credentials": "true",
-}
+_ALLOWED_ORIGINS = set(get_cors_origins(settings.cors_origins))
+
+
+def _cors_headers(request: Request) -> dict:
+    origin = request.headers.get("origin", "")
+    allowed = origin if origin in _ALLOWED_ORIGINS else next(iter(_ALLOWED_ORIGINS))
+    return {"Access-Control-Allow-Origin": allowed, "Access-Control-Allow-Credentials": "true"}
 
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 
@@ -110,7 +113,7 @@ async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPE
             "detail_preview": str(exc.detail)[:300] if exc.detail is not None else "",
         },
     )
-    headers = dict(CORS_HEADERS)
+    headers = _cors_headers(request)
     exc_headers = getattr(exc, "headers", None)
     if exc_headers is not None:
         headers = {**headers, **exc_headers}
@@ -125,7 +128,7 @@ async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPE
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
         status_code=422,
-        headers=CORS_HEADERS,
+        headers=_cors_headers(request),
         content={
             "success": False,
             "error": "Validation Error",
@@ -151,7 +154,7 @@ async def response_validation_exception_handler(request: Request, exc: ResponseV
     )
     return JSONResponse(
         status_code=500,
-        headers=CORS_HEADERS,
+        headers=_cors_headers(request),
         content={
             "success": False,
             "detail": "Response serialization error.",
@@ -181,7 +184,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         safe_message = safe_message[:2000] + "…"
     return JSONResponse(
         status_code=500,
-        headers=CORS_HEADERS,
+        headers=_cors_headers(request),
         content={
             "success": False,
             "detail": "Internal server error",
