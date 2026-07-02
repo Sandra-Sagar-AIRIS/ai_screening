@@ -13,16 +13,19 @@ from app.db.base import Base
 
 class JobVendor(Base):
     __tablename__ = "job_vendors"
+    __table_args__ = {"schema": "jobs"}
 
     # Composite PK: (job_id, vendor_id)
     job_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("jobs.id", ondelete="CASCADE"),
+        ForeignKey("jobs.jobs.id", ondelete="CASCADE"),
         primary_key=True,
     )
+    # vendor_id is a cross-schema reference (identity.profiles) —
+    # 0001_initial.py defines no FK for it; integrity is enforced at the
+    # service layer.
     vendor_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("profiles.id", ondelete="CASCADE"),
         primary_key=True,
     )
 

@@ -16,6 +16,7 @@ class AIScreeningSegment(Base):
     """One recorded answer segment per question within a live AI screening."""
 
     __tablename__ = "ai_screening_segments"
+    __table_args__ = {"schema": "screening"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), primary_key=True,
@@ -23,7 +24,7 @@ class AIScreeningSegment(Base):
     )
     screening_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("ai_screenings.id", ondelete="CASCADE"),
+        ForeignKey("screening.ai_screenings.id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
     question_number: Mapped[int] = mapped_column(Integer, nullable=False)

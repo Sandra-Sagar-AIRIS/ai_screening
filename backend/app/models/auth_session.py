@@ -13,6 +13,7 @@ from app.db.base import Base
 
 class AuthSession(Base):
     __tablename__ = "auth_sessions"
+    __table_args__ = {"schema": "identity"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -21,13 +22,13 @@ class AuthSession(Base):
     )
     organization_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("organizations.id"),
+        ForeignKey("identity.organizations.id"),
         nullable=False,
         index=True,
     )
     user_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("profiles.id"),
+        ForeignKey("identity.profiles.id"),
         nullable=False,
         index=True,
     )

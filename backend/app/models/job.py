@@ -13,6 +13,7 @@ from app.db.base import Base
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = {"schema": "jobs"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -22,7 +23,7 @@ class Job(Base):
     organization_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
     client_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("clients.id"),
+        ForeignKey("jobs.clients.id"),
         nullable=False,
         index=True,
     )
@@ -35,6 +36,9 @@ class Job(Base):
     # Optional fields for Phase 1 job spec.
     # Kept nullable so existing `JobService.create_job()` continues to work.
     location: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    location_flexibility: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, server_default=sa.text("'preferred'")
+    )
     salary_min: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     salary_max: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     salary_currency: Mapped[str | None] = mapped_column(String(3), nullable=True, server_default=sa.text("'USD'"))
@@ -56,9 +60,11 @@ class Job(Base):
     key_responsibilities: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     
     filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # created_by is a cross-schema reference (identity.profiles) —
+    # 0001_initial.py defines no FK for it; integrity is enforced at the
+    # service layer.
     created_by: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("profiles.id"),
         nullable=True,
         index=True,
     )

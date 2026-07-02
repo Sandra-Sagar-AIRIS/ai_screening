@@ -13,6 +13,7 @@ from app.db.base import Base
 
 class JobStatusHistory(Base):
     __tablename__ = "job_status_history"
+    __table_args__ = {"schema": "jobs"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -21,7 +22,7 @@ class JobStatusHistory(Base):
     )
     job_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("jobs.id", ondelete="CASCADE"),
+        ForeignKey("jobs.jobs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

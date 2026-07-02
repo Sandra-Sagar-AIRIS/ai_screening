@@ -1,22 +1,17 @@
-from sqlalchemy import MetaData
 from sqlalchemy.orm import DeclarativeBase
-
-from app.core.config import get_settings
-
-
-def _declarative_metadata() -> MetaData:
-    """
-    When Alembic creates tables in a non-public schema (db_schema), ORM queries must use
-    the same schema or SELECTs hit public.* and return no rows (empty permissions, etc.).
-    """
-    schema = get_settings().db_schema
-    return MetaData(schema=schema) if schema else MetaData()
 
 
 class Base(DeclarativeBase):
-    """Base class for all declarative SQLAlchemy models."""
+    """
+    Base class for all declarative SQLAlchemy models.
 
-    metadata = _declarative_metadata()
+    AIRIS is schema-per-service (see alembic/versions/0001_initial.py): every
+    table lives in its owning service's Postgres schema (identity, candidate,
+    jobs, pipeline, interview, screening, communication, ...), not a single
+    shared schema. There is no one global schema to bind here — each model
+    declares its own schema via `__table_args__ = {"schema": "..."}` (or as
+    the last element of a __table_args__ tuple).
+    """
 
 
 # Ensure Invite model is imported so metadata registration is explicit.

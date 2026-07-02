@@ -45,15 +45,18 @@ class SourcingSession(Base):
     """Tracks one AI sourcing run (job + query + providers + status)."""
 
     __tablename__ = "sourcing_sessions"
+    __table_args__ = {"schema": "candidate"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
     )
+    # organization_id (identity) and created_by (identity) are cross-schema
+    # references — 0001_initial.py defines no FK for either on this table;
+    # integrity is enforced at the service layer.
     organization_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -64,7 +67,6 @@ class SourcingSession(Base):
     )
     created_by: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("profiles.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -97,6 +99,7 @@ class SourcingResult(Base):
     """One candidate result within a sourcing session."""
 
     __tablename__ = "sourcing_results"
+    __table_args__ = {"schema": "candidate"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -105,7 +108,7 @@ class SourcingResult(Base):
     )
     session_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("sourcing_sessions.id", ondelete="CASCADE"),
+        ForeignKey("candidate.sourcing_sessions.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -140,7 +143,7 @@ class SourcingResult(Base):
     reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     candidate_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("candidates.id", ondelete="SET NULL"),
+        ForeignKey("candidate.candidates.id", ondelete="SET NULL"),
         nullable=True,
     )
     is_duplicate: Mapped[bool] = mapped_column(

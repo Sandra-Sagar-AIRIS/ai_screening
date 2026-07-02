@@ -13,6 +13,7 @@ from app.db.base import Base
 
 class Client(Base):
     __tablename__ = "clients"
+    __table_args__ = {"schema": "jobs"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),

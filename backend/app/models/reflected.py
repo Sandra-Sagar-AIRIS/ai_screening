@@ -3,12 +3,13 @@ from __future__ import annotations
 from sqlalchemy import MetaData
 from sqlalchemy.ext.automap import automap_base
 
-from app.core.config import get_settings
 from app.db.session import engine
 
-settings = get_settings()
-
-metadata = MetaData(schema=settings.db_schema)
+# Schema-per-service: there is no single schema to reflect. Reflection here is
+# a dev-only introspection helper and is schema-agnostic (no default schema);
+# callers needing a specific service's tables should reflect that schema
+# explicitly rather than relying on a global default.
+metadata = MetaData()
 ReflectedBase = automap_base(metadata=metadata)
 _is_reflected = False
 

@@ -21,6 +21,7 @@ class PipelineOffer(Base):
     """
 
     __tablename__ = "pipeline_offers"
+    __table_args__ = {"schema": "pipeline"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -36,7 +37,7 @@ class PipelineOffer(Base):
     # ── Pipeline reference ───────────────────────────────────────────────────
     pipeline_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("pipelines.id", ondelete="CASCADE"),
+        ForeignKey("pipeline.pipelines.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -94,6 +95,7 @@ class PipelineOfferEvent(Base):
     """
 
     __tablename__ = "pipeline_offer_events"
+    __table_args__ = {"schema": "pipeline"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -107,14 +109,14 @@ class PipelineOfferEvent(Base):
 
     pipeline_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("pipelines.id", ondelete="CASCADE"),
+        ForeignKey("pipeline.pipelines.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
     offer_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("pipeline_offers.id", ondelete="CASCADE"),
+        ForeignKey("pipeline.pipeline_offers.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

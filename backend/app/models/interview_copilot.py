@@ -23,6 +23,7 @@ class InterviewCopilotSession(Base):
     """One copilot session per interview.  Created lazily on first use."""
 
     __tablename__ = "interview_copilot_sessions"
+    __table_args__ = {"schema": "interview"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -34,7 +35,7 @@ class InterviewCopilotSession(Base):
     )
     interview_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("interviews.id", ondelete="CASCADE"),
+        ForeignKey("interview.interviews.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
         index=True,
@@ -77,6 +78,7 @@ class InterviewTranscriptSegment(Base):
     """One row per transcript utterance — appended in real time during the interview."""
 
     __tablename__ = "interview_transcript_segments"
+    __table_args__ = {"schema": "interview"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -85,13 +87,13 @@ class InterviewTranscriptSegment(Base):
     )
     session_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("interview_copilot_sessions.id", ondelete="CASCADE"),
+        ForeignKey("interview.interview_copilot_sessions.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     interview_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("interviews.id", ondelete="CASCADE"),
+        ForeignKey("interview.interviews.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -123,6 +125,7 @@ class InterviewAISuggestion(Base):
     """AI-generated question suggestion — one row per suggestion emitted."""
 
     __tablename__ = "interview_ai_suggestions"
+    __table_args__ = {"schema": "interview"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -131,13 +134,13 @@ class InterviewAISuggestion(Base):
     )
     session_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("interview_copilot_sessions.id", ondelete="CASCADE"),
+        ForeignKey("interview.interview_copilot_sessions.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     interview_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("interviews.id", ondelete="CASCADE"),
+        ForeignKey("interview.interviews.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

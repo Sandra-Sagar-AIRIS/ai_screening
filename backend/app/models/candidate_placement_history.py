@@ -46,6 +46,7 @@ class CandidatePlacementHistory(Base):
             "'ai_interview', 'interview', 'offer')",
             name="ck_candidate_placement_history_outcome",
         ),
+        {"schema": "candidate"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -55,13 +56,14 @@ class CandidatePlacementHistory(Base):
     )
     candidate_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("candidates.id", ondelete="CASCADE"),
+        ForeignKey("candidate.candidates.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
+    # job_id is a cross-schema reference (jobs.jobs) — 0001_initial.py defines
+    # no FK for it here; integrity is enforced at the service layer.
     job_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("jobs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

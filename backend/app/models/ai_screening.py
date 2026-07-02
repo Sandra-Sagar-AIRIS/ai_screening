@@ -24,6 +24,7 @@ class AIScreening(Base):
     """Top-level screening session — one per candidate × job round."""
 
     __tablename__ = "ai_screenings"
+    __table_args__ = {"schema": "screening"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -33,22 +34,23 @@ class AIScreening(Base):
     organization_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), nullable=False, index=True
     )
+    # candidate_id (candidate.candidates), job_id (jobs.jobs), and pipeline_id
+    # (pipeline.pipelines) are cross-schema references — 0001_initial.py
+    # defines no FK for any of them; integrity is enforced at the service
+    # layer (see candidate_name_snapshot / job_title_snapshot below).
     candidate_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("candidates.id"),
         nullable=False,
         index=True,
     )
     job_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("jobs.id"),
         nullable=True,
         index=True,
     )
     # Link to the pipeline entry that triggered this screening
     pipeline_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("pipelines.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -110,6 +112,7 @@ class AIScreening(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    reminders_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa.text("true"))
 
     # Invite configuration (self-service async flow) --------------------------
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -122,6 +125,9 @@ class AIScreening(Base):
     # Video / audio recording (self-service flow) -----------------------------
     video_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     audio_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    recording_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    recording_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    recording_uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Additional scores for live interview evaluation -------------------------
     experience_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
@@ -157,6 +163,7 @@ class AIScreeningQuestion(Base):
     """AI-generated question within a screening session."""
 
     __tablename__ = "ai_screening_questions"
+    __table_args__ = {"schema": "screening"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -165,7 +172,7 @@ class AIScreeningQuestion(Base):
     )
     screening_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("ai_screenings.id", ondelete="CASCADE"),
+        ForeignKey("screening.ai_screenings.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -192,6 +199,7 @@ class AIScreeningAnswer(Base):
     """Candidate answer — entered by recruiter or uploaded."""
 
     __tablename__ = "ai_screening_answers"
+    __table_args__ = {"schema": "screening"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -200,13 +208,13 @@ class AIScreeningAnswer(Base):
     )
     screening_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("ai_screenings.id", ondelete="CASCADE"),
+        ForeignKey("screening.ai_screenings.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     question_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("ai_screening_questions.id", ondelete="CASCADE"),
+        ForeignKey("screening.ai_screening_questions.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -235,6 +243,7 @@ class AIScreeningEvaluation(Base):
     """AI evaluation of a single answer — one row per question."""
 
     __tablename__ = "ai_screening_evaluations"
+    __table_args__ = {"schema": "screening"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -243,13 +252,13 @@ class AIScreeningEvaluation(Base):
     )
     screening_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("ai_screenings.id", ondelete="CASCADE"),
+        ForeignKey("screening.ai_screenings.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     question_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("ai_screening_questions.id", ondelete="CASCADE"),
+        ForeignKey("screening.ai_screening_questions.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -286,6 +295,7 @@ class AIScreeningMessage(Base):
     """
 
     __tablename__ = "ai_screening_messages"
+    __table_args__ = {"schema": "screening"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -294,7 +304,7 @@ class AIScreeningMessage(Base):
     )
     screening_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("ai_screenings.id", ondelete="CASCADE"),
+        ForeignKey("screening.ai_screenings.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

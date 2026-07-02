@@ -13,6 +13,7 @@ from app.db.base import Base
 
 class Permission(Base):
     __tablename__ = "permissions"
+    __table_args__ = {"schema": "identity"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),

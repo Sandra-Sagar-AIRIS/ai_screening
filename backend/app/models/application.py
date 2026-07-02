@@ -15,6 +15,7 @@ class Application(Base):
     __tablename__ = "applications"
     __table_args__ = (
         UniqueConstraint("candidate_id", "job_id", name="uq_application_candidate_job"),
+        {"schema": "pipeline"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -23,15 +24,16 @@ class Application(Base):
         server_default=sa.text("gen_random_uuid()"),
     )
     organization_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    # candidate_id (candidate.candidates) and job_id (jobs.jobs) are
+    # cross-schema references — 0001_initial.py defines no FK for either;
+    # integrity is enforced at the service layer.
     candidate_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("candidates.id"),
         nullable=False,
         index=True,
     )
     job_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("jobs.id"),
         nullable=False,
         index=True,
     )

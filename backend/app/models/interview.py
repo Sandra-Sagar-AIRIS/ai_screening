@@ -13,6 +13,7 @@ from app.db.base import Base
 
 class Interview(Base):
     __tablename__ = "interviews"
+    __table_args__ = {"schema": "interview"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -20,9 +21,11 @@ class Interview(Base):
         server_default=sa.text("gen_random_uuid()"),
     )
     organization_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    # pipeline_id (pipeline.pipelines), candidate_id (candidate.candidates), and
+    # job_id (jobs.jobs) are cross-schema references — 0001_initial.py defines
+    # no FK for any of them; integrity is enforced at the service layer.
     pipeline_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("pipelines.id"),
         nullable=False,
         index=True,
     )
@@ -30,13 +33,11 @@ class Interview(Base):
     # Denormalized from pipeline for fast single-table queries
     candidate_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("candidates.id"),
         nullable=True,
         index=True,
     )
     job_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("jobs.id"),
         nullable=True,
         index=True,
     )
@@ -52,6 +53,9 @@ class Interview(Base):
     interviewer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
+    reschedule_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=sa.text("0"))
+    last_rescheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reschedule_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -72,6 +76,7 @@ class Interview(Base):
 
 class InterviewParticipant(Base):
     __tablename__ = "interview_participants"
+    __table_args__ = {"schema": "interview"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -81,7 +86,7 @@ class InterviewParticipant(Base):
     organization_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True, index=True)
     interview_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("interviews.id", ondelete="CASCADE"),
+        ForeignKey("interview.interviews.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -104,6 +109,7 @@ class InterviewParticipant(Base):
 
 class InterviewFeedback(Base):
     __tablename__ = "interview_feedback"
+    __table_args__ = {"schema": "interview"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -112,7 +118,7 @@ class InterviewFeedback(Base):
     )
     interview_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("interviews.id", ondelete="CASCADE"),
+        ForeignKey("interview.interviews.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -141,6 +147,7 @@ class InterviewFeedback(Base):
 
 class InterviewerProfile(Base):
     __tablename__ = "interviewer_profiles"
+    __table_args__ = {"schema": "interview"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -163,6 +170,7 @@ class InterviewerProfile(Base):
 
 class InterviewerSkill(Base):
     __tablename__ = "interviewer_skills"
+    __table_args__ = {"schema": "interview"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -171,7 +179,7 @@ class InterviewerSkill(Base):
     )
     interviewer_profile_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("interviewer_profiles.id", ondelete="CASCADE"),
+        ForeignKey("interview.interviewer_profiles.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -180,6 +188,7 @@ class InterviewerSkill(Base):
 
 class InterviewerAvailability(Base):
     __tablename__ = "interviewer_availability"
+    __table_args__ = {"schema": "interview"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -188,7 +197,7 @@ class InterviewerAvailability(Base):
     )
     interviewer_profile_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("interviewer_profiles.id", ondelete="CASCADE"),
+        ForeignKey("interview.interviewer_profiles.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -200,6 +209,7 @@ class InterviewerAvailability(Base):
 
 class InterviewNote(Base):
     __tablename__ = "interview_notes"
+    __table_args__ = {"schema": "interview"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -208,7 +218,7 @@ class InterviewNote(Base):
     )
     interview_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("interviews.id", ondelete="CASCADE"),
+        ForeignKey("interview.interviews.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

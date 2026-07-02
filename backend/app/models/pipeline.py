@@ -16,6 +16,7 @@ class Pipeline(Base):
     __table_args__ = (
         UniqueConstraint("candidate_id", "job_id", name="uq_pipeline_candidate_job"),
         Index("ix_pipelines_org_updated", "organization_id", "updated_at"),
+        {"schema": "pipeline"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -24,15 +25,16 @@ class Pipeline(Base):
         server_default=sa.text("gen_random_uuid()"),
     )
     organization_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    # candidate_id (candidate.candidates) and job_id (jobs.jobs) are
+    # cross-schema references — 0001_initial.py defines no FK for either;
+    # integrity is enforced at the service layer.
     candidate_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("candidates.id"),
         nullable=False,
         index=True,
     )
     job_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("jobs.id"),
         nullable=False,
         index=True,
     )
@@ -72,6 +74,7 @@ class PipelineStatusHistory(Base):
     """Immutable audit log — one row per status change (PIPE-003)."""
 
     __tablename__ = "pipeline_status_history"
+    __table_args__ = {"schema": "pipeline"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -80,7 +83,7 @@ class PipelineStatusHistory(Base):
     )
     pipeline_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("pipelines.id", ondelete="CASCADE"),
+        ForeignKey("pipeline.pipelines.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -105,6 +108,7 @@ class PipelineStageHistory(Base):
     """Immutable audit log — one row per stage transition."""
 
     __tablename__ = "pipeline_stage_history"
+    __table_args__ = {"schema": "pipeline"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -113,7 +117,7 @@ class PipelineStageHistory(Base):
     )
     pipeline_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("pipelines.id", ondelete="CASCADE"),
+        ForeignKey("pipeline.pipelines.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

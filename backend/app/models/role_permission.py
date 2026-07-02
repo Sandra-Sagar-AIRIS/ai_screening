@@ -20,6 +20,7 @@ class RolePermission(Base):
             "permission",
             name="uq_role_permissions_org_role_id_permission",
         ),
+        {"schema": "identity"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -29,13 +30,13 @@ class RolePermission(Base):
     )
     organization_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("organizations.id"),
+        ForeignKey("identity.organizations.id"),
         nullable=False,
         index=True,
     )
     role_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("organization_roles.id"),
+        ForeignKey("identity.organization_roles.id"),
         nullable=False,
         index=True,
     )

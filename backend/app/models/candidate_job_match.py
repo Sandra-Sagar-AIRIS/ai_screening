@@ -18,7 +18,6 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy import (
     DateTime,
-    ForeignKey,
     Index,
     Integer,
     Numeric,
@@ -65,6 +64,7 @@ class CandidateJobMatch(Base):
             "ats_pipeline_status",
             "updated_at",
         ),
+        {"schema": "candidate"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -80,9 +80,11 @@ class CandidateJobMatch(Base):
         nullable=False,
         index=True,
     )
+    # job_id is a cross-schema reference (jobs.jobs) — 0001_initial.py defines
+    # no FK for candidate_job_matches at all; integrity is enforced at the
+    # service layer.
     job_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("jobs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

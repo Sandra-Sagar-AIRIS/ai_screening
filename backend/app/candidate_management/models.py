@@ -13,7 +13,6 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
-    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -27,18 +26,14 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.core.config import get_settings
-
-
-def _module_metadata() -> sa.MetaData:
-    schema = get_settings().db_schema
-    return sa.MetaData(schema=schema) if schema else sa.MetaData()
-
-
 class Base(DeclarativeBase):
-    """Isolated declarative base to avoid metadata collisions."""
+    """
+    Isolated declarative base to avoid metadata collisions with app.db.base.Base.
 
-    metadata = _module_metadata()
+    Schema-per-service: all tables in this module live in the `candidate` or
+    `communication` Postgres schema (see alembic/versions/0001_initial.py) and
+    declare it per-table via __table_args__, not via a global metadata schema.
+    """
 
 
 class CandidateSource(str, enum.Enum):
@@ -131,12 +126,17 @@ class Candidate(Base):
         Index("ix_candidates_org_workspace_created_at", "org_id", "workspace_id", "created_at"),
         Index("ix_candidates_org_workspace_stage", "org_id", "workspace_id", "stage"),
         Index("ix_candidates_org_workspace_status", "org_id", "workspace_id", "status"),
-        UniqueConstraint("id", "org_id", "workspace_id", name="uq_candidates_id_org_workspace"),
+        # NOTE: 0001_initial.py does not define a uq_candidates_id_org_workspace
+        # constraint on candidate.candidates — do not declare it here, and do
+        # not build composite (id, org_id, workspace_id) FKs against it (see
+        # CandidateSkill/CandidateInteraction/CandidateAuditLog/BulkUploadItem
+        # below, which use the real single-column candidate_id FK instead).
         CheckConstraint("years_experience >= 0", name="ck_candidates_years_experience_non_negative"),
         CheckConstraint(
             "(parse_confidence IS NULL) OR (parse_confidence >= 0 AND parse_confidence <= 1)",
             name="ck_candidates_parse_confidence_between_0_1",
         ),
+        {"schema": "candidate"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -190,9 +190,13 @@ class Candidate(Base):
     parse_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # The DB column is `merged_into_id` (see 0001_initial.py); the Python
+    # attribute name is kept as merged_into_candidate_id for compatibility
+    # with existing callers.
     merged_into_candidate_id: Mapped[UUID | None] = mapped_column(
+        "merged_into_id",
         PGUUID(as_uuid=True),
-        ForeignKey("candidates.id", ondelete="SET NULL"),
+        ForeignKey("candidate.candidates.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -234,12 +238,7 @@ class CandidateSkill(Base):
         UniqueConstraint("candidate_id", "normalized_name", name="uq_candidate_skills_candidate_normalized_name"),
         Index("ix_candidate_skills_org_workspace_name", "org_id", "workspace_id", "normalized_name"),
         CheckConstraint("(confidence IS NULL) OR (confidence >= 0 AND confidence <= 1)", name="ck_candidate_skills_confidence"),
-        ForeignKeyConstraint(
-            ["candidate_id", "org_id", "workspace_id"],
-            ["candidates.id", "candidates.org_id", "candidates.workspace_id"],
-            ondelete="CASCADE",
-            name="fk_candidate_skills_candidate_tenant",
-        ),
+        {"schema": "candidate"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -249,8 +248,12 @@ class CandidateSkill(Base):
     )
     org_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
     workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    # 0001_initial.py defines a single-column FK (fk_candidate_skills_candidate_id),
+    # not the composite (candidate_id, org_id, workspace_id) FK this used to
+    # declare — there is no matching composite unique constraint on candidates.
     candidate_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
+        ForeignKey("candidate.candidates.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -275,12 +278,7 @@ class CandidateInteraction(Base):
     __table_args__ = (
         Index("ix_candidate_interactions_org_workspace_created_at", "org_id", "workspace_id", "created_at"),
         Index("ix_candidate_interactions_candidate_created_at", "candidate_id", "created_at"),
-        ForeignKeyConstraint(
-            ["candidate_id", "org_id", "workspace_id"],
-            ["candidates.id", "candidates.org_id", "candidates.workspace_id"],
-            ondelete="CASCADE",
-            name="fk_candidate_interactions_candidate_tenant",
-        ),
+        {"schema": "candidate"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -290,8 +288,11 @@ class CandidateInteraction(Base):
     )
     org_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
     workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    # 0001_initial.py defines a single-column FK (fk_candidate_interactions_candidate_id),
+    # not a composite (candidate_id, org_id, workspace_id) FK.
     candidate_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
+        ForeignKey("candidate.candidates.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -317,12 +318,7 @@ class CandidateAuditLog(Base):
     __table_args__ = (
         Index("ix_candidate_audit_log_org_workspace_created_at", "org_id", "workspace_id", "created_at"),
         Index("ix_candidate_audit_log_candidate_created_at", "candidate_id", "created_at"),
-        ForeignKeyConstraint(
-            ["candidate_id", "org_id", "workspace_id"],
-            ["candidates.id", "candidates.org_id", "candidates.workspace_id"],
-            ondelete="CASCADE",
-            name="fk_candidate_audit_log_candidate_tenant",
-        ),
+        {"schema": "candidate"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -332,21 +328,25 @@ class CandidateAuditLog(Base):
     )
     org_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
     workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    # 0001_initial.py defines a single-column FK (fk_candidate_audit_logs_candidate_id),
+    # not a composite (candidate_id, org_id, workspace_id) FK.
     candidate_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
+        ForeignKey("candidate.candidates.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
     action: Mapped[str] = mapped_column(String(80), nullable=False)
-    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    field_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
     old_value: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     new_value: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # NOTE: 0001_initial.py's candidate_audit_logs table does not have
+    # reason/request_id columns — do not add them back without a migration;
+    # unused elsewhere in the codebase.
 
     actor_user_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True, index=True)
-    actor_role: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    request_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    actor_role: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     candidate: Mapped["Candidate"] = relationship("Candidate", back_populates="audit_logs")
@@ -363,6 +363,7 @@ class CommunicationConnection(Base):
             "external_account_id",
             name="uq_comm_connections_account_provider",
         ),
+        {"schema": "communication"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -408,6 +409,7 @@ class CommunicationTemplate(Base):
             "name",
             name="uq_comm_templates_name_per_channel",
         ),
+        {"schema": "communication"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -452,6 +454,7 @@ class CommunicationMessage(Base):
             "provider_message_id",
             name="uq_comm_messages_provider_message_id",
         ),
+        {"schema": "communication"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -461,9 +464,11 @@ class CommunicationMessage(Base):
     )
     org_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
     workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    # candidate_id is a cross-schema reference (candidate.candidates) —
+    # 0001_initial.py defines no FK for it on this table; integrity is
+    # enforced at the service layer.
     candidate_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("candidates.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -491,7 +496,7 @@ class CommunicationMessage(Base):
     subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     attachments: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
-    template_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("comm_templates.id"), nullable=True)
+    template_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("communication.comm_templates.id"), nullable=True)
     provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -506,6 +511,7 @@ class CommunicationMessageEvent(Base):
     __tablename__ = "comm_message_events"
     __table_args__ = (
         Index("ix_comm_message_events_message_created", "message_id", "created_at"),
+        {"schema": "communication"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -517,7 +523,7 @@ class CommunicationMessageEvent(Base):
     workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
     message_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("comm_messages.id", ondelete="CASCADE"),
+        ForeignKey("communication.comm_messages.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -531,6 +537,7 @@ class CommunicationReminder(Base):
     __table_args__ = (
         Index("ix_comm_reminders_org_workspace_due", "org_id", "workspace_id", "scheduled_for"),
         Index("ix_comm_reminders_status_scheduled", "status", "scheduled_for"),
+        {"schema": "communication"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -540,9 +547,11 @@ class CommunicationReminder(Base):
     )
     org_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
     workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    # candidate_id is a cross-schema reference (candidate.candidates) —
+    # 0001_initial.py defines no FK for it on this table; integrity is
+    # enforced at the service layer.
     candidate_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("candidates.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -555,7 +564,7 @@ class CommunicationReminder(Base):
         Enum(CommunicationProvider, name="communication_provider", native_enum=False),
         nullable=False,
     )
-    template_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("comm_templates.id"), nullable=True)
+    template_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("communication.comm_templates.id"), nullable=True)
     to_address: Mapped[str | None] = mapped_column(String(320), nullable=True)
     subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -575,6 +584,7 @@ class BulkUploadJob(Base):
     __tablename__ = "bulk_upload_jobs"
     __table_args__ = (
         Index("ix_bulk_upload_jobs_org_workspace_created_at", "org_id", "workspace_id", "created_at"),
+        {"schema": "candidate"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -598,9 +608,10 @@ class BulkUploadJob(Base):
     failed_items: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     skipped_items: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
-    error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # NOTE: 0001_initial.py's bulk_upload_jobs table does not have
+    # error_summary/started_at/completed_at columns — do not add them back
+    # without a migration; they were previously declared here but never
+    # existed on the physical table (unused elsewhere in the codebase).
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -619,18 +630,7 @@ class BulkUploadItem(Base):
     __table_args__ = (
         Index("ix_bulk_upload_items_job_status", "job_id", "status"),
         Index("ix_bulk_upload_items_org_workspace_created_at", "org_id", "workspace_id", "created_at"),
-        ForeignKeyConstraint(
-            ["job_id", "org_id", "workspace_id"],
-            ["bulk_upload_jobs.id", "bulk_upload_jobs.org_id", "bulk_upload_jobs.workspace_id"],
-            ondelete="CASCADE",
-            name="fk_bulk_upload_items_job_tenant",
-        ),
-        ForeignKeyConstraint(
-            ["candidate_id", "org_id", "workspace_id"],
-            ["candidates.id", "candidates.org_id", "candidates.workspace_id"],
-            ondelete="NO ACTION",
-            name="fk_bulk_upload_items_candidate_tenant",
-        ),
+        {"schema": "candidate"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -640,11 +640,17 @@ class BulkUploadItem(Base):
     )
     org_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
     workspace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    # 0001_initial.py defines a single-column FK (fk_bulk_upload_items_job_id),
+    # not a composite (job_id, org_id, workspace_id) FK.
     job_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
+        ForeignKey("candidate.bulk_upload_jobs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
+    # candidate_id is a cross-schema-style reference with no matching FK at
+    # all in 0001_initial.py (no fk_bulk_upload_items_candidate_* constraint
+    # exists); integrity is enforced at the service layer.
     candidate_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         nullable=True,
@@ -664,9 +670,10 @@ class BulkUploadItem(Base):
     extracted_email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
     extracted_phone: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     ai_confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
-    parse_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # NOTE: 0001_initial.py's bulk_upload_items table does not have
+    # parse_payload/details columns — do not add them back without a
+    # migration; unused elsewhere in the codebase.
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

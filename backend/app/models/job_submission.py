@@ -13,7 +13,10 @@ from app.db.base import Base
 
 class JobSubmission(Base):
     __tablename__ = "job_submissions"
-    __table_args__ = (sa.UniqueConstraint("job_id", "candidate_id", name="uq_job_submissions_job_id_candidate_id"),)
+    __table_args__ = (
+        sa.UniqueConstraint("job_id", "candidate_id", name="uq_job_submissions_job_id_candidate_id"),
+        {"schema": "jobs"},
+    )
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -22,13 +25,15 @@ class JobSubmission(Base):
     )
     job_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("jobs.id", ondelete="CASCADE"),
+        ForeignKey("jobs.jobs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
+    # candidate_id is a cross-schema reference (candidate.candidates) —
+    # 0001_initial.py defines no FK for it; integrity is enforced at the
+    # service layer.
     candidate_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("candidates.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -38,9 +43,11 @@ class JobSubmission(Base):
         nullable=False,
         server_default=func.now(),
     )
+    # submitted_by is a cross-schema reference (identity.profiles) —
+    # 0001_initial.py defines no FK for it; integrity is enforced at the
+    # service layer.
     submitted_by: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("profiles.id"),
         nullable=False,
         index=True,
     )
@@ -51,9 +58,11 @@ class JobSubmission(Base):
     # PIPE-005: Submission Tracking
     # vendor_id — profile ID of the vendor who submitted (for vendor-isolation queries).
     # Nullable for internal/recruiter submissions; backfilled = submitted_by for existing rows.
+    # vendor_id is a cross-schema reference (identity.profiles) —
+    # 0001_initial.py defines no FK for it; integrity is enforced at the
+    # service layer.
     vendor_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("profiles.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIRIS Phase 1+2 — Implementation Backlog</title>
+<style>
+:root{--bg:#0f1117;--s1:#1a1d27;--s2:#21253a;--bd:#2e3350;--a1:#6c8ef5;--a2:#a78bfa;--gn:#34d399;--yw:#fbbf24;--rd:#f87171;--og:#fb923c;--tx:#e2e8f0;--mt:#94a3b8;--cb:#12151f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;line-height:1.65}
+.wrap{max-width:1460px;margin:0 auto;padding:44px 36px}
+h1{font-size:1.85rem;font-weight:700;color:var(--a1);margin-bottom:6px}
+h2{font-size:1.1rem;font-weight:600;color:var(--a2);margin:40px 0 14px;border-bottom:1px solid var(--bd);padding-bottom:8px;display:flex;align-items:center;gap:12px}
+h3{font-size:.92rem;font-weight:600;color:var(--mt);margin:26px 0 10px;text-transform:uppercase;letter-spacing:.07em}
+p{color:var(--mt);margin-bottom:10px}
+.sub{color:var(--mt);font-size:.88rem;margin-bottom:34px}
+.toc{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:20px 24px;margin-bottom:42px;columns:2;column-gap:32px}
+.toc h3{margin-top:0;color:var(--a1);text-transform:none;letter-spacing:0;font-size:.95rem;column-span:all;margin-bottom:10px}
+.toc a{color:var(--a2);text-decoration:none;display:block;padding:2px 0;font-size:13px}
+.toc a:hover{text-decoration:underline}
+.badge{display:inline-block;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:4px;white-space:nowrap}
+.bdb{background:rgba(108,142,245,.15);color:var(--a1);border:1px solid rgba(108,142,245,.3)}
+.bbe{background:rgba(167,139,250,.15);color:var(--a2);border:1px solid rgba(167,139,250,.3)}
+.bap{background:rgba(52,211,153,.12);color:var(--gn);border:1px solid rgba(52,211,153,.25)}
+.bev{background:rgba(251,191,36,.12);color:var(--yw);border:1px solid rgba(251,191,36,.25)}
+.bte{background:rgba(248,113,113,.15);color:var(--rd);border:1px solid rgba(248,113,113,.3)}
+.bcp{background:rgba(255,89,31,.18);color:#fb923c;border:1px solid rgba(255,89,31,.35)}
+.btag{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;background:var(--s2);color:var(--mt);border:1px solid var(--bd);font-family:monospace}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--mt);padding:9px 12px;border-bottom:1px solid var(--bd);white-space:nowrap}
+td{padding:8px 12px;border-bottom:1px solid rgba(46,51,80,.4);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.015)}
+code{font-family:'Cascadia Code','Fira Code',monospace;font-size:11.5px;background:var(--cb);color:#a5f3fc;padding:2px 6px;border-radius:4px}
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:0;margin-bottom:16px;overflow:hidden}
+.card-header{padding:14px 20px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between}
+.phase-bar{height:4px;width:100%}
+.ph1a{background:linear-gradient(90deg,#6c8ef5,#34d399)}
+.ph1b{background:linear-gradient(90deg,#a78bfa,#6c8ef5)}
+.ph1c{background:linear-gradient(90deg,#f87171,#a78bfa)}
+.ph2{background:linear-gradient(90deg,#fbbf24,#fb923c)}
+.alert{border-radius:8px;padding:13px 18px;margin:14px 0}
+.ag{background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.25)}
+.ag p{color:#6ee7b7;margin:0}
+.ay{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25)}
+.ay p{color:#fcd34d;margin:0}
+.ab{background:rgba(108,142,245,.08);border:1px solid rgba(108,142,245,.25)}
+.ab p{color:#93c5fd;margin:0}
+.ar{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.25)}
+.ar p{color:#fca5a5;margin:0}
+.effort{font-size:12px;font-weight:600;color:var(--yw);white-space:nowrap}
+.exists{font-size:11px;color:var(--gn);font-weight:600}
+.dep{font-size:11px;color:#64748b;font-family:monospace}
+.cp-marker{color:var(--og);font-size:11px;font-weight:700}
+.totrow td{background:rgba(46,51,80,.3);font-weight:600;color:var(--tx)}
+.chk{width:16px;height:16px;accent-color:var(--a1);cursor:pointer;flex-shrink:0;margin-top:2px}
+.task-desc strong{color:var(--tx)}
+.task-desc{color:var(--mt);font-size:13px}
+.phase-title{font-size:1rem;font-weight:700}
+.phase-hours{font-size:.85rem;color:var(--mt);margin-left:8px}
+.summary-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:24px 0}
+.sum-card{background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:16px;text-align:center}
+.sum-num{font-size:1.8rem;font-weight:700;color:var(--a1)}
+.sum-label{font-size:11px;color:var(--mt);margin-top:4px}
+.cp-section{background:var(--s1);border:1px solid rgba(255,89,31,.3);border-radius:10px;padding:20px 24px;margin:20px 0}
+.cp-section h3{color:var(--og);text-transform:none;letter-spacing:0;font-size:.95rem;margin-bottom:14px;margin-top:0}
+.cp-step{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px}
+.cp-id{flex-shrink:0;font-size:11px;font-family:monospace;background:rgba(255,89,31,.15);color:var(--og);border:1px solid rgba(255,89,31,.3);border-radius:4px;padding:2px 6px;margin-top:1px}
+.cp-arrow{color:#475569;margin:0 2px}
+ul{padding-left:18px;color:var(--mt)}
+li{margin:3px 0;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>AIRIS Phase 1 + 2 &#8212; Implementation Backlog</h1>
+<p class="sub">Execution-mode task checklist &#183; Auth Service + AI Screening Service extraction &#183; Schema: <code>app_auth</code> + <code>screening</code> &#183; June 2026</p>
+
+<div class="alert ab">
+  <p><strong>Three monolith endpoints confirmed to already exist:</strong> <code>GET /api/v1/candidates/{id}</code>, <code>GET /api/v1/jobs/{id}</code>, and <code>PATCH /api/v1/pipelines/{id}</code>. Only a service-key guard and a <code>/stage</code> sub-endpoint need to be added. This reduces Phase 1B effort by ~5h.</p>
+</div>
+
+<div class="toc">
+  <h3>Contents</h3>
+  <a href="#summary">Summary &amp; Totals</a>
+  <a href="#cp">Critical Path</a>
+  <a href="#ph1a">Phase 1A — Schema Isolation (zero-downtime)</a>
+  <a href="#ph1b">Phase 1B — Service Extraction</a>
+  <a href="#ph1c">Phase 1C — Compatibility Layer Removal</a>
+  <a href="#ph2">Phase 2 — Full Decoupling</a>
+</div>
+
+<!-- ====================== SUMMARY ====================== -->
+<h2 id="summary">Summary &amp; Totals</h2>
+<div class="summary-grid">
+  <div class="sum-card"><div class="sum-num" style="color:#6c8ef5">9</div><div class="sum-label">Database tasks</div></div>
+  <div class="sum-card"><div class="sum-num" style="color:#a78bfa">31</div><div class="sum-label">Backend tasks</div></div>
+  <div class="sum-card"><div class="sum-num" style="color:#34d399">10</div><div class="sum-label">API endpoint tasks</div></div>
+  <div class="sum-card"><div class="sum-num" style="color:#fbbf24">3</div><div class="sum-label">Env var tasks</div></div>
+  <div class="sum-card"><div class="sum-num" style="color:#f87171">10</div><div class="sum-label">Testing tasks</div></div>
+</div>
+<div class="card">
+<table>
+  <thead><tr><th>Phase</th><th>Focus</th><th>DB</th><th>BE</th><th>API</th><th>Env</th><th>Tests</th><th>Total hours</th><th>Gate condition</th></tr></thead>
+  <tbody>
+    <tr><td>1A</td><td>Schema isolation, compat views, model tags</td><td>5 tasks</td><td>4 tasks</td><td>—</td><td>—</td><td>2 tasks</td><td class="effort">19h</td><td>All tests green, monolith smoke-tested</td></tr>
+    <tr><td>1B</td><td>Auth Service + Screening Service bootstrapped</td><td>—</td><td>15 tasks</td><td>7 tasks</td><td>3 tasks</td><td>4 tasks</td><td class="effort">52h</td><td>End-to-end flow works across 3 processes</td></tr>
+    <tr><td>1C</td><td>Remove compat views, revoke cross-schema grants</td><td>2 tasks</td><td>4 tasks</td><td>—</td><td>—</td><td>2 tasks</td><td class="effort">17h</td><td>Zero cross-schema SQL in any service codebase</td></tr>
+    <tr><td>2</td><td>JWT perms claim, snapshot denorm, analytics decoupling</td><td>2 tasks</td><td>8 tasks</td><td>3 tasks</td><td>—</td><td>2 tasks</td><td class="effort">30h</td><td>Full platform regression; no compat views exist</td></tr>
+    <tr class="totrow"><td colspan="7"><strong>Grand total</strong></td><td class="effort">118h</td><td>&#x2248; 15 engineering days</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ====================== CRITICAL PATH ====================== -->
+<h2 id="cp">Critical Path</h2>
+<div class="cp-section">
+  <h3>&#x26A1; Longest dependency chain — 88h from start to Phase 2 complete</h3>
+  <div class="cp-step"><div class="cp-id">DB-001</div><div class="cp-arrow">&#x2192;</div><div><strong>Create schemas</strong> — everything else is blocked on this</div></div>
+  <div class="cp-step"><div class="cp-id">DB-002</div><div class="cp-arrow">&#x2192;</div><div><strong>Drop jobs FK + move 7 auth tables + compat views</strong></div></div>
+  <div class="cp-step"><div class="cp-id">DB-003</div><div class="cp-arrow">&#x2192;</div><div><strong>Move 6 screening tables + compat views</strong> (can parallel with DB-002 if two DBAs available)</div></div>
+  <div class="cp-step"><div class="cp-id">BE-001</div><div class="cp-arrow">&#x2192;</div><div><strong>Tag 7 auth models</strong> with <code>schema="app_auth"</code></div></div>
+  <div class="cp-step"><div class="cp-id">BE-002</div><div class="cp-arrow">&#x2192;</div><div><strong>Tag 6 screening models</strong> with <code>schema="screening"</code></div></div>
+  <div class="cp-step"><div class="cp-id">TEST-001</div><div class="cp-arrow">&#x2192;</div><div><strong>Full test suite pass</strong> — Phase 1A gate</div></div>
+  <div class="cp-step"><div class="cp-id">BE-003</div><div class="cp-arrow">&#x2192;</div><div><strong>Scaffold Auth Service</strong> FastAPI app</div></div>
+  <div class="cp-step"><div class="cp-id">BE-007</div><div class="cp-arrow">&#x2192;</div><div><strong>Auth Service: internal user/session endpoints</strong> (needed by monolith Phase 1C)</div></div>
+  <div class="cp-step"><div class="cp-id">BE-009</div><div class="cp-arrow">&#x2192;</div><div><strong>Scaffold Screening Service</strong> FastAPI app</div></div>
+  <div class="cp-step"><div class="cp-id">BE-013</div><div class="cp-arrow">&#x2192;</div><div><strong>Replace <code>advance_pipeline_from_screening()</code></strong> with HTTP PATCH — most critical coupling cut</div></div>
+  <div class="cp-step"><div class="cp-id">API-006</div><div class="cp-arrow">&#x2192;</div><div><strong>Monolith: <code>POST /internal/pipelines/{id}/stage</code></strong> with X-Service-Key guard</div></div>
+  <div class="cp-step"><div class="cp-id">TEST-004</div><div class="cp-arrow">&#x2192;</div><div><strong>E2E: send invite → complete screening → advance pipeline</strong> — Phase 1B gate</div></div>
+  <div class="cp-step"><div class="cp-id">BE-018</div><div class="cp-arrow">&#x2192;</div><div><strong>Replace Profile + AuthSession DB lookups</strong> in <code>dependencies.py</code></div></div>
+  <div class="cp-step"><div class="cp-id">BE-019</div><div class="cp-arrow">&#x2192;</div><div><strong>Replace PermissionService DB queries</strong> — last reason monolith touches <code>app_auth</code></div></div>
+  <div class="cp-step"><div class="cp-id">DB-006</div><div class="cp-arrow">&#x2192;</div><div><strong>Drop 13 compat views</strong> — Phase 1C gate</div></div>
+  <div class="cp-step"><div class="cp-id">BE-022</div><div class="cp-arrow">&#x2192;</div><div><strong>Embed <code>perms[]</code> claim in JWT</strong> — eliminates PermissionService entirely</div></div>
+  <div class="cp-step"><div class="cp-id">TEST-009</div><div class="cp-arrow">&#x2192;</div><div><strong>Full RBAC regression</strong> — Phase 2 gate</div></div>
+</div>
+
+<!-- ====================== PHASE 1A ====================== -->
+<h2 id="ph1a"><span class="phase-title">Phase 1A</span> <span class="phase-hours">&#8212; Schema Isolation &amp; Model Tags &nbsp;&#183;&nbsp; 19h &nbsp;&#183;&nbsp; Zero downtime</span></h2>
+<div class="phase-bar ph1a" style="margin-bottom:16px;border-radius:4px"></div>
+<p>Physically moves the 13 tables into their target schemas while creating compatibility views so the monolith continues running unchanged. No application code changes are observable to users.</p>
+
+<h3>Database Changes</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Task</th><th>File / Object</th><th>Effort</th><th>Depends</th><th>CP</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">DB-001</span></td>
+      <td class="task-desc"><strong>Create target schemas</strong><br>
+        <code>CREATE SCHEMA IF NOT EXISTS app_auth;</code><br>
+        <code>CREATE SCHEMA IF NOT EXISTS screening;</code><br>
+        Verify Supabase <code>auth</code> schema is not named <code>app_auth</code> before running.</td>
+      <td><code>001_create_schemas.sql</code></td>
+      <td class="effort">0.5h</td>
+      <td class="dep">—</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">DB-002</span></td>
+      <td class="task-desc"><strong>Drop inbound FK from jobs; move 7 auth tables; create 7 compat views</strong><br>
+        Step 1: <code>ALTER TABLE public.jobs DROP CONSTRAINT IF EXISTS fk_jobs_created_by_profiles;</code><br>
+        Step 2: <code>ALTER TABLE public.profiles SET SCHEMA app_auth;</code> × 7 tables<br>
+        Step 3: <code>CREATE OR REPLACE VIEW public.profiles AS SELECT * FROM app_auth.profiles;</code> × 7<br>
+        All three steps must be in one transaction.</td>
+      <td><code>002_move_auth_tables.sql</code></td>
+      <td class="effort">1.5h</td>
+      <td class="dep">DB-001</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">DB-003</span></td>
+      <td class="task-desc"><strong>Move 6 screening tables; create 6 compat views</strong><br>
+        No FK drops needed — all cross-table FKs within the 6 tables are intra-set; all candidate/job/pipeline columns are soft UUID references with no DB-level FK constraints.<br>
+        <code>ALTER TABLE public.ai_screenings SET SCHEMA screening;</code> × 6 tables<br>
+        <code>CREATE OR REPLACE VIEW public.ai_screenings AS SELECT * FROM screening.ai_screenings;</code> × 6</td>
+      <td><code>003_move_screening_tables.sql</code></td>
+      <td class="effort">1h</td>
+      <td class="dep">DB-001</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">DB-004</span></td>
+      <td class="task-desc"><strong>Create DB roles with schema-scoped permissions</strong><br>
+        Create roles: <code>airis_auth</code>, <code>airis_screening</code>, <code>airis_monolith</code><br>
+        <code>airis_auth</code>: ALL on <code>app_auth</code><br>
+        <code>airis_screening</code>: ALL on <code>screening</code><br>
+        <code>airis_monolith</code>: ALL on <code>public</code> + SELECT on <code>app_auth</code> + SELECT on <code>screening</code> (temporary, revoked in Phase 1C)</td>
+      <td><code>004_db_roles.sql</code></td>
+      <td class="effort">1h</td>
+      <td class="dep">DB-002, DB-003</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">DB-005</span></td>
+      <td class="task-desc"><strong>Seed per-service Alembic version tables; stamp baseline</strong><br>
+        <code>CREATE TABLE app_auth.alembic_version (...)</code><br>
+        <code>CREATE TABLE screening.alembic_version (...)</code><br>
+        Then in each new service directory: <code>alembic stamp head</code><br>
+        This prevents new-service migrations from trying to re-apply existing schema.</td>
+      <td><code>005_alembic_split.sql</code></td>
+      <td class="effort">0.5h</td>
+      <td class="dep">DB-002, DB-003</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Backend Changes</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Task</th><th>Files to edit</th><th>Effort</th><th>Depends</th><th>CP</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-001</span></td>
+      <td class="task-desc"><strong>Add <code>schema="app_auth"</code> to 7 auth SQLAlchemy models</strong><br>
+        For classes with existing <code>__table_args__</code> tuple (constraints), use mixed form:<br>
+        <code>__table_args__ = (UniqueConstraint(...), {"schema": "app_auth"})</code><br>
+        Models: Profile, Organization, AuthSession, OrganizationRole, Permission, RolePermission, Invite</td>
+      <td>
+        <code>models/profile.py</code><br>
+        <code>models/organization.py</code><br>
+        <code>models/auth_session.py</code><br>
+        <code>models/organization_role.py</code><br>
+        <code>models/permission.py</code><br>
+        <code>models/role_permission.py</code><br>
+        <code>models/invite.py</code>
+      </td>
+      <td class="effort">2h</td>
+      <td class="dep">DB-002</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-002</span></td>
+      <td class="task-desc"><strong>Add <code>schema="screening"</code> to 6 screening SQLAlchemy models</strong><br>
+        Models: AIScreening, AIScreeningQuestion, AIScreeningAnswer, AIScreeningEvaluation, AIScreeningMessage, AIScreeningSegment</td>
+      <td>
+        <code>models/ai_screening.py</code><br>
+        <code>models/ai_screening_segment.py</code>
+      </td>
+      <td class="effort">1h</td>
+      <td class="dep">DB-003</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-003</span></td>
+      <td class="task-desc"><strong>Update monolith Alembic config to pin <code>public</code> schema</strong><br>
+        In <code>backend/alembic/env.py</code> <code>run_migrations_online()</code>, add:<br>
+        <code>connection.execute(text("SET search_path TO public"))</code><br>
+        This prevents the monolith's Alembic from accidentally touching <code>app_auth</code> or <code>screening</code> tables in future migrations.</td>
+      <td><code>alembic/env.py</code></td>
+      <td class="effort">0.5h</td>
+      <td class="dep">DB-002, DB-003</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-004</span></td>
+      <td class="task-desc"><strong>Remove auth model imports from monolith <code>alembic/env.py</code></strong><br>
+        Lines 27–36 in <code>alembic/env.py</code> import all auth + screening models for Alembic autogenerate. After the schema split, these imports will cause Alembic to try to manage <code>app_auth</code> tables in the monolith migration history. Remove them and replace with a comment explaining the split.</td>
+      <td><code>alembic/env.py</code> lines 27–37</td>
+      <td class="effort">0.5h</td>
+      <td class="dep">DB-005</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Testing Tasks</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Task</th><th>Scope</th><th>Effort</th><th>Depends</th><th>CP</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">TEST-001</span></td>
+      <td class="task-desc"><strong>Full monolith test suite pass after model schema tags</strong><br>
+        Run <code>pytest backend/tests/ -x -q</code>. All 17 RBAC tests, invite tests, auth tests must pass. Verify no <code>relation "profiles" does not exist</code> errors (would indicate compat view missing).</td>
+      <td>Entire <code>tests/</code> directory</td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-001, BE-002</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">TEST-002</span></td>
+      <td class="task-desc"><strong>Manual smoke test: 10 key user journeys</strong><br>
+        Login &#x2192; create candidate &#x2192; create job &#x2192; add to pipeline &#x2192; send AI screening invite &#x2192; complete screening &#x2192; recruiter review &#x2192; advance pipeline &#x2192; roles page &#x2192; analytics dashboard. All must work with zero code changes to the monolith.</td>
+      <td>End-to-end browser test</td>
+      <td class="effort">3h</td>
+      <td class="dep">TEST-001</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="alert ag"><p><strong>Phase 1A complete gate:</strong> TEST-001 all green + TEST-002 all 10 journeys pass. At this point the data is physically in the right schemas, the monolith reads through compat views, and no user-visible change has occurred.</p></div>
+
+<!-- ====================== PHASE 1B ====================== -->
+<h2 id="ph1b"><span class="phase-title">Phase 1B</span> <span class="phase-hours">&#8212; Service Extraction &nbsp;&#183;&nbsp; 52h &nbsp;&#183;&nbsp; New processes deployed alongside monolith</span></h2>
+<div class="phase-bar ph1b" style="margin-bottom:16px;border-radius:4px"></div>
+
+<h3>Backend Changes — Auth Service Bootstrap</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Task</th><th>Files to create / edit</th><th>Effort</th><th>Depends</th><th>CP</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-005</span></td>
+      <td class="task-desc"><strong>Scaffold <code>auth_service/</code> FastAPI application</strong><br>
+        Create project structure: <code>auth_service/{main.py, core/config.py, core/security.py, db/session.py, alembic.ini, alembic/env.py, Dockerfile, requirements.txt}</code><br>
+        FastAPI app with CORS, health <code>GET /health</code>, structured logging.<br>
+        DB connection uses role <code>airis_auth</code>. Connection string sets <code>options=-csearch_path=app_auth</code>.</td>
+      <td><code>auth_service/</code> (new directory)</td>
+      <td class="effort">4h</td>
+      <td class="dep">DB-004, DB-005</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-006</span></td>
+      <td class="task-desc"><strong>Copy + adapt 7 auth models into Auth Service</strong><br>
+        Copy from monolith: Profile, Organization, AuthSession, OrganizationRole, Permission, RolePermission, Invite.<br>
+        Confirm each has <code>__table_args__ = {"schema": "app_auth"}</code>.<br>
+        Remove any ORM relationships that point to <code>public</code> schema models (e.g., Profile &#x2192; Job backref).</td>
+      <td><code>auth_service/models/</code> (7 new files)</td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-005</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-007</span></td>
+      <td class="task-desc"><strong>Port auth routes to Auth Service</strong><br>
+        Move from monolith <code>routes/auth.py</code>: POST /login, /signup, /refresh, /logout, GET /me.<br>
+        Copy <code>services/permission_service.py</code>, <code>core/signup_permissions.py</code>, <code>core/security.py</code>.<br>
+        Auth Service becomes the sole issuer of JWTs — ensure <code>SECRET_KEY</code> is shared with monolith during transition (or switch to asymmetric RS256 — see Phase 2).</td>
+      <td>
+        <code>auth_service/routes/auth.py</code><br>
+        <code>auth_service/services/permission_service.py</code><br>
+        <code>auth_service/core/signup_permissions.py</code>
+      </td>
+      <td class="effort">4h</td>
+      <td class="dep">BE-006</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-008</span></td>
+      <td class="task-desc"><strong>Implement Auth Service user/role management routes</strong><br>
+        Move from monolith: <code>routes/users.py</code>, <code>routes/roles.py</code>, <code>routes/invites.py</code>, <code>routes/permission_catalog.py</code>, <code>tasks/invite_tasks.py</code>.<br>
+        Keep route paths identical — monolith will proxy or redirect these in Phase 1C.</td>
+      <td>
+        <code>auth_service/routes/users.py</code><br>
+        <code>auth_service/routes/roles.py</code><br>
+        <code>auth_service/routes/invites.py</code><br>
+        <code>auth_service/routes/permission_catalog.py</code>
+      </td>
+      <td class="effort">5h</td>
+      <td class="dep">BE-006</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-009</span></td>
+      <td class="task-desc"><strong>Scaffold <code>screening_service/</code> FastAPI application</strong><br>
+        Structure: <code>screening_service/{main.py, core/config.py, db/session.py, alembic.ini, alembic/env.py, Dockerfile, requirements.txt}</code><br>
+        DB connection uses role <code>airis_screening</code>. <code>search_path=screening,public</code> (public needed to read compat views during Phase 1B).<br>
+        Registers AI screening router and WebSocket handler.</td>
+      <td><code>screening_service/</code> (new directory)</td>
+      <td class="effort">3h</td>
+      <td class="dep">DB-004, DB-005</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-010</span></td>
+      <td class="task-desc"><strong>Copy + adapt 6 screening models into Screening Service</strong><br>
+        Copy: AIScreening, AIScreeningQuestion, AIScreeningAnswer, AIScreeningEvaluation, AIScreeningMessage, AIScreeningSegment.<br>
+        Confirm each has <code>__table_args__ = {"schema": "screening"}</code>.<br>
+        Remove any ORM relationships pointing to <code>public.candidates</code>, <code>public.jobs</code> — those become soft UUID fields only.</td>
+      <td><code>screening_service/models/</code> (2 files with 6 classes)</td>
+      <td class="effort">1.5h</td>
+      <td class="dep">BE-009</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-011</span></td>
+      <td class="task-desc"><strong>Move AI screening service + routes + WebSocket into Screening Service</strong><br>
+        Copy: <code>services/ai_screening_service.py</code>, <code>routes/ai_screening.py</code>, <code>websocket/ai_screening_ws.py</code>, <code>services/ai_screening_email.py</code>, <code>services/ai/</code> directory.<br>
+        Update all imports (<code>from app.models...</code> → <code>from screening_service.models...</code>).<br>
+        Copy <code>services/candidate_hard_delete.py</code> — will be updated in BE-020.</td>
+      <td>
+        <code>screening_service/services/ai_screening_service.py</code><br>
+        <code>screening_service/routes/ai_screening.py</code><br>
+        <code>screening_service/websocket/ai_screening_ws.py</code><br>
+        <code>screening_service/services/ai/</code>
+      </td>
+      <td class="effort">3h</td>
+      <td class="dep">BE-010</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-012</span></td>
+      <td class="task-desc"><strong>Create Monolith HTTP client in Screening Service</strong><br>
+        <code>screening_service/clients/monolith_client.py</code> using <code>httpx.AsyncClient</code>.<br>
+        Methods:<br>
+        &#x2022; <code>get_candidate(id: UUID) -> dict</code> &#x2192; calls <code>GET {MONOLITH_URL}/api/v1/candidates/{id}</code><br>
+        &#x2022; <code>get_job(id: UUID) -> dict</code> &#x2192; calls <code>GET {MONOLITH_URL}/api/v1/jobs/{id}</code><br>
+        &#x2022; <code>get_job_match(cid, jid) -> dict | None</code> &#x2192; calls <code>GET {MONOLITH_URL}/api/v1/candidates/{cid}/matches</code><br>
+        &#x2022; <code>advance_pipeline_stage(pipeline_id, stage, status) -> None</code> &#x2192; calls <code>POST {MONOLITH_URL}/internal/pipelines/{id}/stage</code><br>
+        &#x2022; <code>get_pipeline_for_candidate(candidate_id, stage) -> dict | None</code> &#x2192; calls <code>GET {MONOLITH_URL}/api/v1/pipelines?candidate_id=&amp;stage=</code><br>
+        Each method adds <code>X-Service-Key: {SERVICE_API_KEY}</code> header. Raises <code>ServiceUnavailableError</code> on 5xx.</td>
+      <td><code>screening_service/clients/monolith_client.py</code></td>
+      <td class="effort">3h</td>
+      <td class="dep">BE-009</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-013</span></td>
+      <td class="task-desc"><strong>Replace <code>advance_pipeline_from_screening()</code> with HTTP call</strong><br>
+        In <code>ai_screening_service.py</code>, replace the <code>pipeline.stage = new_stage; self.db.commit()</code> block (lines 1480–1487) with:<br>
+        <code>await monolith_client.advance_pipeline_stage(pipeline_id, new_stage, status)</code><br>
+        This is the single most critical coupling to cut — it is the only <em>write</em> the Screening Service makes to a public-schema table.</td>
+      <td><code>screening_service/services/ai_screening_service.py</code> lines 1458–1488</td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-012, API-006</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-014</span></td>
+      <td class="task-desc"><strong>Replace Candidate ORM reads with HTTP client calls</strong><br>
+        Replace 6 <code>self.db.get(Candidate, ...)</code> callsites with <code>monolith_client.get_candidate(id)</code>.<br>
+        Lines: 109, 169, 213, 341, 534, 619.<br>
+        Update <code>question_generator.py</code> to accept <code>dict</code> instead of <code>Candidate</code> ORM object.<br>
+        For lines 341 + 110 (list/completion): use <code>candidate_name_snapshot</code> / <code>job_title_snapshot</code> already stored on the screening record — no API call needed there.</td>
+      <td>
+        <code>screening_service/services/ai_screening_service.py</code><br>
+        <code>screening_service/services/ai/question_generator.py</code>
+      </td>
+      <td class="effort">4h</td>
+      <td class="dep">BE-012</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-015</span></td>
+      <td class="task-desc"><strong>Replace Job ORM reads with HTTP client calls</strong><br>
+        Replace 6 <code>self.db.get(Job, ...)</code> callsites with <code>monolith_client.get_job(id)</code>.<br>
+        Lines: 110, 170, 214, 340, 535, 1683.<br>
+        Lines 110 + 340 (list/completion): use <code>job_title_snapshot</code> — no API call needed.<br>
+        Update <code>_answer_candidate_question()</code> to call monolith for job description.</td>
+      <td><code>screening_service/services/ai_screening_service.py</code></td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-012</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-016</span></td>
+      <td class="task-desc"><strong>Replace Pipeline ORM reads with HTTP client calls</strong><br>
+        <code>get_or_create_for_candidate()</code> (lines 1427–1456): replace <code>select(Pipeline)</code> with <code>monolith_client.get_pipeline_for_candidate(candidate_id, stage="ai_interview")</code>.<br>
+        <code>get_pipeline_ai_screenings()</code> (lines 1302–1345): this 4-table JOIN cannot be converted to a simple API call. <strong>Move this method to the Monolith</strong> as a new endpoint that fetches pipeline entries and calls <code>GET {SCREENING_URL}/internal/screenings?candidate_ids=</code> to merge AI screening status. Delete from Screening Service.</td>
+      <td>
+        <code>screening_service/services/ai_screening_service.py</code><br>
+        <code>backend/app/routes/pipeline.py</code> (new method added)
+      </td>
+      <td class="effort">4h</td>
+      <td class="dep">BE-012, API-007</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-017</span></td>
+      <td class="task-desc"><strong>Add service-key middleware to both new services</strong><br>
+        In each new service, create <code>core/service_auth.py</code> with a FastAPI dependency:<br>
+        <code>def require_service_key(x_service_key: str = Header(...)): assert x_service_key == settings.service_api_key</code><br>
+        Apply to all <code>/internal/*</code> routes in both services. Shared secret in <code>SERVICE_API_KEY</code> env var.</td>
+      <td>
+        <code>auth_service/core/service_auth.py</code><br>
+        <code>screening_service/core/service_auth.py</code>
+      </td>
+      <td class="effort">1h</td>
+      <td class="dep">BE-005, BE-009</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>New API Endpoints</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Endpoint</th><th>Service</th><th>Description</th><th>Status</th><th>Effort</th><th>Depends</th><th>CP</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-001</span></td>
+      <td><code>POST /auth/login<br>POST /auth/signup<br>POST /auth/refresh<br>POST /auth/logout</code></td>
+      <td><span class="badge bdb">Auth</span></td>
+      <td>Ported from monolith <code>routes/auth.py</code>. No logic change — same JWT shape, same validation rules.</td>
+      <td><span class="exists">EXISTS in monolith — copy</span></td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-007</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-002</span></td>
+      <td><code>GET /me<br>GET /users<br>PUT /users/{id}<br>DELETE /users/{id}</code></td>
+      <td><span class="badge bdb">Auth</span></td>
+      <td>Ported from monolith <code>routes/users.py</code>. Unchanged.</td>
+      <td><span class="exists">EXISTS in monolith — copy</span></td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-008</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-003</span></td>
+      <td><code>GET/POST/DELETE /roles<br>GET /permission-catalog<br>GET/POST/DELETE /invites</code></td>
+      <td><span class="badge bdb">Auth</span></td>
+      <td>Ported from monolith <code>routes/roles.py</code>, <code>routes/invites.py</code>, <code>routes/permission_catalog.py</code>.</td>
+      <td><span class="exists">EXISTS in monolith — copy</span></td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-008</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-004</span></td>
+      <td><code>GET /internal/users/{id}</code></td>
+      <td><span class="badge bdb">Auth</span></td>
+      <td>Returns full profile + organization_id + role. Used by monolith <code>dependencies.py</code> in Phase 1C to replace the direct DB lookup on line 165. Requires <code>X-Service-Key</code> header.</td>
+      <td><span style="color:var(--rd);font-size:11px;font-weight:600">NEW — build</span></td>
+      <td class="effort">1.5h</td>
+      <td class="dep">BE-007, BE-017</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-005</span></td>
+      <td><code>GET /internal/sessions/{id}</code></td>
+      <td><span class="badge bdb">Auth</span></td>
+      <td>Returns <code>{id, revoked_at}</code>. Used by monolith <code>dependencies.py</code> in Phase 1C to replace the <code>auth_sessions</code> DB lookup on line 186. Requires <code>X-Service-Key</code> header.</td>
+      <td><span style="color:var(--rd);font-size:11px;font-weight:600">NEW — build</span></td>
+      <td class="effort">1h</td>
+      <td class="dep">BE-007, BE-017</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-006</span></td>
+      <td><code>POST /internal/pipelines/{id}/stage</code></td>
+      <td><span class="badge bbe">Monolith</span></td>
+      <td>Body: <code>{"stage": "interview" | "rejected", "status": "closed" | null}</code>. Wraps the existing <code>transition_pipeline_stage()</code> logic. Requires <code>X-Service-Key</code> header. <strong>This is the only write the Screening Service needs from the Monolith.</strong></td>
+      <td><span style="color:var(--rd);font-size:11px;font-weight:600">NEW — build</span></td>
+      <td class="effort">2h</td>
+      <td class="dep">—</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-007</span></td>
+      <td><code>GET /internal/screenings</code><br><code>?candidate_ids=&amp;job_ids=</code></td>
+      <td><span class="badge bap">Screening</span></td>
+      <td>Batch fetch screening status for a list of candidate+job pairs. Used by the Monolith's pipeline board (<code>get_pipeline_ai_screenings</code> replacement in pipeline.py). Returns array of <code>{candidate_id, job_id, status, screening_id}</code>.</td>
+      <td><span style="color:var(--rd);font-size:11px;font-weight:600">NEW — build</span></td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-011</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Environment Variables</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Variable</th><th>Service</th><th>Value / Notes</th><th>Effort</th><th>Depends</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">ENV-001</span></td>
+      <td>
+        <code>DATABASE_URL</code><br>
+        <code>SERVICE_API_KEY</code><br>
+        <code>JWT_SECRET_KEY</code><br>
+        <code>FRONTEND_URL</code><br>
+        <code>SMTP_*</code>
+      </td>
+      <td><span class="badge bdb">Auth Service</span></td>
+      <td>DB URL must use <code>airis_auth</code> role + <code>?options=-csearch_path%3Dapp_auth</code> to default search path. <code>JWT_SECRET_KEY</code> must match monolith's secret during Phase 1B/C (shared HS256 secret). <code>SERVICE_API_KEY</code> is a random 64-char hex shared with all 3 services.</td>
+      <td class="effort">1h</td>
+      <td class="dep">BE-005</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">ENV-002</span></td>
+      <td>
+        <code>DATABASE_URL</code><br>
+        <code>SERVICE_API_KEY</code><br>
+        <code>MONOLITH_INTERNAL_URL</code><br>
+        <code>AUTH_SERVICE_URL</code><br>
+        <code>ANTHROPIC_API_KEY</code><br>
+        <code>LIVEKIT_*</code><br>
+        <code>SUPABASE_*</code>
+      </td>
+      <td><span class="badge bap">Screening Service</span></td>
+      <td>DB URL uses <code>airis_screening</code> role. <code>MONOLITH_INTERNAL_URL</code>: base URL for candidate/job/pipeline calls. <code>AUTH_SERVICE_URL</code>: for JWT validation delegation (Phase 1C). All AI/LiveKit/Supabase keys are copied from monolith env.</td>
+      <td class="effort">1h</td>
+      <td class="dep">BE-009</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">ENV-003</span></td>
+      <td>
+        <code>SERVICE_API_KEY</code><br>
+        <code>SCREENING_SERVICE_URL</code><br>
+        <code>AUTH_SERVICE_URL</code>
+      </td>
+      <td><span class="badge bbe">Monolith</span></td>
+      <td>Add to monolith <code>.env</code>. <code>SERVICE_API_KEY</code>: validates inbound calls from Screening Service. <code>SCREENING_SERVICE_URL</code> + <code>AUTH_SERVICE_URL</code> are used in Phase 1C when the monolith starts making outbound service calls.</td>
+      <td class="effort">0.5h</td>
+      <td class="dep">BE-005, BE-009</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Testing Tasks</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Task</th><th>Scope</th><th>Effort</th><th>Depends</th><th>CP</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">TEST-003</span></td>
+      <td class="task-desc"><strong>Auth Service unit + integration tests</strong><br>
+        Login with valid/invalid credentials. Refresh token rotation. Signup with duplicate email (409). Role assignment. Invite creation + token validation. <code>GET /internal/users/{id}</code> with valid + invalid service key. <code>GET /internal/sessions/{id}</code> returns correct <code>revoked_at</code>.</td>
+      <td><code>auth_service/tests/</code></td>
+      <td class="effort">4h</td>
+      <td class="dep">BE-007, BE-008, API-004, API-005</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">TEST-004</span></td>
+      <td class="task-desc"><strong>Screening Service integration tests with mocked Monolith</strong><br>
+        Mock <code>monolith_client</code> using <code>respx</code> or <code>pytest-httpx</code>.<br>
+        Create screening &#x2192; generate questions &#x2192; answer questions &#x2192; evaluate &#x2192; recruiter submits advance &#x2192; verify <code>PATCH /internal/pipelines/{id}/stage</code> was called with correct body.<br>
+        Verify <code>advance_pipeline_from_screening()</code> makes HTTP call, NOT a direct DB write.</td>
+      <td><code>screening_service/tests/</code></td>
+      <td class="effort">4h</td>
+      <td class="dep">BE-011, BE-013, BE-014, BE-015</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">TEST-005</span></td>
+      <td class="task-desc"><strong>End-to-end integration: 3-service flow against real DB</strong><br>
+        With all 3 processes running (Auth :8001, Monolith :8000, Screening :8002):<br>
+        1. Login via Auth Service &#x2192; get JWT<br>
+        2. Create candidate + job via Monolith<br>
+        3. Add to pipeline via Monolith<br>
+        4. <code>POST /ai-screenings</code> via Screening Service<br>
+        5. Complete screening<br>
+        6. Recruiter advances &#x2192; verify <code>public.pipelines.stage</code> updated to "interview"<br>
+        7. Verify no cross-schema SQL was issued (check DB role grants)</td>
+      <td>Docker Compose / local multi-process</td>
+      <td class="effort">4h</td>
+      <td class="dep">TEST-003, TEST-004, API-006</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">TEST-006</span></td>
+      <td class="task-desc"><strong>Monolith regression after Screening extraction</strong><br>
+        Verify all monolith routes still work: candidates, jobs, pipelines, clients, sourcing, offers, interviews, analytics dashboard. The monolith should not call the Screening Service at this point — it still reads <code>public.ai_screenings</code> via compat view.</td>
+      <td>Full monolith test suite</td>
+      <td class="effort">2h</td>
+      <td class="dep">TEST-005</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="alert ag"><p><strong>Phase 1B complete gate:</strong> TEST-005 end-to-end passes. All three processes running. <code>advance_pipeline_from_screening()</code> makes HTTP call verified in TEST-004. Compat views still active — monolith unchanged.</p></div>
+
+<!-- ====================== PHASE 1C ====================== -->
+<h2 id="ph1c"><span class="phase-title">Phase 1C</span> <span class="phase-hours">&#8212; Compatibility Layer Removal &nbsp;&#183;&nbsp; 17h &nbsp;&#183;&nbsp; Service boundary enforced at DB level</span></h2>
+<div class="phase-bar ph1c" style="margin-bottom:16px;border-radius:4px"></div>
+<div class="alert ay"><p><strong>Do not start Phase 1C until every cross-schema SQL statement in the monolith has been replaced by an API call. Run this audit first:</strong> <code>grep -rn "select(Profile\|select(AuthSession\|select(RolePermission\|select(OrganizationRole\|select(AIScreening" backend/app/</code> — every hit in non-auth, non-screening service code must be eliminated before dropping views.</p></div>
+
+<h3>Backend Changes</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Task</th><th>Files to edit</th><th>Effort</th><th>Depends</th><th>CP</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-018</span></td>
+      <td class="task-desc"><strong>Replace Profile DB lookup in <code>dependencies.py</code> line 165</strong><br>
+        Replace <code>db.scalar(select(Profile).where(Profile.id == user_uuid))</code> with:<br>
+        <code>profile = await auth_client.get_user(str(user_uuid))</code><br>
+        Create <code>backend/app/clients/auth_client.py</code> with <code>get_user(id)</code> calling <code>GET {AUTH_SERVICE_URL}/internal/users/{id}</code> with <code>X-Service-Key</code>.<br>
+        Add LRU cache (TTL=30s) to avoid per-request HTTP call — profile data changes infrequently. Cache key: <code>user_id</code>.</td>
+      <td>
+        <code>app/core/dependencies.py</code> line 165<br>
+        <code>app/clients/auth_client.py</code> (new)
+      </td>
+      <td class="effort">4h</td>
+      <td class="dep">API-004</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-019</span></td>
+      <td class="task-desc"><strong>Replace AuthSession DB lookup in <code>dependencies.py</code> line 186</strong><br>
+        Replace <code>db.scalar(select(AuthSession).where(AuthSession.id == session_uuid))</code> with:<br>
+        <code>session = await auth_client.get_session(str(session_uuid))</code><br>
+        The <code>ProgrammingError</code> fallback block (lines 187–206) can be removed — the table will always exist.<br>
+        Add same TTL cache as BE-018 (cache key: <code>session_id</code>, invalidated on logout).</td>
+      <td><code>app/core/dependencies.py</code> line 186</td>
+      <td class="effort">2h</td>
+      <td class="dep">API-005, BE-018</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-020</span></td>
+      <td class="task-desc"><strong>Replace <code>signup_permissions.py</code> direct role writes with Auth Service call</strong><br>
+        <code>core/signup_permissions.py</code> seeds <code>role_permissions</code> rows directly during org creation. Replace with <code>POST {AUTH_SERVICE_URL}/internal/orgs/{id}/seed-permissions</code>.<br>
+        Add the corresponding internal endpoint to the Auth Service.</td>
+      <td>
+        <code>app/core/signup_permissions.py</code><br>
+        <code>auth_service/routes/internal.py</code> (add endpoint)
+      </td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-007</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-021</span></td>
+      <td class="task-desc"><strong>Update <code>candidate_hard_delete.py</code> to call Screening Service</strong><br>
+        Replace direct <code>AIScreening</code> ORM writes with:<br>
+        <code>await screening_client.delete_by_candidate(candidate_id)</code><br>
+        This calls <code>DELETE {SCREENING_SERVICE_URL}/internal/screenings?candidate_id={id}</code>.<br>
+        Create <code>backend/app/clients/screening_client.py</code>.</td>
+      <td>
+        <code>app/services/candidate_hard_delete.py</code><br>
+        <code>app/clients/screening_client.py</code> (new)
+      </td>
+      <td class="effort">2h</td>
+      <td class="dep">API-008</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>New API Endpoints</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Endpoint</th><th>Service</th><th>Description</th><th>Effort</th><th>Depends</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-008</span></td>
+      <td><code>DELETE /internal/screenings<br>?candidate_id={id}</code></td>
+      <td><span class="badge bap">Screening</span></td>
+      <td>Cascade-deletes all screening records for a candidate (questions, answers, evaluations, messages, segments). Called when a candidate is hard-deleted from the monolith. Requires <code>X-Service-Key</code>.</td>
+      <td class="effort">1.5h</td>
+      <td class="dep">BE-011, BE-017</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-009</span></td>
+      <td><code>POST /internal/orgs/{id}/seed-permissions</code></td>
+      <td><span class="badge bdb">Auth</span></td>
+      <td>Seeds default role-permission rows for a newly created organization. Called by monolith's <code>signup_permissions.py</code>. Idempotent. Requires <code>X-Service-Key</code>.</td>
+      <td class="effort">1.5h</td>
+      <td class="dep">BE-007, BE-017</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Database Changes</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Task</th><th>SQL</th><th>Effort</th><th>Depends</th><th>CP</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">DB-006</span></td>
+      <td class="task-desc"><strong>Drop all 13 compatibility views from <code>public</code> schema</strong><br>
+        <code>DROP VIEW IF EXISTS public.profiles CASCADE;</code> × 13<br>
+        <strong>Only run after:</strong> BE-018, BE-019, BE-020, BE-021 are deployed and tested. Run <code>grep</code> audit described above first. This enforces the service boundary — any rogue cross-schema SQL will now hard-error.</td>
+      <td><code>006_drop_compat_views.sql</code></td>
+      <td class="effort">0.5h</td>
+      <td class="dep">BE-018, BE-019, BE-020, BE-021, TEST-007</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">DB-007</span></td>
+      <td class="task-desc"><strong>Revoke monolith cross-schema DB grants</strong><br>
+        <code>REVOKE SELECT ON ALL TABLES IN SCHEMA app_auth FROM airis_monolith;</code><br>
+        <code>REVOKE SELECT ON ALL TABLES IN SCHEMA screening FROM airis_monolith;</code><br>
+        <code>REVOKE USAGE ON SCHEMA app_auth FROM airis_monolith;</code><br>
+        <code>REVOKE USAGE ON SCHEMA screening FROM airis_monolith;</code><br>
+        After this the monolith's DB connection is physically incapable of querying auth or screening tables.</td>
+      <td><code>007_revoke_cross_grants.sql</code></td>
+      <td class="effort">0.5h</td>
+      <td class="dep">DB-006</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Testing Tasks</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Task</th><th>Scope</th><th>Effort</th><th>Depends</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">TEST-007</span></td>
+      <td class="task-desc"><strong>Cross-schema SQL audit — zero remaining hits</strong><br>
+        Run: <code>grep -rn "select(Profile\|select(AuthSession\|PermissionService(db)\|select(AIScreening\|select(RolePermission" backend/app/ --include="*.py"</code><br>
+        Every hit must be in a file that will be moved to Auth or Screening Service. Zero hits in monolith service/route files is the pass criterion.</td>
+      <td>Static grep audit</td>
+      <td class="effort">1h</td>
+      <td class="dep">BE-018, BE-019, BE-020, BE-021</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">TEST-008</span></td>
+      <td class="task-desc"><strong>Full regression after compat view removal</strong><br>
+        Run full monolith test suite + 10-journey smoke test against the running 3-service stack.<br>
+        Any <code>UndefinedTable</code> or <code>ProgrammingError</code> means a cross-schema query was missed — fix before proceeding to DB-007.</td>
+      <td>Full test suite + manual smoke</td>
+      <td class="effort">3h</td>
+      <td class="dep">DB-006</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="alert ag"><p><strong>Phase 1C complete gate:</strong> DB-007 applied. Monolith DB role has zero access to <code>app_auth</code> or <code>screening</code> schemas. TEST-008 all green. The service boundary is now enforced at the database layer.</p></div>
+
+<!-- ====================== PHASE 2 ====================== -->
+<h2 id="ph2"><span class="phase-title">Phase 2</span> <span class="phase-hours">&#8212; Full Decoupling &nbsp;&#183;&nbsp; 30h &nbsp;&#183;&nbsp; Eliminate remaining runtime coupling</span></h2>
+<div class="phase-bar ph2" style="margin-bottom:16px;border-radius:4px"></div>
+<p>Phase 2 eliminates the two remaining sources of cross-service coupling: per-request HTTP calls from <code>dependencies.py</code> to the Auth Service (replaced by JWT claims), and the analytics JOIN over Profile (replaced by denormalization or dedicated endpoint).</p>
+
+<h3>Database Changes</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Task</th><th>Migration file</th><th>Effort</th><th>Depends</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">DB-008</span></td>
+      <td class="task-desc"><strong>Add snapshot columns to <code>screening.ai_screenings</code></strong><br>
+        <code>ALTER TABLE screening.ai_screenings ADD COLUMN IF NOT EXISTS candidate_email_snapshot VARCHAR(255);</code><br>
+        <code>ALTER TABLE screening.ai_screenings ADD COLUMN IF NOT EXISTS job_description_snapshot TEXT;</code><br>
+        Backfill via one-time script calling the Monolith for existing records.<br>
+        (<code>candidate_name_snapshot</code> and <code>job_title_snapshot</code> already exist.)</td>
+      <td><code>screening_service/alembic/versions/001_add_snapshots.py</code></td>
+      <td class="effort">2h</td>
+      <td class="dep">DB-007</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">DB-009</span></td>
+      <td class="task-desc"><strong>Add <code>recruiter_name_snapshot</code> to <code>public.interviews</code></strong><br>
+        <code>analytics/repository.py</code> joins <code>profiles</code> 17 times to get recruiter name/email for analytics aggregations. Adding a denormalized <code>recruiter_name</code> column to <code>interviews</code> (populated at creation time) eliminates most of those joins.<br>
+        Alternative: keep analytics joins via compat view — only drop if performance degrades.</td>
+      <td><code>backend/alembic/versions/XXX_recruiter_snapshot.py</code></td>
+      <td class="effort">2h</td>
+      <td class="dep">DB-007</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Backend Changes</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Task</th><th>Files to edit</th><th>Effort</th><th>Depends</th><th>CP</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-022</span></td>
+      <td class="task-desc"><strong>Add <code>perms: string[]</code> claim to JWT access tokens in Auth Service</strong><br>
+        In <code>auth_service/core/security.py</code>, when creating the access token, call <code>PermissionService.get_user_permissions(user_id)</code> and embed result as <code>"perms"</code> claim.<br>
+        Token size impact: ~200–400 bytes per token for typical permission sets. Acceptable.<br>
+        Permissions cache TTL in Auth Service: 60s (role changes take effect on next login or token refresh).</td>
+      <td><code>auth_service/core/security.py</code><br><code>auth_service/routes/auth.py</code></td>
+      <td class="effort">3h</td>
+      <td class="dep">BE-007</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-023</span></td>
+      <td class="task-desc"><strong>Update <code>dependencies.py</code> to read permissions from JWT claim</strong><br>
+        In <code>_effective_permissions_for_request()</code> (line 247): replace <code>PermissionService(db).get_user_permissions(user_id)</code> with <code>frozenset(payload.get("perms", []))</code> from the already-decoded JWT.<br>
+        The <code>db</code> parameter can be removed from this function entirely.<br>
+        The fallback legacy path (lines 89–108, <code>ROLE_ALIASES</code> dict) can also be removed once all tokens are reissued with <code>perms</code> claim.</td>
+      <td><code>app/core/dependencies.py</code> lines 239–249</td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-022</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-024</span></td>
+      <td class="task-desc"><strong>Remove <code>PermissionService</code> import and usage from monolith</strong><br>
+        After BE-023, <code>services/permission_service.py</code> is no longer called from <code>dependencies.py</code> or <code>copilot_ws.py</code>. Delete the monolith copy. The Auth Service retains its own copy for JWT claim generation.<br>
+        Update <code>websocket/copilot_ws.py</code> (5 RolePermission refs) to read from JWT claims.</td>
+      <td>
+        <code>app/services/permission_service.py</code> (delete from monolith)<br>
+        <code>app/websocket/copilot_ws.py</code>
+      </td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-023</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-025</span></td>
+      <td class="task-desc"><strong>Populate snapshot columns at screening creation time</strong><br>
+        In <code>screening_service/services/ai_screening_service.py</code>, in the <code>AIScreening(...)</code> constructor calls, populate:<br>
+        <code>candidate_email_snapshot=candidate["email"]</code><br>
+        <code>job_description_snapshot=job["description"]</code><br>
+        This eliminates the <code>get_candidate</code> + <code>get_job</code> API calls for list/completion paths (lines 109, 340 equivalents). The question-generation path (line 213) still needs full candidate resume data — keep that API call.</td>
+      <td><code>screening_service/services/ai_screening_service.py</code> (creation methods)</td>
+      <td class="effort">2h</td>
+      <td class="dep">DB-008, BE-014</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-026</span></td>
+      <td class="task-desc"><strong>Decouple <code>analytics/repository.py</code> from Profile</strong><br>
+        17 Profile references — all for recruiter name/email aggregation.<br>
+        Option A (preferred): populate <code>recruiter_name_snapshot</code> on <code>interviews</code> at creation (DB-009). Update analytics queries to use snapshot column instead of JOIN.<br>
+        Option B (fallback): keep analytics JOIN via compatibility view — mark as tech debt and revisit in Phase 3 when Auth Service adds a <code>GET /internal/users/batch</code> endpoint (API-010).</td>
+      <td><code>app/analytics/repository.py</code></td>
+      <td class="effort">4h</td>
+      <td class="dep">DB-009</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-027</span></td>
+      <td class="task-desc"><strong>Decouple <code>interview_service.py</code> and <code>interview_reminder_service.py</code> from Profile</strong><br>
+        13 Profile refs across both files — reads recruiter name/email for calendar invites and reminder emails.<br>
+        Replace with: embed recruiter name in the <code>interviews</code> record at creation time, or call <code>GET {AUTH_URL}/internal/users/{id}</code> at email-send time (acceptable latency — these are background tasks).</td>
+      <td>
+        <code>app/services/interview_service.py</code><br>
+        <code>app/services/interview_reminder_service.py</code>
+      </td>
+      <td class="effort">3h</td>
+      <td class="dep">API-004</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-028</span></td>
+      <td class="task-desc"><strong>Decouple remaining monolith services from Profile</strong><br>
+        <code>services/client_service.py</code>: 10 Profile refs — reads recruiter's org for client scoping. Replace with org_id from JWT claim (already available in <code>current_user.organization_id</code>).<br>
+        <code>candidate_management/service.py</code>: 5 Profile refs — reads recruiter name for activity log. Embed in activity log at write time.<br>
+        <code>routes/job.py</code>: 9 Profile refs — reads profile.organization_id. Already in JWT claim — delete queries.</td>
+      <td>
+        <code>app/services/client_service.py</code><br>
+        <code>app/candidate_management/service.py</code><br>
+        <code>app/routes/job.py</code>
+      </td>
+      <td class="effort">4h</td>
+      <td class="dep">BE-023</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">BE-029</span></td>
+      <td class="task-desc"><strong>Decouple <code>routes/invites.py</code>, <code>routes/roles.py</code>, <code>routes/users.py</code> from Profile</strong><br>
+        These 3 routes have a combined 27 Profile refs — but they will physically move to Auth Service in Phase 1B (BE-008). Verify the monolith's copies have been retired/redirected to Auth Service. If not redirected yet, set up reverse-proxy or 301 redirects from monolith to Auth Service for these paths.</td>
+      <td>Nginx / API gateway config or monolith proxy routes</td>
+      <td class="effort">2h</td>
+      <td class="dep">BE-008</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>New API Endpoints</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Endpoint</th><th>Service</th><th>Description</th><th>Effort</th><th>Depends</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-010</span></td>
+      <td><code>GET /internal/users/batch<br>?ids=uuid1,uuid2,...</code></td>
+      <td><span class="badge bdb">Auth</span></td>
+      <td>Batch user lookup — returns array of <code>{id, name, email, org_id, role}</code>. Used by analytics if Option A snapshot strategy is not viable. Max 100 IDs per request.</td>
+      <td class="effort">1.5h</td>
+      <td class="dep">BE-007</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-011</span></td>
+      <td><code>GET /internal/pipelines<br>?candidate_id=&amp;stage=</code></td>
+      <td><span class="badge bbe">Monolith</span></td>
+      <td>Filters pipeline entries by candidate_id and optional stage. Used by Screening Service's <code>get_or_create_for_candidate()</code>. Requires <code>X-Service-Key</code>.</td>
+      <td class="effort">1h</td>
+      <td class="dep">—</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">API-012</span></td>
+      <td><code>GET /api/v1/candidates/{cid}<br>/job-matches/{jid}</code></td>
+      <td><span class="badge bbe">Monolith</span></td>
+      <td>Returns ATS score + skill gaps for a specific candidate-job pair. Used by Screening Service to tailor question difficulty. Check if <code>GET /candidates/{id}/matches</code> (line 165 in routes) already returns this — if it does, reuse it and adjust the Screening Service client call.</td>
+      <td class="effort">1h</td>
+      <td class="dep">—</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Testing Tasks</h3>
+<div class="card">
+<table>
+  <thead><tr><th>&#x2713;</th><th>ID</th><th>Task</th><th>Scope</th><th>Effort</th><th>Depends</th><th>CP</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">TEST-009</span></td>
+      <td class="task-desc"><strong>Full RBAC regression after JWT perms claim migration</strong><br>
+        Test every permission-gated endpoint with: valid token with correct perm, valid token missing perm, expired token, tampered token.<br>
+        Verify role change propagates to new tokens (old tokens still work until expiry — document this behavior).<br>
+        Test <code>require_permission()</code>, <code>require_roles()</code>, <code>require_any_permissions()</code> FastAPI dependencies all work from JWT claim.</td>
+      <td>Permission system full matrix</td>
+      <td class="effort">5h</td>
+      <td class="dep">BE-022, BE-023</td>
+      <td class="cp-marker">&#x26A1; CP</td>
+    </tr>
+    <tr>
+      <td><input type="checkbox" class="chk"></td>
+      <td><span class="btag">TEST-010</span></td>
+      <td class="task-desc"><strong>Final full platform regression — no compat views, no cross-schema grants</strong><br>
+        Run all tests. Run 10-journey smoke test. Confirm DB role grants are fully isolated.<br>
+        Confirm no <code>ProgrammingError</code>, <code>UndefinedTable</code>, or <code>UndefinedColumn</code> errors in logs after 24h of production traffic (or staging simulation).</td>
+      <td>Full platform test suite + 24h monitoring</td>
+      <td class="effort">4h</td>
+      <td class="dep">BE-022, BE-023, BE-024, BE-025, BE-026, BE-027, BE-028</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="alert ag"><p><strong>Phase 2 complete gate:</strong> TEST-009 and TEST-010 pass. <code>PermissionService</code> deleted from monolith. JWT contains <code>perms</code> claim. Analytics uses snapshots or batch API. No service reads data from a schema it does not own.</p></div>
+
+<!-- ====================== EFFORT SUMMARY TABLE ====================== -->
+<h2 id="effort">Effort by Category</h2>
+<div class="card">
+<table>
+  <thead><tr><th>Category</th><th>Phase 1A</th><th>Phase 1B</th><th>Phase 1C</th><th>Phase 2</th><th>Total</th></tr></thead>
+  <tbody>
+    <tr><td><span class="badge bdb">Database Changes</span></td><td>4.5h</td><td>2.5h</td><td>1h</td><td>4h</td><td class="effort">12h</td></tr>
+    <tr><td><span class="badge bbe">Backend Changes</span></td><td>4h</td><td>29.5h</td><td>10h</td><td>22h</td><td class="effort">65.5h</td></tr>
+    <tr><td><span class="badge bap">New API Endpoints</span></td><td>—</td><td>11h</td><td>3h</td><td>3.5h</td><td class="effort">17.5h</td></tr>
+    <tr><td><span class="badge bev">Environment Vars</span></td><td>—</td><td>2.5h</td><td>—</td><td>—</td><td class="effort">2.5h</td></tr>
+    <tr><td><span class="badge bte">Testing Tasks</span></td><td>5h</td><td>14h</td><td>4h</td><td>9h</td><td class="effort">32h</td></tr>
+    <tr class="totrow"><td><strong>Phase total</strong></td><td class="effort">13.5h</td><td class="effort">59.5h</td><td class="effort">18h</td><td class="effort">38.5h</td><td class="effort" style="color:#34d399">129.5h</td></tr>
+  </tbody>
+</table>
+</div>
+<p style="font-size:12px;color:#475569;margin-top:4px">&#x2248; 16 engineering days at 8h/day. Parallel execution of BE-005 (Auth scaffold) and BE-009 (Screening scaffold) during Phase 1B reduces wall-clock time by ~4h.</p>
+
+<p style="margin-top:52px;color:#2e3350;font-size:12px;border-top:1px solid #2e3350;padding-top:18px">
+  Generated by Claude Code &#183; AIRIS Platform &#183; June 2026
+</p>
+</div>
+</body>
+</html>

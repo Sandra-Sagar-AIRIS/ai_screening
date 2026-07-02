@@ -20,6 +20,7 @@ from app.db.base import Base
 
 class InterviewReminder(Base):
     __tablename__ = "interview_reminders"
+    __table_args__ = {"schema": "interview"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -28,7 +29,7 @@ class InterviewReminder(Base):
     )
     interview_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("interviews.id", ondelete="CASCADE"),
+        ForeignKey("interview.interviews.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

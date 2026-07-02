@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIRIS — Database Schema Migration Plan</title>
+<style>
+:root{--bg:#0f1117;--s1:#1a1d27;--s2:#21253a;--bd:#2e3350;--a1:#6c8ef5;--a2:#a78bfa;--gn:#34d399;--yw:#fbbf24;--rd:#f87171;--og:#fb923c;--tx:#e2e8f0;--mt:#94a3b8;--cb:#12151f;--auth:#3b82f6;--screen:#8b5cf6;--pub:#10b981}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-serif;font-size:13px;line-height:1.6}
+.wrap{max-width:1600px;margin:0 auto;padding:40px 32px}
+h1{font-size:1.8rem;font-weight:800;color:var(--a1);margin-bottom:6px}
+h2{font-size:1.1rem;font-weight:700;margin:48px 0 16px;padding-bottom:10px;border-bottom:2px solid var(--bd);display:flex;align-items:center;gap:10px;color:var(--tx)}
+h2 .ph{font-size:.7rem;font-weight:700;padding:3px 8px;border-radius:4px;background:var(--s2);color:var(--mt);letter-spacing:.06em;text-transform:uppercase}
+h3{font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--mt);margin:22px 0 8px}
+p{color:var(--mt);margin-bottom:10px;font-size:13px}
+.sub{color:var(--mt);font-size:.85rem;margin-bottom:32px}
+code{font-family:'Cascadia Code','Fira Code',monospace;font-size:11px;background:var(--cb);color:#a5f3fc;padding:1px 5px;border-radius:3px;white-space:nowrap}
+pre{background:var(--cb);border:1px solid var(--bd);border-radius:8px;padding:18px;overflow-x:auto;font-family:'Cascadia Code','Fira Code',monospace;font-size:11.5px;line-height:1.7;color:#e2e8f0;margin:12px 0}
+pre .c{color:#475569}
+pre .k{color:#818cf8}
+pre .s{color:#34d399}
+pre .n{color:#a5f3fc}
+pre .w{color:#fbbf24}
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:10px;margin-bottom:12px;overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--mt);padding:8px 12px;border-bottom:1px solid var(--bd);white-space:nowrap;background:rgba(0,0,0,.15)}
+td{padding:7px 12px;border-bottom:1px solid rgba(46,51,80,.35);vertical-align:top;line-height:1.5}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.01)}
+.badge{display:inline-flex;align-items:center;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;gap:3px}
+.ba{background:rgba(59,130,246,.15);color:#93c5fd;border:1px solid rgba(59,130,246,.3)}
+.bs{background:rgba(139,92,246,.15);color:#c4b5fd;border:1px solid rgba(139,92,246,.3)}
+.bp{background:rgba(16,185,129,.12);color:#6ee7b7;border:1px solid rgba(16,185,129,.25)}
+.safe{background:rgba(52,211,153,.1);color:var(--gn);border:1px solid rgba(52,211,153,.25)}
+.warn{background:rgba(251,191,36,.1);color:var(--yw);border:1px solid rgba(251,191,36,.25)}
+.risk{background:rgba(255,89,31,.12);color:var(--og);border:1px solid rgba(255,89,31,.25)}
+.blk{background:rgba(248,113,113,.12);color:var(--rd);border:1px solid rgba(248,113,113,.3)}
+.alert{border-radius:8px;padding:12px 16px;margin:12px 0;font-size:12.5px}
+.ag{background:rgba(52,211,153,.06);border:1px solid rgba(52,211,153,.2);color:#6ee7b7}
+.ay{background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);color:#fcd34d}
+.ar{background:rgba(248,113,113,.06);border:1px solid rgba(248,113,113,.2);color:#fca5a5}
+.ab{background:rgba(108,142,245,.07);border:1px solid rgba(108,142,245,.2);color:#a5b4fc}
+strong{color:var(--tx)}
+.toc{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:18px 22px;margin-bottom:36px}
+.toc h3{margin-top:0;text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--a1)}
+.toc ol{padding-left:18px}
+.toc li{margin:4px 0}
+.toc a{color:var(--a2);text-decoration:none;font-size:12.5px}
+.toc a:hover{text-decoration:underline}
+.summary-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:16px 0}
+.sg{background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:14px;text-align:center}
+.sg .n{font-size:2rem;font-weight:800;line-height:1}
+.sg .l{font-size:10.5px;margin-top:4px;color:var(--mt)}
+.auth-n{color:var(--auth)}
+.screen-n{color:var(--screen)}
+.pub-n{color:var(--pub)}
+.xfk-n{color:var(--og)}
+.total-n{color:var(--a1)}
+.schema-auth{color:var(--auth);font-weight:600}
+.schema-screen{color:var(--screen);font-weight:600}
+.schema-pub{color:var(--pub);font-weight:600}
+.fk-cross{color:var(--og);font-weight:600}
+ul{padding-left:16px}
+li{margin:3px 0;color:var(--mt);font-size:12.5px}
+.step-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:var(--a1);color:#0f1117;border-radius:50%;font-weight:800;font-size:11px;flex-shrink:0;margin-right:8px}
+.step{display:flex;align-items:flex-start;margin:8px 0;padding:10px 14px;background:var(--s2);border-radius:6px;border-left:3px solid var(--a1)}
+.step-w{border-left-color:var(--og)}
+.step-r{border-left-color:var(--rd)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>AIRIS — Database Schema Migration Plan</h1>
+<p class="sub">PostgreSQL / Supabase · Zero-downtime schema split · Monolith → app_auth + screening + public · June 2026<br>
+<strong>DO NOT EXECUTE.</strong> This document is a complete migration blueprint. All SQL is for review only.</p>
+
+<div class="toc">
+  <h3>Contents</h3>
+  <ol>
+    <li><a href="#p1">Phase 1 — Discovery</a>: all 44 tables, FKs, indexes, extensions, constraints</li>
+    <li><a href="#p2">Phase 2 — Migration Plan</a>: per-table destination with justification</li>
+    <li><a href="#p3">Phase 3 — Compatibility Strategy</a>: schemas, views, grants, RLS</li>
+    <li><a href="#p4">Phase 4 — Risk Analysis</a>: breaking changes, circular deps, ORM impact</li>
+    <li><a href="#p5">Phase 5 — Execution Script</a>: complete ordered SQL (review only)</li>
+  </ol>
+</div>
+
+<div class="summary-grid">
+  <div class="sg"><div class="n total-n">44</div><div class="l">Total Tables</div></div>
+  <div class="sg"><div class="n auth-n">7</div><div class="l">→ app_auth</div></div>
+  <div class="sg"><div class="n screen-n">6</div><div class="l">→ screening</div></div>
+  <div class="sg"><div class="n pub-n">31</div><div class="l">Stay public</div></div>
+  <div class="sg"><div class="n xfk-n">12</div><div class="l">Cross-schema FKs</div></div>
+</div>
+
+<!-- ===================== PHASE 1 ===================== -->
+<h2 id="p1"><span class="ph">Phase 1</span> Discovery</h2>
+
+<div class="alert ab">All data derived from static analysis of 29 ORM model files and 107 Alembic migration files. No live DB connection was used. Row counts are estimates; run the <code>SELECT</code> block in Phase 5 against production to get real counts before executing the migration.</div>
+
+<h3>1.1 — Database Objects Inventory</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Object Type</th><th>Count</th><th>Names / Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Tables</td><td>44</td><td>All currently in <code>public</code> schema. See §1.2.</td></tr>
+    <tr><td>Schemas</td><td>1</td><td><code>public</code> only. <code>app_auth</code> and <code>screening</code> do not yet exist.</td></tr>
+    <tr><td>Views</td><td>0</td><td>No <code>CREATE VIEW</code> found in any of the 107 Alembic migrations.</td></tr>
+    <tr><td>Triggers</td><td>0</td><td>No <code>CREATE TRIGGER</code> found in any migration.</td></tr>
+    <tr><td>Functions</td><td>0</td><td>No <code>CREATE FUNCTION</code> found in any migration.</td></tr>
+    <tr><td>RLS Policies</td><td>0</td><td>No <code>CREATE POLICY</code> or <code>ROW LEVEL SECURITY</code> in application migrations. Supabase platform may add its own — verify with <code>SELECT * FROM pg_policies WHERE schemaname = 'public'</code> before migration.</td></tr>
+    <tr><td>Extensions</td><td>2</td><td><code>pgcrypto</code> (gen_random_uuid) · <code>pg_trgm</code> (GIN text search on candidates). Both live in <code>pg_catalog</code> — not schema-scoped, unaffected by SET SCHEMA.</td></tr>
+    <tr><td>GIN Indexes</td><td>1</td><td><code>ix_candidates_search_document_trgm</code> — partial GIN on <code>candidates</code> WHERE deleted_at IS NULL. Stays in public. Moves with the table automatically.</td></tr>
+    <tr><td>Alembic version</td><td>1</td><td><code>public.alembic_version</code>. Must be split into 3 service-scoped tables post-migration.</td></tr>
+    <tr><td>Named FK constraints</td><td>12+</td><td>Mix of explicit names (from <code>create_foreign_key</code>) and auto-generated (<code>{table}_{col}_fkey</code>). See §1.3.</td></tr>
+    <tr><td>Unique constraints</td><td>9</td><td>See §1.2 per-table notes.</td></tr>
+    <tr><td>Composite indexes</td><td>8</td><td>pipelines, candidate_job_matches, pipeline_stage_history, pipeline_status_history, ai_screenings. All move with their tables.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>1.2 — Full Table Inventory (44 tables)</h3>
+<div class="card">
+<table>
+  <thead><tr><th>#</th><th>Table</th><th>Current Schema</th><th>ORM Class</th><th>Key Columns</th><th>Outbound FKs</th><th>Referenced By (inbound)</th><th>Notable Constraints</th></tr></thead>
+  <tbody>
+    <!-- AUTH DOMAIN -->
+    <tr><td>1</td><td><strong>organizations</strong></td><td><code>public</code></td><td><code>Organization</code></td><td>id, name, max_concurrent_sessions</td><td>—</td><td>profiles, auth_sessions, organization_roles, role_permissions, invites, sourcing_sessions</td><td>Root auth table — no deps</td></tr>
+    <tr><td>2</td><td><strong>profiles</strong></td><td><code>public</code></td><td><code>Profile</code></td><td>id, organization_id, email, role, role_id, password_hash</td><td>organizations.id · organization_roles.id</td><td>candidates, jobs, job_submissions×2, job_vendors, client_job_access, client_recruiter_assignments, sourcing_sessions, auth_sessions (via user_id), interview_participants (soft), interviewer_profiles (soft)</td><td>UNIQUE(email) · INDEX(organization_id)</td></tr>
+    <tr><td>3</td><td><strong>auth_sessions</strong></td><td><code>public</code></td><td><code>AuthSession</code></td><td>id, organization_id, user_id, refresh_token_hash, refresh_expires_at, revoked_at</td><td>organizations.id · profiles.id</td><td>—</td><td>—</td></tr>
+    <tr><td>4</td><td><strong>organization_roles</strong></td><td><code>public</code></td><td><code>OrganizationRole</code></td><td>id, organization_id, name, key, is_custom</td><td>organizations.id</td><td>profiles, role_permissions</td><td>UNIQUE(organization_id, key)</td></tr>
+    <tr><td>5</td><td><strong>permissions</strong></td><td><code>public</code></td><td><code>Permission</code></td><td>id, code, module, display_name</td><td>—</td><td>—</td><td>UNIQUE(code)</td></tr>
+    <tr><td>6</td><td><strong>role_permissions</strong></td><td><code>public</code></td><td><code>RolePermission</code></td><td>id, organization_id, role_id, permission</td><td>organizations.id · organization_roles.id</td><td>—</td><td>UNIQUE(organization_id, role_id, permission)</td></tr>
+    <tr><td>7</td><td><strong>invites</strong></td><td><code>public</code></td><td><code>Invite</code></td><td>id, email, organization_id, role, token, status, expires_at, delivery_status</td><td>organizations.id</td><td>—</td><td>UNIQUE(token)</td></tr>
+    <!-- SCREENING DOMAIN -->
+    <tr><td>8</td><td><strong>ai_screenings</strong></td><td><code>public</code></td><td><code>AIScreening</code></td><td>id, org_id, candidate_id, job_id, pipeline_id, status, scores×6, snapshots</td><td><span class="fk-cross">candidates.id</span> · <span class="fk-cross">jobs.id</span> · <span class="fk-cross">pipelines.id (SET NULL)</span></td><td>ai_screening_questions, ai_screening_answers, ai_screening_evaluations, ai_screening_messages, ai_screening_segments</td><td>UNIQUE(session_token) · INDEX(org_id, candidate_id, job_id, status)</td></tr>
+    <tr><td>9</td><td><strong>ai_screening_questions</strong></td><td><code>public</code></td><td><code>AIScreeningQuestion</code></td><td>id, screening_id, category, difficulty, position, question_text</td><td>ai_screenings.id CASCADE</td><td>ai_screening_answers, ai_screening_evaluations</td><td>INDEX(screening_id)</td></tr>
+    <tr><td>10</td><td><strong>ai_screening_answers</strong></td><td><code>public</code></td><td><code>AIScreeningAnswer</code></td><td>id, screening_id, question_id, answer_text, source_type</td><td>ai_screenings.id CASCADE · ai_screening_questions.id CASCADE</td><td>—</td><td>INDEX(screening_id, question_id)</td></tr>
+    <tr><td>11</td><td><strong>ai_screening_evaluations</strong></td><td><code>public</code></td><td><code>AIScreeningEvaluation</code></td><td>id, screening_id, question_id, ai_score, ratings, strengths, reasoning</td><td>ai_screenings.id CASCADE · ai_screening_questions.id CASCADE</td><td>—</td><td>INDEX(screening_id, question_id)</td></tr>
+    <tr><td>12</td><td><strong>ai_screening_messages</strong></td><td><code>public</code></td><td><code>AIScreeningMessage</code></td><td>id, screening_id, role, content, sequence_number</td><td>ai_screenings.id CASCADE</td><td>—</td><td>INDEX(screening_id)</td></tr>
+    <tr><td>13</td><td><strong>ai_screening_segments</strong></td><td><code>public</code></td><td><code>AIScreeningSegment</code></td><td>id, screening_id, question_number, transcript, video_clip_url</td><td>ai_screenings.id CASCADE</td><td>—</td><td>INDEX(screening_id)</td></tr>
+    <!-- PUBLIC DOMAIN -->
+    <tr><td>14</td><td><strong>candidates</strong></td><td><code>public</code></td><td><code>Candidate</code></td><td>id, org_id, created_by, email, first_name, last_name, is_deleted, is_merged, merged_into_id</td><td>profiles.id SET NULL · candidates.id SET NULL (self-ref)</td><td>pipelines, interviews, applications, ai_screenings, job_submissions, sourcing_results, candidate_placement_history</td><td>GIN trgm index · INDEX(email, org_id)</td></tr>
+    <tr><td>15</td><td><strong>jobs</strong></td><td><code>public</code></td><td><code>Job</code></td><td>id, org_id, client_id, title, description, status, salary_min/max</td><td>clients.id · profiles.id</td><td>pipelines, interviews, applications, ai_screenings, job_skills, job_status_history, job_match_cache, job_vendors, job_submissions, candidate_job_matches, candidate_placement_history</td><td>INDEX(org_id, status, location)</td></tr>
+    <tr><td>16</td><td><strong>clients</strong></td><td><code>public</code></td><td><code>Client</code></td><td>id, org_id, name, industry, is_deleted</td><td>—</td><td>jobs, client_job_access, client_recruiter_assignments</td><td>Root ATS table</td></tr>
+    <tr><td>17</td><td><strong>pipelines</strong></td><td><code>public</code></td><td><code>Pipeline</code></td><td>id, org_id, candidate_id, job_id, stage, status, stage_updated_at</td><td>candidates.id · jobs.id</td><td>interviews, ai_screenings, pipeline_offers, pipeline_offer_events, pipeline_status_history, pipeline_stage_history</td><td>UNIQUE(candidate_id, job_id) · COMPOSITE INDEX(org_id, updated_at)</td></tr>
+    <tr><td>18</td><td><strong>pipeline_status_history</strong></td><td><code>public</code></td><td><code>PipelineStatusHistory</code></td><td>id, pipeline_id, org_id, previous_status, new_status, actor_user_id</td><td>pipelines.id CASCADE</td><td>—</td><td>Audit log</td></tr>
+    <tr><td>19</td><td><strong>pipeline_stage_history</strong></td><td><code>public</code></td><td><code>PipelineStageHistory</code></td><td>id, pipeline_id, org_id, previous_stage, new_stage, actor_user_id</td><td>pipelines.id CASCADE</td><td>—</td><td>Audit log</td></tr>
+    <tr><td>20</td><td><strong>interviews</strong></td><td><code>public</code></td><td><code>Interview</code></td><td>id, org_id, pipeline_id, candidate_id, job_id, scheduled_at, status, ai_summary</td><td>pipelines.id · candidates.id · jobs.id</td><td>interview_participants, interview_feedback, interview_notes, interview_copilot_sessions, interview_transcript_segments, interview_ai_suggestions, interview_reminders</td><td>INDEX(scheduled_at, org_id)</td></tr>
+    <tr><td>21</td><td><strong>interview_participants</strong></td><td><code>public</code></td><td><code>InterviewParticipant</code></td><td>id, interview_id, user_id (soft), role</td><td>interviews.id CASCADE</td><td>—</td><td>user_id is a soft ref to profiles.id — no DB constraint</td></tr>
+    <tr><td>22</td><td><strong>interview_feedback</strong></td><td><code>public</code></td><td><code>InterviewFeedback</code></td><td>id, interview_id, reviewer_id (soft), scores×6</td><td>interviews.id CASCADE</td><td>—</td><td>reviewer_id soft ref to profiles.id</td></tr>
+    <tr><td>23</td><td><strong>interviewer_profiles</strong></td><td><code>public</code></td><td><code>InterviewerProfile</code></td><td>id, org_id, user_id (soft), title, department, max_interviews_per_day</td><td>—</td><td>interviewer_skills, interviewer_availability</td><td>user_id soft ref to profiles.id — NOT auth.Profile</td></tr>
+    <tr><td>24</td><td><strong>interviewer_skills</strong></td><td><code>public</code></td><td><code>InterviewerSkill</code></td><td>id, interviewer_profile_id, skill</td><td>interviewer_profiles.id CASCADE</td><td>—</td><td>—</td></tr>
+    <tr><td>25</td><td><strong>interviewer_availability</strong></td><td><code>public</code></td><td><code>InterviewerAvailability</code></td><td>id, interviewer_profile_id, day_of_week, start_time, end_time</td><td>interviewer_profiles.id CASCADE</td><td>—</td><td>—</td></tr>
+    <tr><td>26</td><td><strong>interview_notes</strong></td><td><code>public</code></td><td><code>InterviewNote</code></td><td>id, interview_id, interviewer_id (soft), content</td><td>interviews.id CASCADE</td><td>—</td><td>—</td></tr>
+    <tr><td>27</td><td><strong>interview_copilot_sessions</strong></td><td><code>public</code></td><td><code>InterviewCopilotSession</code></td><td>id, interview_id, status, transcript_summary</td><td>interviews.id CASCADE</td><td>interview_transcript_segments, interview_ai_suggestions</td><td>—</td></tr>
+    <tr><td>28</td><td><strong>interview_transcript_segments</strong></td><td><code>public</code></td><td><code>InterviewTranscriptSegment</code></td><td>id, interview_id, copilot_session_id, speaker, content</td><td>interviews.id CASCADE · interview_copilot_sessions.id CASCADE</td><td>—</td><td>—</td></tr>
+    <tr><td>29</td><td><strong>interview_ai_suggestions</strong></td><td><code>public</code></td><td><code>InterviewAISuggestion</code></td><td>id, interview_id, copilot_session_id, suggestion_text, type</td><td>interviews.id CASCADE · interview_copilot_sessions.id CASCADE</td><td>—</td><td>—</td></tr>
+    <tr><td>30</td><td><strong>interview_reminders</strong></td><td><code>public</code></td><td><code>InterviewReminder</code></td><td>id, interview_id, reminder_type, sent_at</td><td>interviews.id CASCADE</td><td>—</td><td>—</td></tr>
+    <tr><td>31</td><td><strong>pipeline_offers</strong></td><td><code>public</code></td><td><code>PipelineOffer</code></td><td>id, pipeline_id, candidate_id (soft), job_id (soft), offered_salary, offer_response</td><td>pipelines.id CASCADE</td><td>pipeline_offer_events</td><td>candidate_id/job_id are denormalized soft refs</td></tr>
+    <tr><td>32</td><td><strong>pipeline_offer_events</strong></td><td><code>public</code></td><td><code>PipelineOfferEvent</code></td><td>id, pipeline_id, offer_id, event_type, actor_user_id (soft)</td><td>pipelines.id CASCADE · pipeline_offers.id CASCADE</td><td>—</td><td>Audit log</td></tr>
+    <tr><td>33</td><td><strong>applications</strong></td><td><code>public</code></td><td><code>Application</code></td><td>id, org_id, candidate_id, job_id, stage, status</td><td>candidates.id · jobs.id</td><td>—</td><td>UNIQUE(candidate_id, job_id)</td></tr>
+    <tr><td>34</td><td><strong>sourcing_sessions</strong></td><td><code>public</code></td><td><code>SourcingSession</code></td><td>id, org_id, job_id (nullable), created_by, status, providers_used</td><td><span class="fk-cross">organizations.id CASCADE</span> · <span class="fk-cross">profiles.id SET NULL</span></td><td>sourcing_results</td><td>—</td></tr>
+    <tr><td>35</td><td><strong>sourcing_results</strong></td><td><code>public</code></td><td><code>SourcingResult</code></td><td>id, session_id, candidate_id (nullable), email, ats_score, action</td><td>sourcing_sessions.id CASCADE · candidates.id SET NULL</td><td>—</td><td>INDEX(email, session_id)</td></tr>
+    <tr><td>36</td><td><strong>candidate_job_matches</strong></td><td><code>public</code></td><td><code>CandidateJobMatch</code></td><td>id, org_id, candidate_id (soft), job_id, ats_score, skill_gaps</td><td>jobs.id CASCADE</td><td>—</td><td>COMPOSITE INDEX(org_id, candidate_id, job_id)</td></tr>
+    <tr><td>37</td><td><strong>candidate_placement_history</strong></td><td><code>public</code></td><td><code>CandidatePlacementHistory</code></td><td>id, candidate_id, job_id, placement_type, outcome</td><td>candidates.id CASCADE · jobs.id CASCADE</td><td>—</td><td>—</td></tr>
+    <tr><td>38</td><td><strong>job_submissions</strong></td><td><code>public</code></td><td><code>JobSubmission</code></td><td>id, job_id, candidate_id, submitted_by, reviewed_by, status</td><td>jobs.id CASCADE · candidates.id CASCADE · <span class="fk-cross">profiles.id ×2</span></td><td>—</td><td>UNIQUE(job_id, candidate_id)</td></tr>
+    <tr><td>39</td><td><strong>job_vendors</strong></td><td><code>public</code></td><td><code>JobVendor</code></td><td>id, job_id, recruiter_id (profile)</td><td>jobs.id CASCADE · <span class="fk-cross">profiles.id CASCADE</span></td><td>—</td><td>—</td></tr>
+    <tr><td>40</td><td><strong>job_skills</strong></td><td><code>public</code></td><td><code>JobSkill</code></td><td>id, job_id, skill, is_required</td><td>jobs.id CASCADE</td><td>—</td><td>UNIQUE(job_id, skill)</td></tr>
+    <tr><td>41</td><td><strong>job_status_history</strong></td><td><code>public</code></td><td><code>JobStatusHistory</code></td><td>id, job_id, old_status, new_status, changed_by (soft)</td><td>jobs.id CASCADE</td><td>—</td><td>Audit log</td></tr>
+    <tr><td>42</td><td><strong>job_match_cache</strong></td><td><code>public</code></td><td><code>JobMatchCache</code></td><td>id, job_id, cached_at, match_data JSONB</td><td>jobs.id CASCADE</td><td>—</td><td>UNIQUE(job_id)</td></tr>
+    <tr><td>43</td><td><strong>client_job_access</strong></td><td><code>public</code></td><td><code>ClientJobAccess</code></td><td>id, user_id (profile), job_id, granted_at</td><td><span class="fk-cross">profiles.id</span> · jobs.id</td><td>—</td><td>Vendor/client read-only access</td></tr>
+    <tr><td>44</td><td><strong>client_recruiter_assignments</strong></td><td><code>public</code></td><td><code>ClientRecruiterAssignment</code></td><td>id, client_id, recruiter_id (profile)</td><td>clients.id CASCADE · <span class="fk-cross">profiles.id CASCADE</span></td><td>—</td><td>—</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>1.3 — Cross-Schema FK Map (12 constraints requiring action)</h3>
+<div class="card">
+<table>
+  <thead><tr><th>#</th><th>Constraint Name</th><th>From Table (col)</th><th>To Table (col)</th><th>Direction</th><th>Action Required</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>fk_jobs_created_by_profiles</code></td><td>public.jobs (created_by)</td><td>→ <span class="schema-auth">app_auth.profiles</span> (id)</td><td>public→auth</td><td>DROP before SET SCHEMA. Recreate as soft ref or cross-schema FK.</td></tr>
+    <tr><td>2</td><td><code>candidates_created_by_fkey</code></td><td>public.candidates (created_by)</td><td>→ <span class="schema-auth">app_auth.profiles</span> (id)</td><td>public→auth</td><td>DROP before SET SCHEMA. Already SET NULL — ok to drop entirely.</td></tr>
+    <tr><td>3</td><td><code>sourcing_sessions_organization_id_fkey</code></td><td>public.sourcing_sessions (organization_id)</td><td>→ <span class="schema-auth">app_auth.organizations</span> (id)</td><td>public→auth</td><td>DROP before SET SCHEMA.</td></tr>
+    <tr><td>4</td><td><code>sourcing_sessions_created_by_fkey</code></td><td>public.sourcing_sessions (created_by)</td><td>→ <span class="schema-auth">app_auth.profiles</span> (id)</td><td>public→auth</td><td>DROP before SET SCHEMA.</td></tr>
+    <tr><td>5</td><td><code>client_job_access_user_id_fkey</code></td><td>public.client_job_access (user_id)</td><td>→ <span class="schema-auth">app_auth.profiles</span> (id)</td><td>public→auth</td><td>DROP before SET SCHEMA.</td></tr>
+    <tr><td>6</td><td><code>client_recruiter_assignments_recruiter_id_fkey</code></td><td>public.client_recruiter_assignments (recruiter_id)</td><td>→ <span class="schema-auth">app_auth.profiles</span> (id)</td><td>public→auth</td><td>DROP before SET SCHEMA.</td></tr>
+    <tr><td>7</td><td><code>job_submissions_submitted_by_fkey</code></td><td>public.job_submissions (submitted_by)</td><td>→ <span class="schema-auth">app_auth.profiles</span> (id)</td><td>public→auth</td><td>DROP before SET SCHEMA.</td></tr>
+    <tr><td>8</td><td><code>job_submissions_reviewed_by_fkey</code></td><td>public.job_submissions (reviewed_by)</td><td>→ <span class="schema-auth">app_auth.profiles</span> (id)</td><td>public→auth</td><td>DROP before SET SCHEMA.</td></tr>
+    <tr><td>9</td><td><code>job_vendors_recruiter_id_fkey</code></td><td>public.job_vendors (recruiter_id)</td><td>→ <span class="schema-auth">app_auth.profiles</span> (id)</td><td>public→auth</td><td>DROP before SET SCHEMA.</td></tr>
+    <tr><td>10</td><td><code>ai_screenings_candidate_id_fkey</code></td><td>public.ai_screenings (candidate_id)</td><td>→ public.candidates (id)</td><td>screening→public</td><td>DROP, move table, recreate as <code>REFERENCES public.candidates(id)</code></td></tr>
+    <tr><td>11</td><td><code>ai_screenings_job_id_fkey</code></td><td>public.ai_screenings (job_id)</td><td>→ public.jobs (id)</td><td>screening→public</td><td>DROP, move table, recreate as <code>REFERENCES public.jobs(id)</code></td></tr>
+    <tr><td>12</td><td><code>ai_screenings_pipeline_id_fkey</code></td><td>public.ai_screenings (pipeline_id)</td><td>→ public.pipelines (id) SET NULL</td><td>screening→public</td><td>DROP, move table, recreate as <code>REFERENCES public.pipelines(id) ON DELETE SET NULL</code></td></tr>
+  </tbody>
+</table>
+</div>
+<div class="alert ay">Constraints #1–9: Once dropped, data integrity between public schema and app_auth is enforced by the application layer only. The compatibility view strategy (Phase 3) ensures ORM models continue resolving table names correctly during the transition window.</div>
+
+<h3>1.4 — Indexes Inventory</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Index Name</th><th>Table</th><th>Columns</th><th>Type</th><th>Partial?</th><th>Moves With Table?</th></tr></thead>
+  <tbody>
+    <tr><td><code>ix_candidates_search_document_trgm</code></td><td>candidates</td><td>lower(full_name||first_name||last_name||email||phone||location||headline)</td><td>GIN (trgm)</td><td>WHERE deleted_at IS NULL</td><td>YES — stays public</td></tr>
+    <tr><td><code>ix_profiles_email</code></td><td>profiles</td><td>email</td><td>UNIQUE BTREE</td><td>No</td><td>YES — moves to app_auth</td></tr>
+    <tr><td><code>ix_profiles_organization_id</code></td><td>profiles</td><td>organization_id</td><td>BTREE</td><td>No</td><td>YES — moves to app_auth</td></tr>
+    <tr><td><code>ix_ai_screenings_organization_id</code></td><td>ai_screenings</td><td>organization_id</td><td>BTREE</td><td>No</td><td>YES — moves to screening</td></tr>
+    <tr><td><code>ix_ai_screenings_candidate_id</code></td><td>ai_screenings</td><td>candidate_id</td><td>BTREE</td><td>No</td><td>YES — moves to screening</td></tr>
+    <tr><td><code>ix_ai_screenings_job_id</code></td><td>ai_screenings</td><td>job_id</td><td>BTREE</td><td>No</td><td>YES — moves to screening</td></tr>
+    <tr><td><code>ix_ai_screenings_status</code></td><td>ai_screenings</td><td>status</td><td>BTREE</td><td>No</td><td>YES — moves to screening</td></tr>
+    <tr><td><code>ix_pipelines_org_updated</code></td><td>pipelines</td><td>organization_id, updated_at</td><td>BTREE composite</td><td>No</td><td>YES — stays public</td></tr>
+    <tr><td><code>ix_cjm_org_candidate_job</code></td><td>candidate_job_matches</td><td>organization_id, candidate_id, job_id</td><td>BTREE composite</td><td>No</td><td>YES — stays public</td></tr>
+    <tr><td><code>ix_cjm_org_status_updated</code></td><td>candidate_job_matches</td><td>organization_id, ats_pipeline_status, updated_at</td><td>BTREE composite</td><td>No</td><td>YES — stays public</td></tr>
+    <tr><td><code>uq_organization_roles_org_key</code></td><td>organization_roles</td><td>organization_id, key</td><td>UNIQUE BTREE</td><td>No</td><td>YES — moves to app_auth</td></tr>
+    <tr><td><code>uq_pipeline_candidate_job</code></td><td>pipelines</td><td>candidate_id, job_id</td><td>UNIQUE BTREE</td><td>No</td><td>YES — stays public</td></tr>
+    <tr><td colspan="7" style="color:#475569;font-size:11px">Note: <code>ALTER TABLE … SET SCHEMA</code> automatically moves all indexes, constraints, and sequences belonging to the table. No manual index recreation needed except for the screening cross-schema FKs.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ===================== PHASE 2 ===================== -->
+<h2 id="p2"><span class="ph">Phase 2</span> Migration Plan</h2>
+
+<div class="card">
+<table>
+  <thead><tr><th>Table</th><th>Decision</th><th>Target Schema</th><th>Justification</th></tr></thead>
+  <tbody>
+    <tr><td><strong>organizations</strong></td><td><span class="badge ba">→ app_auth</span></td><td><code>app_auth</code></td><td>Core identity entity. Owned exclusively by Auth Service. No public table depends on it with a retained FK — all public→organizations FKs are dropped as part of migration.</td></tr>
+    <tr><td><strong>profiles</strong></td><td><span class="badge ba">→ app_auth</span></td><td><code>app_auth</code></td><td>User identity + credentials. Auth Service's most referenced table. Compat view <code>public.profiles</code> maintains backward compatibility for monolith during Phase 1A/1B.</td></tr>
+    <tr><td><strong>auth_sessions</strong></td><td><span class="badge ba">→ app_auth</span></td><td><code>app_auth</code></td><td>Session lifecycle. Only Auth Service reads/writes it. Both FKs (→organizations, →profiles) become intra-schema after move.</td></tr>
+    <tr><td><strong>organization_roles</strong></td><td><span class="badge ba">→ app_auth</span></td><td><code>app_auth</code></td><td>RBAC role definitions. Only referenced by profiles and role_permissions — both also moving to app_auth. Zero cross-schema dependencies after move.</td></tr>
+    <tr><td><strong>permissions</strong></td><td><span class="badge ba">→ app_auth</span></td><td><code>app_auth</code></td><td>Static permission catalog. Owned and seeded by Auth Service. No FK dependencies from outside auth domain.</td></tr>
+    <tr><td><strong>role_permissions</strong></td><td><span class="badge ba">→ app_auth</span></td><td><code>app_auth</code></td><td>RBAC assignments. Both FKs (→organizations, →organization_roles) become intra-schema. Only auth service writes to it.</td></tr>
+    <tr><td><strong>invites</strong></td><td><span class="badge ba">→ app_auth</span></td><td><code>app_auth</code></td><td>User invitation lifecycle. FK to organizations becomes intra-schema. Zero references from public domain.</td></tr>
+    <tr><td><strong>ai_screenings</strong></td><td><span class="badge bs">→ screening</span></td><td><code>screening</code></td><td>Root screening entity. Owned exclusively by Screening Service. Cross-schema FKs to candidates/jobs/pipelines are dropped and recreated as qualified <code>REFERENCES public.X(id)</code>.</td></tr>
+    <tr><td><strong>ai_screening_questions</strong></td><td><span class="badge bs">→ screening</span></td><td><code>screening</code></td><td>Child of ai_screenings. Intra-screening FK — moves cleanly. No cross-schema dependencies of its own.</td></tr>
+    <tr><td><strong>ai_screening_answers</strong></td><td><span class="badge bs">→ screening</span></td><td><code>screening</code></td><td>Child of ai_screenings. Intra-screening FKs only. Moves with parent.</td></tr>
+    <tr><td><strong>ai_screening_evaluations</strong></td><td><span class="badge bs">→ screening</span></td><td><code>screening</code></td><td>Child of ai_screenings. Intra-screening FKs only. Moves with parent.</td></tr>
+    <tr><td><strong>ai_screening_messages</strong></td><td><span class="badge bs">→ screening</span></td><td><code>screening</code></td><td>Live interview conversation log. Intra-screening FK only. Moves with parent.</td></tr>
+    <tr><td><strong>ai_screening_segments</strong></td><td><span class="badge bs">→ screening</span></td><td><code>screening</code></td><td>Per-question video segments. Intra-screening FK only. Moves with parent.</td></tr>
+    <tr><td><strong>candidates</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Core ATS entity. Referenced by 9 public tables via real FKs. Owned by the Monolith. Soft ref from candidates.created_by to profiles.id — FK dropped, value preserved.</td></tr>
+    <tr><td><strong>jobs</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Core ATS entity. Referenced by 11 public tables. FK to clients.id is intra-public. FK to profiles.id (created_by) is dropped — value preserved as soft ref.</td></tr>
+    <tr><td><strong>clients</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>ATS client company entity. No FKs to auth domain. Fully intra-public.</td></tr>
+    <tr><td><strong>pipelines</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>ATS pipeline. FKs to candidates and jobs only — intra-public. Central ATS workflow entity.</td></tr>
+    <tr><td><strong>pipeline_status_history</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Audit log for pipeline status. Intra-public FK to pipelines.</td></tr>
+    <tr><td><strong>pipeline_stage_history</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Audit log for pipeline stage transitions. Intra-public FK to pipelines.</td></tr>
+    <tr><td><strong>interviews</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Interview scheduling. FKs to pipelines/candidates/jobs — all intra-public. created_by is a soft ref (no FK constraint on interviews.created_by).</td></tr>
+    <tr><td><strong>interview_participants</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>user_id is a soft reference — no FK constraint to profiles. Intra-public.</td></tr>
+    <tr><td><strong>interview_feedback</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>reviewer_id is soft. Intra-public.</td></tr>
+    <tr><td><strong>interviewer_profiles</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Interview domain model (NOT auth Profile). user_id is soft ref. No FK to auth tables.</td></tr>
+    <tr><td><strong>interviewer_skills</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Intra-public FK to interviewer_profiles.</td></tr>
+    <tr><td><strong>interviewer_availability</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Intra-public FK to interviewer_profiles.</td></tr>
+    <tr><td><strong>interview_notes</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Intra-public. interviewer_id is soft.</td></tr>
+    <tr><td><strong>interview_copilot_sessions</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Intra-public FK to interviews.</td></tr>
+    <tr><td><strong>interview_transcript_segments</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Intra-public FKs.</td></tr>
+    <tr><td><strong>interview_ai_suggestions</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Intra-public FKs.</td></tr>
+    <tr><td><strong>interview_reminders</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Intra-public FK to interviews.</td></tr>
+    <tr><td><strong>pipeline_offers</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Offer lifecycle. FK to pipelines (intra-public). candidate_id/job_id are denormalized soft refs.</td></tr>
+    <tr><td><strong>pipeline_offer_events</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Offer event audit log. Intra-public FKs.</td></tr>
+    <tr><td><strong>applications</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Job applications. FKs to candidates and jobs — intra-public.</td></tr>
+    <tr><td><strong>sourcing_sessions</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>AI sourcing sessions. FKs to organizations and profiles are dropped (cross-schema). organization_id and created_by preserved as soft refs.</td></tr>
+    <tr><td><strong>sourcing_results</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>FK to sourcing_sessions is intra-public. FK to candidates is intra-public.</td></tr>
+    <tr><td><strong>candidate_job_matches</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>ATS scoring. FK to jobs is intra-public. candidate_id is soft.</td></tr>
+    <tr><td><strong>candidate_placement_history</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Intra-public FKs to candidates and jobs.</td></tr>
+    <tr><td><strong>job_submissions</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>FKs to jobs and candidates are intra-public. FKs to profiles (submitted_by, reviewed_by) are dropped — values preserved as soft refs.</td></tr>
+    <tr><td><strong>job_vendors</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>FK to jobs intra-public. FK to profiles (recruiter_id) is dropped.</td></tr>
+    <tr><td><strong>job_skills</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Intra-public FK to jobs.</td></tr>
+    <tr><td><strong>job_status_history</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Intra-public FK to jobs.</td></tr>
+    <tr><td><strong>job_match_cache</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>Intra-public FK to jobs.</td></tr>
+    <tr><td><strong>client_job_access</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>FK to jobs intra-public. FK to profiles (user_id) dropped — soft ref preserved.</td></tr>
+    <tr><td><strong>client_recruiter_assignments</strong></td><td><span class="badge bp">stays public</span></td><td><code>public</code></td><td>FK to clients intra-public. FK to profiles (recruiter_id) dropped.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ===================== PHASE 3 ===================== -->
+<h2 id="p3"><span class="ph">Phase 3</span> Compatibility Strategy</h2>
+
+<h3>3.1 — Strategy Overview</h3>
+<p>Zero-downtime is achieved by creating compatibility views in <code>public</code> that mirror every moved table. The ORM continues resolving <code>ForeignKey("profiles.id")</code> to <code>public.profiles</code> — which the view redirects transparently. During Phase 1A/1B, the application reads/writes through the views unchanged. Phase 1C removes the views once all ORM model schema tags have been applied.</p>
+
+<div class="card" style="margin-bottom:16px">
+<table>
+  <thead><tr><th>Phase</th><th>Action</th><th>App behavior</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Phase 1A</strong></td><td>Create schemas + Move tables + Create compat views</td><td>App is unchanged — reads/writes via views, ORM models unchanged</td></tr>
+    <tr><td><strong>Phase 1B</strong></td><td>Apply schema tags to ORM models (<code>__table_args__ = {"schema": "app_auth"}</code>), update ForeignKey refs</td><td>App reads/writes directly to new schemas; views still exist as fallback</td></tr>
+    <tr><td><strong>Phase 1C</strong></td><td>Drop compat views, drop old public FK stubs, seed new alembic_version tables</td><td>App runs fully on separated schemas; no views</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>3.2 — Compatibility Views (13 views for 13 moved tables)</h3>
+<pre>
+<span class="c">-- Compatibility views: public schema → app_auth and screening schemas</span>
+<span class="c">-- These make the existing ORM models (which reference "profiles", "organizations", etc.)</span>
+<span class="c">-- continue to work UNCHANGED during the transition period.</span>
+<span class="c">-- Simple SELECT * views are auto-updatable in PostgreSQL — INSERTs/UPDATEs/DELETEs</span>
+<span class="c">-- on the views are forwarded to the underlying tables.</span>
+
+<span class="c">-- app_auth compat views</span>
+<span class="k">CREATE OR REPLACE VIEW</span> public.organizations <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> app_auth.organizations;
+
+<span class="k">CREATE OR REPLACE VIEW</span> public.profiles <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> app_auth.profiles;
+
+<span class="k">CREATE OR REPLACE VIEW</span> public.auth_sessions <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> app_auth.auth_sessions;
+
+<span class="k">CREATE OR REPLACE VIEW</span> public.organization_roles <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> app_auth.organization_roles;
+
+<span class="k">CREATE OR REPLACE VIEW</span> public.permissions <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> app_auth.permissions;
+
+<span class="k">CREATE OR REPLACE VIEW</span> public.role_permissions <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> app_auth.role_permissions;
+
+<span class="k">CREATE OR REPLACE VIEW</span> public.invites <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> app_auth.invites;
+
+<span class="c">-- screening compat views</span>
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screenings <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> screening.ai_screenings;
+
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screening_questions <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> screening.ai_screening_questions;
+
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screening_answers <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> screening.ai_screening_answers;
+
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screening_evaluations <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> screening.ai_screening_evaluations;
+
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screening_messages <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> screening.ai_screening_messages;
+
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screening_segments <span class="k">AS</span>
+  <span class="k">SELECT</span> * <span class="k">FROM</span> screening.ai_screening_segments;
+</pre>
+
+<h3>3.3 — Required Grants</h3>
+<pre>
+<span class="c">-- Grant schema usage to Supabase roles</span>
+<span class="k">GRANT USAGE ON SCHEMA</span> app_auth <span class="k">TO</span> authenticated, service_role, anon;
+<span class="k">GRANT USAGE ON SCHEMA</span> screening <span class="k">TO</span> authenticated, service_role, anon;
+
+<span class="c">-- Table-level grants for app_auth</span>
+<span class="k">GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA</span> app_auth <span class="k">TO</span> service_role;
+<span class="k">GRANT SELECT ON ALL TABLES IN SCHEMA</span> app_auth <span class="k">TO</span> authenticated;
+<span class="k">GRANT SELECT ON ALL SEQUENCES IN SCHEMA</span> app_auth <span class="k">TO</span> authenticated, service_role;
+
+<span class="c">-- Table-level grants for screening</span>
+<span class="k">GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA</span> screening <span class="k">TO</span> service_role;
+<span class="k">GRANT SELECT ON ALL TABLES IN SCHEMA</span> screening <span class="k">TO</span> authenticated;
+<span class="k">GRANT SELECT ON ALL SEQUENCES IN SCHEMA</span> screening <span class="k">TO</span> authenticated, service_role;
+
+<span class="c">-- Compat view grants (views in public schema inherit table grants, but make explicit)</span>
+<span class="k">GRANT SELECT, INSERT, UPDATE, DELETE ON</span>
+  public.organizations, public.profiles, public.auth_sessions,
+  public.organization_roles, public.permissions, public.role_permissions, public.invites,
+  public.ai_screenings, public.ai_screening_questions, public.ai_screening_answers,
+  public.ai_screening_evaluations, public.ai_screening_messages, public.ai_screening_segments
+<span class="k">TO</span> authenticated, service_role;
+
+<span class="c">-- Ensure new schemas appear in search_path for the application role</span>
+<span class="c">-- (adjust role name to match your Supabase project)</span>
+<span class="k">ALTER ROLE</span> authenticator <span class="k">SET</span> search_path <span class="k">TO</span> public, app_auth, screening;
+</pre>
+
+<h3>3.4 — RLS Policy Updates</h3>
+<div class="alert ay"><strong>No RLS policies were found in application migrations.</strong> However, Supabase may have auto-generated policies on auth tables. Before executing: run <code>SELECT schemaname, tablename, policyname, cmd, qual FROM pg_policies WHERE schemaname = 'public' ORDER BY tablename</code> against production. Any policies on tables being moved must be recreated on the new schema after <code>SET SCHEMA</code> (policies are NOT automatically moved). Use the pattern below.</div>
+<pre>
+<span class="c">-- Template: recreate any RLS policies found on moved tables</span>
+<span class="c">-- Run BEFORE the migration to capture existing policies:</span>
+<span class="k">SELECT</span>
+  tablename,
+  policyname,
+  cmd,
+  qual,
+  with_check
+<span class="k">FROM</span> pg_policies
+<span class="k">WHERE</span> schemaname <span class="s">= 'public'</span>
+  <span class="k">AND</span> tablename <span class="k">IN</span> (
+    <span class="s">'organizations'</span>, <span class="s">'profiles'</span>, <span class="s">'auth_sessions'</span>, <span class="s">'organization_roles'</span>,
+    <span class="s">'permissions'</span>, <span class="s">'role_permissions'</span>, <span class="s">'invites'</span>,
+    <span class="s">'ai_screenings'</span>, <span class="s">'ai_screening_questions'</span>, <span class="s">'ai_screening_answers'</span>,
+    <span class="s">'ai_screening_evaluations'</span>, <span class="s">'ai_screening_messages'</span>, <span class="s">'ai_screening_segments'</span>
+  );
+
+<span class="c">-- After SET SCHEMA, recreate each policy on new schema location:</span>
+<span class="c">-- ALTER TABLE app_auth.profiles ENABLE ROW LEVEL SECURITY;</span>
+<span class="c">-- CREATE POLICY &lt;name&gt; ON app_auth.profiles FOR &lt;cmd&gt; USING (&lt;qual&gt;);</span>
+</pre>
+
+<h3>3.5 — Alembic Version Table Split</h3>
+<pre>
+<span class="c">-- After migration: create per-service alembic_version tables</span>
+<span class="c">-- The monolith keeps public.alembic_version unchanged.</span>
+
+<span class="k">CREATE TABLE IF NOT EXISTS</span> app_auth.alembic_version (
+  version_num <span class="n">VARCHAR</span>(32) <span class="k">NOT NULL</span>,
+  <span class="k">CONSTRAINT</span> alembic_version_pkc <span class="k">PRIMARY KEY</span> (version_num)
+);
+
+<span class="k">CREATE TABLE IF NOT EXISTS</span> screening.alembic_version (
+  version_num <span class="n">VARCHAR</span>(32) <span class="k">NOT NULL</span>,
+  <span class="k">CONSTRAINT</span> alembic_version_pkc <span class="k">PRIMARY KEY</span> (version_num)
+);
+
+<span class="c">-- Seed initial HEAD revision for each service</span>
+<span class="c">-- (replace with actual current HEAD revision ID from each service's alembic history)</span>
+<span class="k">INSERT INTO</span> app_auth.alembic_version (version_num) <span class="k">VALUES</span> (<span class="s">'auth_service_initial'</span>);
+<span class="k">INSERT INTO</span> screening.alembic_version (version_num) <span class="k">VALUES</span> (<span class="s">'screening_service_initial'</span>);
+</pre>
+
+<!-- ===================== PHASE 4 ===================== -->
+<h2 id="p4"><span class="ph">Phase 4</span> Risk Analysis</h2>
+
+<h3>4.1 — Breaking Changes</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Change</th><th>Impact</th><th>Severity</th><th>Mitigation</th></tr></thead>
+  <tbody>
+    <tr><td>9 FK constraints from public→auth dropped (no enforcement)</td><td>Data integrity for created_by/submitted_by/recruiter_id columns is now application-enforced only. Orphaned UUIDs possible if Auth Service deletes a profile.</td><td><span class="badge warn">Medium</span></td><td>Auth Service must emit events or expose bulk-check endpoint. Monolith validates UUIDs on write.</td></tr>
+    <tr><td><code>public.profiles</code> becomes a view, not a table</td><td>Any code that does <code>SELECT … FROM information_schema.tables WHERE table_name='profiles'</code> will find it but it will be a VIEW type. Code doing <code>INSERT INTO public.profiles RETURNING *</code> still works (simple updatable view).</td><td><span class="badge warn">Medium</span></td><td>Compat view is auto-updatable. Test all INSERT/UPDATE/DELETE paths through the view before Phase 1C.</td></tr>
+    <tr><td>ORM <code>ForeignKey("profiles.id")</code> resolves to a VIEW, not a table</td><td>SQLAlchemy reflects the view as a table during startup. FK constraint enforcement is dropped. ORM relationships still query correctly.</td><td><span class="badge warn">Medium</span></td><td>After Phase 1B (schema tags applied), ForeignKey becomes <code>"app_auth.profiles.id"</code> — real table again.</td></tr>
+    <tr><td>Supabase <code>auth</code> schema NOT used — <code>app_auth</code> instead</td><td>Supabase dashboard JWT tokens contain <code>sub</code> that references Supabase's own <code>auth.users</code> table. AIRIS uses its own <code>profiles</code> table independently. No collision as long as we never name our schema <code>auth</code>.</td><td><span class="badge safe">Low</span></td><td>Already addressed — using <code>app_auth</code> throughout.</td></tr>
+    <tr><td>Cross-schema FK from <code>screening.ai_screenings</code> → <code>public.candidates/jobs/pipelines</code></td><td>PostgreSQL enforces cross-schema FKs correctly, but Alembic autogenerate may fail to detect these as valid FKs (it may try to drop/recreate them on every <code>alembic revision --autogenerate</code>). ORM models must explicitly set <code>ForeignKey("public.candidates.id")</code>.</td><td><span class="badge warn">Medium</span></td><td>Add <code>include_schemas=True</code> to Alembic env.py. Use schema-qualified FK strings in ORM.</td></tr>
+    <tr><td><code>SET SCHEMA</code> is NOT transactional in all Postgres versions</td><td>On older Postgres (pre-14), <code>ALTER TABLE SET SCHEMA</code> acquires <code>ACCESS EXCLUSIVE</code> lock on the table — briefly blocks all reads/writes on that table during the rename.</td><td><span class="badge warn">Medium</span></td><td>Schedule during off-hours. Lock duration is typically &lt;100ms per table. Supabase uses PG14+ — lock is brief. Monitor <code>pg_stat_activity</code>.</td></tr>
+    <tr><td>Supabase Storage, Realtime, and PostgREST may reference <code>public.*</code> tables by name</td><td>Supabase PostgREST auto-exposes all tables in the <code>public</code> schema. If PostgREST is configured with <code>db-schema=public</code>, it will expose the compat views. Once views are dropped in Phase 1C, those endpoints disappear from PostgREST.</td><td><span class="badge risk">High</span></td><td>Update Supabase project config to include <code>db-extra-search-path = "app_auth, screening"</code> before Phase 1C. Or keep compat views permanently.</td></tr>
+    <tr><td>Analytics JOINs across schemas</td><td><code>analytics/repository.py</code> does 4 JOIN queries between public tables and profiles. After migration, these JOINs span schemas — syntactically valid but may affect query planner stats.</td><td><span class="badge safe">Low</span></td><td>Run <code>ANALYZE</code> on all moved tables after migration. Cross-schema JOINs are fully supported by PostgreSQL.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>4.2 — Invalid Foreign Keys After Migration</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Scenario</th><th>Will it fail?</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>INSERT into <code>public.ai_screenings</code> compat view with a non-existent candidate_id</td><td>YES — FK enforced</td><td>After Phase 1A, ai_screenings has cross-schema FK <code>REFERENCES public.candidates(id)</code>. Constraint is enforced across schemas.</td></tr>
+    <tr><td>DELETE from <code>app_auth.profiles</code> while candidate has <code>created_by=profile.id</code></td><td>NO — FK dropped</td><td>The FK constraint between candidates.created_by and profiles.id is dropped in this migration. Orphaned UUIDs are allowed.</td></tr>
+    <tr><td>Alembic autogenerate detecting false FK differences</td><td>MIGRATIONS WILL BE INCORRECT</td><td>After moving tables, <code>alembic revision --autogenerate</code> may try to recreate existing constraints if env.py doesn't include the new schemas in the comparison scope.</td></tr>
+    <tr><td>intra-auth FKs (profiles→organizations, auth_sessions→profiles, etc.)</td><td>NO — all correct</td><td>Both sides of these FKs move to app_auth together. PostgreSQL resolves them by OID. No action needed.</td></tr>
+    <tr><td>Supabase migrations run on top of moved tables</td><td>RISK — if they reference public schema explicitly</td><td>Any future Supabase-managed migration that says <code>ALTER TABLE public.profiles</code> will now modify the VIEW, not the real table, causing confusing errors.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>4.3 — ORM Impact (7 models need schema annotation)</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Model File</th><th>Change Required</th><th>Example</th></tr></thead>
+  <tbody>
+    <tr><td><code>models/organization.py</code></td><td>Add <code>__table_args__ = {"schema": "app_auth"}</code></td><td><code>__table_args__ = ({"schema": "app_auth"},)</code></td></tr>
+    <tr><td><code>models/profile.py</code></td><td>Add schema tag. Update ForeignKey strings.</td><td><code>ForeignKey("app_auth.organizations.id")</code></td></tr>
+    <tr><td><code>models/auth_session.py</code></td><td>Add schema tag. Update ForeignKey strings.</td><td><code>ForeignKey("app_auth.organizations.id")</code></td></tr>
+    <tr><td><code>models/organization_role.py</code></td><td>Add schema tag. Update ForeignKey strings.</td><td><code>ForeignKey("app_auth.organizations.id")</code></td></tr>
+    <tr><td><code>models/permission.py</code></td><td>Add schema tag. No FKs to update.</td><td><code>__table_args__ = ({"schema": "app_auth"},)</code></td></tr>
+    <tr><td><code>models/role_permission.py</code></td><td>Add schema tag. Update ForeignKey strings.</td><td><code>ForeignKey("app_auth.organizations.id")</code></td></tr>
+    <tr><td><code>models/invite.py</code></td><td>Add schema tag. Update ForeignKey strings.</td><td><code>ForeignKey("app_auth.organizations.id")</code></td></tr>
+    <tr><td><code>models/ai_screening.py</code></td><td>Add schema tag. Update cross-schema FK strings.</td><td><code>ForeignKey("public.candidates.id")</code>, <code>__table_args__ = ({"schema": "screening"},)</code></td></tr>
+    <tr><td><code>models/ai_screening_segment.py</code></td><td>Add schema tag. Update FK string.</td><td><code>ForeignKey("screening.ai_screenings.id")</code></td></tr>
+    <tr><td>All public models referencing <code>profiles.id</code></td><td>Remove DB-level FK. Keep column. No <code>ForeignKey()</code> wrapper.</td><td><code>created_by: Mapped[UUID | None] = mapped_column(PGUUID, nullable=True)</code></td></tr>
+    <tr><td><code>alembic/env.py</code></td><td>Add <code>include_schemas=True</code> and configure target metadata to include app_auth + screening models</td><td><code>context.configure(..., include_schemas=True, version_table_schema="public")</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>4.4 — Circular Dependency Check</h3>
+<div class="alert ag"><strong>No circular dependencies exist in the FK graph.</strong><br>
+Auth graph: organizations ← profiles ← auth_sessions (DAG, no cycle)<br>
+Screening graph: ai_screenings ← questions ← answers/evaluations (DAG, no cycle)<br>
+Cross-schema: screening.ai_screenings → public.candidates/jobs/pipelines (one-way, no return FK)<br>
+public → app_auth: only dropped soft refs remain (no DB-enforced cycle possible)
+</div>
+
+<!-- ===================== PHASE 5 ===================== -->
+<h2 id="p5"><span class="ph">Phase 5</span> Execution Script</h2>
+
+<div class="alert ar" style="margin-bottom:20px">
+  <strong>⛔ DO NOT EXECUTE WITHOUT:</strong><br>
+  1. Taking a full database backup (pg_dump or Supabase point-in-time restore snapshot)<br>
+  2. Running the discovery queries at the top against production to verify constraint names<br>
+  3. Testing the complete script in a staging environment first<br>
+  4. Scheduling a maintenance window or verifying lock duration is acceptable<br>
+  5. Confirming PostgREST / Supabase config changes are deployed simultaneously
+</div>
+
+<h3>Step 0 — Pre-Migration Discovery Queries (run first, read-only)</h3>
+<pre>
+<span class="c">-- 0a. Verify actual table list</span>
+<span class="k">SELECT</span> schemaname, tablename, <span class="w">pg_size_pretty</span>(pg_total_relation_size(schemaname||<span class="s">'.'</span>||tablename)) <span class="k">AS</span> size
+<span class="k">FROM</span> pg_tables
+<span class="k">WHERE</span> schemaname <span class="s">= 'public'</span>
+<span class="k">ORDER BY</span> tablename;
+
+<span class="c">-- 0b. Capture row counts</span>
+<span class="k">SELECT</span> relname, reltuples::<span class="n">bigint</span> <span class="k">AS</span> estimated_rows
+<span class="k">FROM</span> pg_class
+<span class="k">WHERE</span> relnamespace = <span class="w">to_regnamespace</span>(<span class="s">'public'</span>)
+  <span class="k">AND</span> relkind = <span class="s">'r'</span>
+<span class="k">ORDER BY</span> relname;
+
+<span class="c">-- 0c. Capture ALL foreign key constraint names (critical — use these in Step 2)</span>
+<span class="k">SELECT</span>
+  tc.constraint_name,
+  tc.table_name <span class="k">AS</span> from_table,
+  kcu.column_name <span class="k">AS</span> from_col,
+  ccu.table_name <span class="k">AS</span> to_table,
+  ccu.column_name <span class="k">AS</span> to_col,
+  rc.delete_rule
+<span class="k">FROM</span> information_schema.table_constraints tc
+<span class="k">JOIN</span> information_schema.key_column_usage kcu
+  <span class="k">ON</span> tc.constraint_name = kcu.constraint_name
+<span class="k">JOIN</span> information_schema.constraint_column_usage ccu
+  <span class="k">ON</span> tc.constraint_name = ccu.constraint_name
+<span class="k">JOIN</span> information_schema.referential_constraints rc
+  <span class="k">ON</span> tc.constraint_name = rc.constraint_name
+<span class="k">WHERE</span> tc.constraint_type = <span class="s">'FOREIGN KEY'</span>
+  <span class="k">AND</span> tc.table_schema = <span class="s">'public'</span>
+<span class="k">ORDER BY</span> tc.table_name, kcu.column_name;
+
+<span class="c">-- 0d. Capture existing RLS policies</span>
+<span class="k">SELECT</span> tablename, policyname, cmd, qual, with_check
+<span class="k">FROM</span> pg_policies
+<span class="k">WHERE</span> schemaname = <span class="s">'public'</span>
+<span class="k">ORDER BY</span> tablename;
+
+<span class="c">-- 0e. Verify schemas do NOT already exist</span>
+<span class="k">SELECT</span> schema_name <span class="k">FROM</span> information_schema.schemata
+<span class="k">WHERE</span> schema_name <span class="k">IN</span> (<span class="s">'app_auth'</span>, <span class="s">'screening'</span>);
+<span class="c">-- Expected: 0 rows. If rows returned, STOP and investigate.</span>
+</pre>
+
+<h3>Step 1 — Create Schemas</h3>
+<pre>
+<span class="c">-- ============================================================</span>
+<span class="c">-- STEP 1: Create target schemas</span>
+<span class="c">-- ============================================================</span>
+<span class="k">CREATE SCHEMA IF NOT EXISTS</span> app_auth;
+<span class="k">CREATE SCHEMA IF NOT EXISTS</span> screening;
+
+<span class="c">-- Verify</span>
+<span class="k">SELECT</span> schema_name <span class="k">FROM</span> information_schema.schemata
+<span class="k">WHERE</span> schema_name <span class="k">IN</span> (<span class="s">'app_auth'</span>, <span class="s">'screening'</span>);
+<span class="c">-- Expected: 2 rows</span>
+</pre>
+
+<h3>Step 2 — Drop Cross-Schema FK Constraints</h3>
+<pre>
+<span class="c">-- ============================================================</span>
+<span class="c">-- STEP 2: Drop all FK constraints that will become cross-schema</span>
+<span class="c">-- after the SET SCHEMA operations.</span>
+<span class="c">--</span>
+<span class="c">-- IMPORTANT: Replace constraint names below with the actual names</span>
+<span class="c">-- from Step 0c output if they differ from the patterns shown.</span>
+<span class="c">-- Use IF EXISTS to make this idempotent.</span>
+<span class="c">-- ============================================================</span>
+
+<span class="c">-- public.jobs → profiles (known explicit name from migration 20260422_1000)</span>
+<span class="k">ALTER TABLE</span> public.jobs
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> fk_jobs_created_by_profiles;
+
+<span class="c">-- public.candidates → profiles (auto-generated name)</span>
+<span class="k">ALTER TABLE</span> public.candidates
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> candidates_created_by_fkey;
+
+<span class="c">-- public.sourcing_sessions → organizations + profiles</span>
+<span class="k">ALTER TABLE</span> public.sourcing_sessions
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> sourcing_sessions_organization_id_fkey;
+<span class="k">ALTER TABLE</span> public.sourcing_sessions
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> sourcing_sessions_created_by_fkey;
+
+<span class="c">-- public.client_job_access → profiles</span>
+<span class="k">ALTER TABLE</span> public.client_job_access
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> client_job_access_user_id_fkey;
+
+<span class="c">-- public.client_recruiter_assignments → profiles</span>
+<span class="k">ALTER TABLE</span> public.client_recruiter_assignments
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> client_recruiter_assignments_recruiter_id_fkey;
+
+<span class="c">-- public.job_submissions → profiles (submitted_by and reviewed_by)</span>
+<span class="k">ALTER TABLE</span> public.job_submissions
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> job_submissions_submitted_by_fkey;
+<span class="k">ALTER TABLE</span> public.job_submissions
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> job_submissions_reviewed_by_fkey;
+
+<span class="c">-- public.job_vendors → profiles</span>
+<span class="k">ALTER TABLE</span> public.job_vendors
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> job_vendors_recruiter_id_fkey;
+
+<span class="c">-- screening tables → public (must drop before moving to screening schema)</span>
+<span class="k">ALTER TABLE</span> public.ai_screenings
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> ai_screenings_candidate_id_fkey;
+<span class="k">ALTER TABLE</span> public.ai_screenings
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> ai_screenings_job_id_fkey;
+<span class="k">ALTER TABLE</span> public.ai_screenings
+  <span class="k">DROP CONSTRAINT IF EXISTS</span> ai_screenings_pipeline_id_fkey;
+
+<span class="c">-- Verify all FK drops succeeded</span>
+<span class="k">SELECT</span> COUNT(*) <span class="k">FROM</span> information_schema.table_constraints tc
+<span class="k">JOIN</span> information_schema.constraint_column_usage ccu
+  <span class="k">ON</span> tc.constraint_name = ccu.constraint_name
+<span class="k">WHERE</span> tc.constraint_type = <span class="s">'FOREIGN KEY'</span>
+  <span class="k">AND</span> tc.table_schema = <span class="s">'public'</span>
+  <span class="k">AND</span> ccu.table_name <span class="k">IN</span> (<span class="s">'profiles'</span>, <span class="s">'organizations'</span>);
+<span class="c">-- Expected: 0 (or only intra-auth FKs which haven't moved yet)</span>
+</pre>
+
+<h3>Step 3 — Move Auth Tables to app_auth</h3>
+<pre>
+<span class="c">-- ============================================================</span>
+<span class="c">-- STEP 3: Move auth tables to app_auth schema</span>
+<span class="c">-- Order matters: move referenced tables before referencing ones</span>
+<span class="c">-- (even though intra-auth FKs follow the table by OID,</span>
+<span class="c">-- moving in dependency order is safest practice)</span>
+<span class="c">-- ============================================================</span>
+
+<span class="c">-- Root table first (no inbound FKs from auth tables)</span>
+<span class="k">ALTER TABLE</span> public.organizations    <span class="k">SET SCHEMA</span> app_auth;
+<span class="k">ALTER TABLE</span> public.permissions      <span class="k">SET SCHEMA</span> app_auth;
+
+<span class="c">-- Tables that reference organizations</span>
+<span class="k">ALTER TABLE</span> public.organization_roles <span class="k">SET SCHEMA</span> app_auth;
+<span class="k">ALTER TABLE</span> public.invites           <span class="k">SET SCHEMA</span> app_auth;
+
+<span class="c">-- Tables that reference organization_roles</span>
+<span class="k">ALTER TABLE</span> public.profiles          <span class="k">SET SCHEMA</span> app_auth;
+<span class="k">ALTER TABLE</span> public.role_permissions  <span class="k">SET SCHEMA</span> app_auth;
+
+<span class="c">-- Tables that reference profiles</span>
+<span class="k">ALTER TABLE</span> public.auth_sessions     <span class="k">SET SCHEMA</span> app_auth;
+
+<span class="c">-- Verify</span>
+<span class="k">SELECT</span> tablename <span class="k">FROM</span> pg_tables <span class="k">WHERE</span> schemaname = <span class="s">'app_auth'</span> <span class="k">ORDER BY</span> tablename;
+<span class="c">-- Expected: auth_sessions, invites, organization_roles, organizations, permissions, profiles, role_permissions</span>
+</pre>
+
+<h3>Step 4 — Move Screening Tables to screening</h3>
+<pre>
+<span class="c">-- ============================================================</span>
+<span class="c">-- STEP 4: Move screening tables to screening schema</span>
+<span class="c">-- Root table first, children follow</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">ALTER TABLE</span> public.ai_screenings          <span class="k">SET SCHEMA</span> screening;
+<span class="k">ALTER TABLE</span> public.ai_screening_questions  <span class="k">SET SCHEMA</span> screening;
+<span class="k">ALTER TABLE</span> public.ai_screening_answers    <span class="k">SET SCHEMA</span> screening;
+<span class="k">ALTER TABLE</span> public.ai_screening_evaluations <span class="k">SET SCHEMA</span> screening;
+<span class="k">ALTER TABLE</span> public.ai_screening_messages   <span class="k">SET SCHEMA</span> screening;
+<span class="k">ALTER TABLE</span> public.ai_screening_segments   <span class="k">SET SCHEMA</span> screening;
+
+<span class="c">-- Verify</span>
+<span class="k">SELECT</span> tablename <span class="k">FROM</span> pg_tables <span class="k">WHERE</span> schemaname = <span class="s">'screening'</span> <span class="k">ORDER BY</span> tablename;
+<span class="c">-- Expected: ai_screening_answers, ai_screening_evaluations, ai_screening_messages,</span>
+<span class="c">--           ai_screening_questions, ai_screening_segments, ai_screenings</span>
+</pre>
+
+<h3>Step 5 — Recreate Cross-Schema FKs for Screening</h3>
+<pre>
+<span class="c">-- ============================================================</span>
+<span class="c">-- STEP 5: Recreate the 3 FK constraints from screening.ai_screenings</span>
+<span class="c">-- to public schema tables, now with schema-qualified references.</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">ALTER TABLE</span> screening.ai_screenings
+  <span class="k">ADD CONSTRAINT</span> fk_ai_screenings_candidate_id
+  <span class="k">FOREIGN KEY</span> (candidate_id)
+  <span class="k">REFERENCES</span> public.candidates(id)
+  <span class="k">ON DELETE CASCADE</span>;
+
+<span class="k">ALTER TABLE</span> screening.ai_screenings
+  <span class="k">ADD CONSTRAINT</span> fk_ai_screenings_job_id
+  <span class="k">FOREIGN KEY</span> (job_id)
+  <span class="k">REFERENCES</span> public.jobs(id)
+  <span class="k">ON DELETE SET NULL</span>;
+
+<span class="k">ALTER TABLE</span> screening.ai_screenings
+  <span class="k">ADD CONSTRAINT</span> fk_ai_screenings_pipeline_id
+  <span class="k">FOREIGN KEY</span> (pipeline_id)
+  <span class="k">REFERENCES</span> public.pipelines(id)
+  <span class="k">ON DELETE SET NULL</span>;
+
+<span class="c">-- Verify</span>
+<span class="k">SELECT</span> constraint_name, table_name, column_name
+<span class="k">FROM</span> information_schema.key_column_usage
+<span class="k">WHERE</span> table_schema = <span class="s">'screening'</span>
+<span class="k">ORDER BY</span> table_name;
+</pre>
+
+<h3>Step 6 — Create Compatibility Views</h3>
+<pre>
+<span class="c">-- ============================================================</span>
+<span class="c">-- STEP 6: Create compatibility views in public schema.</span>
+<span class="c">-- These allow the existing application code to continue working</span>
+<span class="c">-- without any changes during Phase 1B.</span>
+<span class="c">-- Simple SELECT * views are auto-updatable in PostgreSQL.</span>
+<span class="c">-- ============================================================</span>
+
+<span class="c">-- app_auth compat views</span>
+<span class="k">CREATE OR REPLACE VIEW</span> public.organizations      <span class="k">AS SELECT</span> * <span class="k">FROM</span> app_auth.organizations;
+<span class="k">CREATE OR REPLACE VIEW</span> public.profiles           <span class="k">AS SELECT</span> * <span class="k">FROM</span> app_auth.profiles;
+<span class="k">CREATE OR REPLACE VIEW</span> public.auth_sessions      <span class="k">AS SELECT</span> * <span class="k">FROM</span> app_auth.auth_sessions;
+<span class="k">CREATE OR REPLACE VIEW</span> public.organization_roles <span class="k">AS SELECT</span> * <span class="k">FROM</span> app_auth.organization_roles;
+<span class="k">CREATE OR REPLACE VIEW</span> public.permissions        <span class="k">AS SELECT</span> * <span class="k">FROM</span> app_auth.permissions;
+<span class="k">CREATE OR REPLACE VIEW</span> public.role_permissions   <span class="k">AS SELECT</span> * <span class="k">FROM</span> app_auth.role_permissions;
+<span class="k">CREATE OR REPLACE VIEW</span> public.invites            <span class="k">AS SELECT</span> * <span class="k">FROM</span> app_auth.invites;
+
+<span class="c">-- screening compat views</span>
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screenings           <span class="k">AS SELECT</span> * <span class="k">FROM</span> screening.ai_screenings;
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screening_questions  <span class="k">AS SELECT</span> * <span class="k">FROM</span> screening.ai_screening_questions;
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screening_answers    <span class="k">AS SELECT</span> * <span class="k">FROM</span> screening.ai_screening_answers;
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screening_evaluations <span class="k">AS SELECT</span> * <span class="k">FROM</span> screening.ai_screening_evaluations;
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screening_messages   <span class="k">AS SELECT</span> * <span class="k">FROM</span> screening.ai_screening_messages;
+<span class="k">CREATE OR REPLACE VIEW</span> public.ai_screening_segments   <span class="k">AS SELECT</span> * <span class="k">FROM</span> screening.ai_screening_segments;
+
+<span class="c">-- Verify all 13 views exist</span>
+<span class="k">SELECT</span> viewname <span class="k">FROM</span> pg_views <span class="k">WHERE</span> schemaname = <span class="s">'public'</span>
+  <span class="k">AND</span> viewname <span class="k">IN</span> (
+    <span class="s">'organizations'</span>,<span class="s">'profiles'</span>,<span class="s">'auth_sessions'</span>,<span class="s">'organization_roles'</span>,
+    <span class="s">'permissions'</span>,<span class="s">'role_permissions'</span>,<span class="s">'invites'</span>,
+    <span class="s">'ai_screenings'</span>,<span class="s">'ai_screening_questions'</span>,<span class="s">'ai_screening_answers'</span>,
+    <span class="s">'ai_screening_evaluations'</span>,<span class="s">'ai_screening_messages'</span>,<span class="s">'ai_screening_segments'</span>
+  )
+<span class="k">ORDER BY</span> viewname;
+<span class="c">-- Expected: 13 rows</span>
+</pre>
+
+<h3>Step 7 — Grants</h3>
+<pre>
+<span class="c">-- ============================================================</span>
+<span class="c">-- STEP 7: Grant schema and table access</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">GRANT USAGE ON SCHEMA</span> app_auth  <span class="k">TO</span> authenticated, service_role, anon;
+<span class="k">GRANT USAGE ON SCHEMA</span> screening <span class="k">TO</span> authenticated, service_role, anon;
+
+<span class="k">GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA</span> app_auth  <span class="k">TO</span> service_role;
+<span class="k">GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA</span> screening <span class="k">TO</span> service_role;
+
+<span class="k">GRANT SELECT ON ALL TABLES IN SCHEMA</span> app_auth  <span class="k">TO</span> authenticated;
+<span class="k">GRANT SELECT ON ALL TABLES IN SCHEMA</span> screening <span class="k">TO</span> authenticated;
+
+<span class="c">-- Ensure future tables in these schemas also get grants</span>
+<span class="k">ALTER DEFAULT PRIVILEGES IN SCHEMA</span> app_auth
+  <span class="k">GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO</span> service_role;
+<span class="k">ALTER DEFAULT PRIVILEGES IN SCHEMA</span> app_auth
+  <span class="k">GRANT SELECT ON TABLES TO</span> authenticated;
+
+<span class="k">ALTER DEFAULT PRIVILEGES IN SCHEMA</span> screening
+  <span class="k">GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO</span> service_role;
+<span class="k">ALTER DEFAULT PRIVILEGES IN SCHEMA</span> screening
+  <span class="k">GRANT SELECT ON TABLES TO</span> authenticated;
+
+<span class="c">-- Compat view grants</span>
+<span class="k">GRANT SELECT, INSERT, UPDATE, DELETE ON</span>
+  public.organizations, public.profiles, public.auth_sessions,
+  public.organization_roles, public.permissions, public.role_permissions, public.invites,
+  public.ai_screenings, public.ai_screening_questions, public.ai_screening_answers,
+  public.ai_screening_evaluations, public.ai_screening_messages, public.ai_screening_segments
+<span class="k">TO</span> authenticated, service_role;
+</pre>
+
+<h3>Step 8 — Alembic Version Tables</h3>
+<pre>
+<span class="c">-- ============================================================</span>
+<span class="c">-- STEP 8: Create per-service alembic_version tables</span>
+<span class="c">-- The monolith's public.alembic_version is left UNCHANGED.</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">CREATE TABLE IF NOT EXISTS</span> app_auth.alembic_version (
+  version_num <span class="n">VARCHAR</span>(32) <span class="k">NOT NULL</span>,
+  <span class="k">CONSTRAINT</span> app_auth_alembic_version_pkc <span class="k">PRIMARY KEY</span> (version_num)
+);
+
+<span class="k">CREATE TABLE IF NOT EXISTS</span> screening.alembic_version (
+  version_num <span class="n">VARCHAR</span>(32) <span class="k">NOT NULL</span>,
+  <span class="k">CONSTRAINT</span> screening_alembic_version_pkc <span class="k">PRIMARY KEY</span> (version_num)
+);
+
+<span class="c">-- Seed the initial revision (get actual value from: alembic history | tail -1)</span>
+<span class="c">-- INSERT INTO app_auth.alembic_version VALUES ('&lt;auth_service_head_revision&gt;');</span>
+<span class="c">-- INSERT INTO screening.alembic_version VALUES ('&lt;screening_service_head_revision&gt;');</span>
+</pre>
+
+<h3>Step 9 — Post-Migration Verification</h3>
+<pre>
+<span class="c">-- ============================================================</span>
+<span class="c">-- STEP 9: Post-migration verification queries</span>
+<span class="c">-- Run all of these and confirm expected results before proceeding.</span>
+<span class="c">-- ============================================================</span>
+
+<span class="c">-- 9a. Confirm app_auth has exactly 7 tables</span>
+<span class="k">SELECT</span> COUNT(*) <span class="k">FROM</span> pg_tables <span class="k">WHERE</span> schemaname = <span class="s">'app_auth'</span>;
+<span class="c">-- Expected: 7</span>
+
+<span class="c">-- 9b. Confirm screening has exactly 6 tables</span>
+<span class="k">SELECT</span> COUNT(*) <span class="k">FROM</span> pg_tables <span class="k">WHERE</span> schemaname = <span class="s">'screening'</span>;
+<span class="c">-- Expected: 6</span>
+
+<span class="c">-- 9c. Confirm public has exactly 31 tables + 13 views = 44 objects minus 13 moved tables</span>
+<span class="k">SELECT</span>
+  (SELECT COUNT(*) FROM pg_tables WHERE schemaname = <span class="s">'public'</span>) AS tables,
+  (SELECT COUNT(*) FROM pg_views  WHERE schemaname = <span class="s">'public'</span>) AS views;
+<span class="c">-- Expected: tables=31, views=13</span>
+
+<span class="c">-- 9d. Confirm compat views return data (smoke test)</span>
+<span class="k">SELECT</span> COUNT(*) <span class="k">FROM</span> public.profiles;
+<span class="k">SELECT</span> COUNT(*) <span class="k">FROM</span> public.organizations;
+<span class="k">SELECT</span> COUNT(*) <span class="k">FROM</span> public.ai_screenings;
+<span class="c">-- Expected: same counts as pre-migration</span>
+
+<span class="c">-- 9e. Confirm cross-schema FKs on screening exist</span>
+<span class="k">SELECT</span> constraint_name, table_schema, table_name
+<span class="k">FROM</span> information_schema.table_constraints
+<span class="k">WHERE</span> table_schema = <span class="s">'screening'</span>
+  <span class="k">AND</span> constraint_type = <span class="s">'FOREIGN KEY'</span>;
+<span class="c">-- Expected: fk_ai_screenings_candidate_id, fk_ai_screenings_job_id, fk_ai_screenings_pipeline_id</span>
+<span class="c">--           + intra-screening FKs for questions/answers/evaluations/messages/segments</span>
+
+<span class="c">-- 9f. Confirm no orphaned FK constraints pointing to old public.profiles location</span>
+<span class="k">SELECT</span> tc.constraint_name, tc.table_name
+<span class="k">FROM</span> information_schema.table_constraints tc
+<span class="k">JOIN</span> information_schema.constraint_column_usage ccu
+  <span class="k">ON</span> tc.constraint_name = ccu.constraint_name
+<span class="k">WHERE</span> tc.constraint_type = <span class="s">'FOREIGN KEY'</span>
+  <span class="k">AND</span> ccu.table_name = <span class="s">'profiles'</span>
+  <span class="k">AND</span> ccu.table_schema = <span class="s">'public'</span>;
+<span class="c">-- Expected: 0 rows (profiles is now a VIEW, not a table)</span>
+
+<span class="c">-- 9g. Test INSERT through compat view (run in a transaction, then ROLLBACK)</span>
+<span class="k">BEGIN</span>;
+<span class="k">INSERT INTO</span> public.organizations (id, name)
+  <span class="k">VALUES</span> (<span class="w">gen_random_uuid</span>(), <span class="s">'test-org-migration-check'</span>);
+<span class="k">SELECT</span> COUNT(*) <span class="k">FROM</span> app_auth.organizations <span class="k">WHERE</span> name = <span class="s">'test-org-migration-check'</span>;
+<span class="c">-- Expected: 1 (confirms view is auto-updatable and forwards to real table)</span>
+<span class="k">ROLLBACK</span>;
+
+<span class="c">-- 9h. Run ANALYZE on all moved tables to update query planner statistics</span>
+<span class="k">ANALYZE</span> app_auth.organizations;
+<span class="k">ANALYZE</span> app_auth.profiles;
+<span class="k">ANALYZE</span> app_auth.auth_sessions;
+<span class="k">ANALYZE</span> app_auth.organization_roles;
+<span class="k">ANALYZE</span> app_auth.permissions;
+<span class="k">ANALYZE</span> app_auth.role_permissions;
+<span class="k">ANALYZE</span> app_auth.invites;
+<span class="k">ANALYZE</span> screening.ai_screenings;
+<span class="k">ANALYZE</span> screening.ai_screening_questions;
+<span class="k">ANALYZE</span> screening.ai_screening_answers;
+<span class="k">ANALYZE</span> screening.ai_screening_evaluations;
+<span class="k">ANALYZE</span> screening.ai_screening_messages;
+<span class="k">ANALYZE</span> screening.ai_screening_segments;
+</pre>
+
+<h3>Step 10 — Phase 1C Teardown (run ONLY after ORM is fully migrated)</h3>
+<pre>
+<span class="c">-- ============================================================</span>
+<span class="c">-- STEP 10: Phase 1C — Drop compatibility views</span>
+<span class="c">-- Execute ONLY after:</span>
+<span class="c">--   (a) All ORM models have __table_args__ schema tags applied</span>
+<span class="c">--   (b) All ForeignKey() strings updated to schema-qualified form</span>
+<span class="c">--   (c) All monolith code calling auth tables converted to HTTP API</span>
+<span class="c">--   (d) Full regression test suite passed against new schema</span>
+<span class="c">--   (e) Supabase PostgREST config updated</span>
+<span class="c">-- ============================================================</span>
+
+<span class="k">DROP VIEW IF EXISTS</span> public.organizations      <span class="k">CASCADE</span>;
+<span class="k">DROP VIEW IF EXISTS</span> public.profiles           <span class="k">CASCADE</span>;
+<span class="k">DROP VIEW IF EXISTS</span> public.auth_sessions      <span class="k">CASCADE</span>;
+<span class="k">DROP VIEW IF EXISTS</span> public.organization_roles <span class="k">CASCADE</span>;
+<span class="k">DROP VIEW IF EXISTS</span> public.permissions        <span class="k">CASCADE</span>;
+<span class="k">DROP VIEW IF EXISTS</span> public.role_permissions   <span class="k">CASCADE</span>;
+<span class="k">DROP VIEW IF EXISTS</span> public.invites            <span class="k">CASCADE</span>;
+
+<span class="k">DROP VIEW IF EXISTS</span> public.ai_screenings           <span class="k">CASCADE</span>;
+<span class="k">DROP VIEW IF EXISTS</span> public.ai_screening_questions  <span class="k">CASCADE</span>;
+<span class="k">DROP VIEW IF EXISTS</span> public.ai_screening_answers    <span class="k">CASCADE</span>;
+<span class="k">DROP VIEW IF EXISTS</span> public.ai_screening_evaluations <span class="k">CASCADE</span>;
+<span class="k">DROP VIEW IF EXISTS</span> public.ai_screening_messages   <span class="k">CASCADE</span>;
+<span class="k">DROP VIEW IF EXISTS</span> public.ai_screening_segments   <span class="k">CASCADE</span>;
+
+<span class="c">-- Verify public schema is clean</span>
+<span class="k">SELECT</span> COUNT(*) <span class="k">FROM</span> pg_views <span class="k">WHERE</span> schemaname = <span class="s">'public'</span>;
+<span class="c">-- Expected: 0</span>
+</pre>
+
+<p style="margin-top:52px;color:#2e3350;font-size:11px;border-top:1px solid #1e2236;padding-top:16px">
+  AIRIS Database Migration Plan · Generated from static analysis of 29 ORM models + 107 Alembic migrations · June 2026 ·
+  <strong style="color:#475569">DO NOT EXECUTE without backup + staging validation</strong>
+</p>
+</div>
+</body>
+</html>

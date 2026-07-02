@@ -2764,11 +2764,11 @@ class JobService:
         self.db.add(cached)
 
     def _job_match_cache_table_exists(self) -> bool:
-        settings = get_settings()
-        schema = settings.db_schema
-        table_fqn = f"{schema}.job_match_cache" if schema else "job_match_cache"
+        # job_match_cache lives in the `jobs` Postgres schema (see
+        # alembic/versions/0001_initial.py) — not the single db_schema
+        # setting, which no longer applies under schema-per-service.
         # `to_regclass` returns NULL when the relation doesn't exist.
-        exists = self.db.scalar(sa.text("select to_regclass(:t) is not null"), {"t": table_fqn})
+        exists = self.db.scalar(sa.text("select to_regclass('jobs.job_match_cache') is not null"))
         return bool(exists)
 
     def _load_structured_resume_fields(self, candidate_id: UUID, organization_id: UUID) -> dict[str, object]:
@@ -2787,7 +2787,7 @@ class JobService:
                 text(
                     """
                     SELECT parsed_resume_data, summary, headline, years_experience
-                    FROM candidates
+                    FROM candidate.candidates
                     WHERE id = :cid
                       AND (
                         organization_id = :oid

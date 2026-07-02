@@ -4,7 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import DateTime, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +28,7 @@ class Invite(Base):
     __tablename__ = "invites"
     __table_args__ = (
         UniqueConstraint("token", name="uq_invites_token"),
+        {"schema": "interview"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -36,9 +37,11 @@ class Invite(Base):
         server_default=sa.text("gen_random_uuid()"),
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # organization_id is a cross-schema reference (identity.organizations) —
+    # 0001_initial.py defines no FK for it; integrity is enforced at the
+    # service layer, not the database.
     organization_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("organizations.id"),
         nullable=False,
         index=True,
     )

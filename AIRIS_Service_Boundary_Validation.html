@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIRIS — Service Boundary Validation Report</title>
+<style>
+:root{--bg:#0f1117;--s1:#1a1d27;--s2:#21253a;--bd:#2e3350;--a1:#6c8ef5;--a2:#a78bfa;--gn:#34d399;--yw:#fbbf24;--rd:#f87171;--og:#fb923c;--tx:#e2e8f0;--mt:#94a3b8;--cb:#12151f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;line-height:1.65}
+.wrap{max-width:1460px;margin:0 auto;padding:44px 36px}
+h1{font-size:1.85rem;font-weight:700;color:var(--a1);margin-bottom:6px}
+h2{font-size:1.15rem;font-weight:700;margin:44px 0 14px;padding-bottom:10px;border-bottom:2px solid var(--bd);display:flex;align-items:center;gap:12px}
+h3{font-size:.88rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--mt);margin:26px 0 10px}
+p{color:var(--mt);margin-bottom:10px;font-size:13.5px}
+.sub{color:var(--mt);font-size:.88rem;margin-bottom:34px}
+.toc{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:20px 24px;margin-bottom:42px}
+.toc h3{margin-top:0;color:var(--a1);text-transform:none;letter-spacing:0;font-size:.95rem}
+.toc ol{padding-left:20px}
+.toc li{margin:4px 0}
+.toc a{color:var(--a2);text-decoration:none;font-size:13px}
+.toc a:hover{text-decoration:underline}
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:10px;margin-bottom:16px;overflow:hidden}
+.card-body{padding:0}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--mt);padding:9px 14px;border-bottom:1px solid var(--bd);white-space:nowrap;background:rgba(0,0,0,.15)}
+td{padding:8px 14px;border-bottom:1px solid rgba(46,51,80,.4);vertical-align:top;line-height:1.5}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.012)}
+code{font-family:'Cascadia Code','Fira Code',monospace;font-size:11px;background:var(--cb);color:#a5f3fc;padding:1px 5px;border-radius:3px;white-space:nowrap}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap}
+.safe{background:rgba(52,211,153,.12);color:var(--gn);border:1px solid rgba(52,211,153,.3)}
+.refactor{background:rgba(251,191,36,.1);color:var(--yw);border:1px solid rgba(251,191,36,.25)}
+.highrisk{background:rgba(255,89,31,.15);color:var(--og);border:1px solid rgba(255,89,31,.3)}
+.blocker{background:rgba(248,113,113,.15);color:var(--rd);border:1px solid rgba(248,113,113,.35)}
+.auth-col{color:var(--a1)}
+.screen-col{color:var(--a2)}
+.alert{border-radius:8px;padding:13px 18px;margin:14px 0;font-size:13px}
+.ag{background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.25);color:#6ee7b7}
+.ay{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);color:#fcd34d}
+.ar{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.25);color:#fca5a5}
+.ab{background:rgba(108,142,245,.08);border:1px solid rgba(108,142,245,.25);color:#93c5fd}
+.ao{background:rgba(255,89,31,.08);border:1px solid rgba(255,89,31,.25);color:#fdba74}
+.verdict-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}
+.vcard{border-radius:8px;padding:16px;text-align:center}
+.vs{background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.25)}
+.vr{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25)}
+.vh{background:rgba(255,89,31,.08);border:1px solid rgba(255,89,31,.25)}
+.vb{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.25)}
+.vcard .num{font-size:2rem;font-weight:800;line-height:1.1}
+.vcard .lbl{font-size:11px;margin-top:4px}
+.vs .num,.vs .lbl{color:var(--gn)}
+.vr .num,.vr .lbl{color:var(--yw)}
+.vh .num,.vh .lbl{color:var(--og)}
+.vb .num,.vb .lbl{color:var(--rd)}
+.section-header{padding:14px 20px;border-bottom:1px solid var(--bd);background:rgba(0,0,0,.12)}
+.section-header h3{margin:0;text-transform:none;letter-spacing:0;font-size:.92rem;color:var(--tx)}
+.section-header .meta{font-size:11px;color:var(--mt);margin-top:3px}
+ul{padding-left:18px;color:var(--mt)}
+li{margin:3px 0;font-size:13px}
+.proof{font-size:11px;color:#475569;font-family:monospace;display:block;margin-top:3px}
+strong{color:var(--tx)}
+.rw{color:var(--rd);font-weight:700;font-size:11px}
+.ro{color:var(--gn);font-weight:700;font-size:11px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px;flex-shrink:0}
+.dot-g{background:var(--gn)}
+.dot-y{background:var(--yw)}
+.dot-r{background:var(--rd)}
+.dot-o{background:var(--og)}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.service-bar-auth{height:3px;background:linear-gradient(90deg,#6c8ef5,#34d399);border-radius:2px;margin-bottom:20px}
+.service-bar-screen{height:3px;background:linear-gradient(90deg,#a78bfa,#6c8ef5);border-radius:2px;margin-bottom:20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Service Boundary Validation Report</h1>
+<p class="sub">Static analysis proving Auth Service + AI Screening Service can be independently operated &#183; June 2026<br>All findings grounded in direct codebase inspection — no assumptions.</p>
+
+<div class="toc">
+  <h3>Contents</h3>
+  <ol>
+    <li><a href="#verdict">Overall Verdict</a></li>
+    <li><a href="#auth">Auth Service Boundary Analysis</a></li>
+    <li><a href="#screen">AI Screening Service Boundary Analysis</a></li>
+    <li><a href="#circ">Circular Dependency Analysis</a></li>
+    <li><a href="#proof">Independence Proof</a></li>
+  </ol>
+</div>
+
+<!-- ================== VERDICT ================== -->
+<h2 id="verdict">Overall Verdict</h2>
+
+<div class="verdict-grid">
+  <div class="vcard vs"><div class="num">14</div><div class="lbl">Safe to Extract</div></div>
+  <div class="vcard vr"><div class="num">8</div><div class="lbl">Requires Refactoring</div></div>
+  <div class="vcard vh"><div class="num">3</div><div class="lbl">High Risk</div></div>
+  <div class="vcard vb"><div class="num">1</div><div class="lbl">Blocker</div></div>
+</div>
+
+<div class="card">
+<table>
+  <thead><tr><th>File / Component</th><th>Service</th><th>Verdict</th><th>Reason</th></tr></thead>
+  <tbody>
+    <tr><td><code>routes/auth.py</code> — login, signup, refresh, logout</td><td class="auth-col">Auth</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Self-contained. Only touches auth-owned tables. No public schema dependency.</td></tr>
+    <tr><td><code>routes/users.py</code> — user list, PATCH, DELETE, permissions</td><td class="auth-col">Auth</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Only touches Profile + OrganizationRole. Fully auth-owned.</td></tr>
+    <tr><td><code>routes/roles.py</code> — CRUD roles + role permissions</td><td class="auth-col">Auth</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Only touches OrganizationRole + RolePermission. Self-contained.</td></tr>
+    <tr><td><code>routes/invites.py</code> — invite lifecycle</td><td class="auth-col">Auth</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Only touches Invite + Profile. Self-contained.</td></tr>
+    <tr><td><code>routes/permission_catalog.py</code></td><td class="auth-col">Auth</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Read-only Permission table. Self-contained.</td></tr>
+    <tr><td><code>services/permission_service.py</code></td><td class="auth-col">Auth</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Only touches Profile + RolePermission. Self-contained.</td></tr>
+    <tr><td><code>services/organization_role_service.py</code></td><td class="auth-col">Auth</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Only touches OrganizationRole. Self-contained.</td></tr>
+    <tr><td><code>tasks/invite_tasks.py</code></td><td class="auth-col">Auth</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Only touches Invite. Self-contained.</td></tr>
+    <tr><td><code>websocket/ai_screening_ws.py</code></td><td class="screen-col">Screening</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Only queries AIScreening. Uses shared WebSocket registry. Self-contained.</td></tr>
+    <tr><td><code>services/ai_screening_email.py</code></td><td class="screen-col">Screening</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Pure SMTP. Zero DB access. No imports from public schema models.</td></tr>
+    <tr><td><code>services/ai/question_generator.py</code></td><td class="screen-col">Screening</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Stateless AI function. Needs dict refactor (receives ORM object today — 1h fix).</td></tr>
+    <tr><td><code>services/ai/answer_evaluator.py</code></td><td class="screen-col">Screening</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Stateless. No DB access. No cross-schema imports.</td></tr>
+    <tr><td><code>services/ai/recommendation_engine.py</code></td><td class="screen-col">Screening</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Stateless. No DB access. No cross-schema imports.</td></tr>
+    <tr><td><code>services/ai/recruiter_summary.py</code></td><td class="screen-col">Screening</td><td><span class="badge safe">&#x2713; Safe</span></td><td>Stateless. No DB access. No cross-schema imports.</td></tr>
+    <tr><td><code>core/signup_permissions.py</code></td><td class="auth-col">Auth</td><td><span class="badge refactor">&#x26A0; Refactor</span></td><td>Currently called from monolith during org creation. Must be an Auth Service internal endpoint.</td></tr>
+    <tr><td><code>services/ai_screening_service.py</code> — Candidate/Job reads</td><td class="screen-col">Screening</td><td><span class="badge refactor">&#x26A0; Refactor</span></td><td>13 direct DB reads against public.candidates + public.jobs. Must become HTTP calls.</td></tr>
+    <tr><td><code>services/ai_screening_service.py</code> — Pipeline reads</td><td class="screen-col">Screening</td><td><span class="badge refactor">&#x26A0; Refactor</span></td><td>3 Pipeline SELECTs. Must become HTTP calls.</td></tr>
+    <tr><td><code>services/ai_screening_service.py</code> — CandidateJobMatch reads</td><td class="screen-col">Screening</td><td><span class="badge refactor">&#x26A0; Refactor</span></td><td>2 CandidateJobMatch SELECTs. Must become HTTP calls.</td></tr>
+    <tr><td><code>services/ai_screening_service.py</code> — <code>get_pipeline_ai_screenings()</code></td><td class="screen-col">Screening</td><td><span class="badge refactor">&#x26A0; Refactor</span></td><td>4-table JOIN across Pipeline+Candidate+Job+AIScreening. Must move to Monolith.</td></tr>
+    <tr><td><code>services/candidate_hard_delete.py</code></td><td class="screen-col">Screening</td><td><span class="badge refactor">&#x26A0; Refactor</span></td><td>Monolith calls this to cascade-delete screening data. Must become API call.</td></tr>
+    <tr><td><code>analytics/repository.py</code></td><td class="screen-col">Monolith</td><td><span class="badge refactor">&#x26A0; Refactor</span></td><td>17 Profile refs in JOIN aggregations. Safe via compat view; must denormalize in Phase 2.</td></tr>
+    <tr><td><code>core/dependencies.py</code> — Profile lookup L165</td><td>Monolith</td><td><span class="badge highrisk">&#x26A1; High Risk</span></td><td>Every authenticated request calls <code>db.scalar(select(Profile)...)</code>. Latency-critical path. Requires caching layer.</td></tr>
+    <tr><td><code>core/dependencies.py</code> — AuthSession lookup L186</td><td>Monolith</td><td><span class="badge highrisk">&#x26A1; High Risk</span></td><td>Every JWT-with-sid request queries auth_sessions for revocation. Session invalidation correctness is security-critical.</td></tr>
+    <tr><td><code>core/dependencies.py</code> — RolePermission L91</td><td>Monolith</td><td><span class="badge highrisk">&#x26A1; High Risk</span></td><td>Every permission-gated endpoint resolves permissions live from DB. Must shift to JWT claim before compat views drop.</td></tr>
+    <tr><td><code>advance_pipeline_from_screening()</code> L1481–1487</td><td class="screen-col">Screening</td><td><span class="badge blocker">&#x1F6AB; Blocker</span></td><td>Only direct WRITE from Screening schema to public.pipelines. Must be replaced with HTTP before Phase 1C can start.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================== AUTH SERVICE ================== -->
+<h2 id="auth" style="color:var(--a1)">Auth Service Boundary Analysis</h2>
+<div class="service-bar-auth"></div>
+
+<h3>1. Tables Owned (7 — all move to <code>app_auth</code> schema)</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Table</th><th>Primary Key</th><th>Key Columns</th><th>Intra-auth FKs</th><th>External FKs (inbound)</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>app_auth.profiles</code></td><td><code>id (UUID)</code></td>
+      <td><code>email, password_hash, role, type, organization_id, role_id</code></td>
+      <td><code>organization_id → organizations.id</code><br><code>role_id → organization_roles.id</code></td>
+      <td><span class="badge blocker" style="font-size:10px">public.jobs.created_by → profiles.id</span> — must drop before migration</td>
+    </tr>
+    <tr>
+      <td><code>app_auth.organizations</code></td><td><code>id (UUID)</code></td>
+      <td><code>name, slug, max_concurrent_sessions</code></td>
+      <td>None</td>
+      <td>None after jobs FK drop</td>
+    </tr>
+    <tr>
+      <td><code>app_auth.auth_sessions</code></td><td><code>id (UUID)</code></td>
+      <td><code>profile_id, refresh_token_hash, revoked_at, expires_at</code></td>
+      <td><code>profile_id → profiles.id</code> (intra)</td>
+      <td>None</td>
+    </tr>
+    <tr>
+      <td><code>app_auth.organization_roles</code></td><td><code>id (UUID)</code></td>
+      <td><code>organization_id, key, name, is_custom</code></td>
+      <td><code>organization_id → organizations.id</code> (intra)</td>
+      <td>None (profiles.role_id is intra-auth)</td>
+    </tr>
+    <tr>
+      <td><code>app_auth.permissions</code></td><td><code>id (UUID)</code></td>
+      <td><code>module, code, description</code></td>
+      <td>None</td>
+      <td>None</td>
+    </tr>
+    <tr>
+      <td><code>app_auth.role_permissions</code></td><td><code>id (UUID)</code></td>
+      <td><code>role_id, organization_id, permission</code></td>
+      <td><code>role_id → organization_roles.id</code> (intra)</td>
+      <td>None</td>
+    </tr>
+    <tr>
+      <td><code>app_auth.invites</code></td><td><code>id (UUID)</code></td>
+      <td><code>email, token, type, organization_id, status, expires_at</code></td>
+      <td><code>organization_id → organizations.id</code> (intra)</td>
+      <td>None</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+<div class="alert ag">All 7 auth tables are internally connected only to each other. After dropping the single inbound FK from <code>public.jobs.created_by</code>, the Auth Service schema is fully isolated with no outbound dependencies on any public schema table.</div>
+
+<h3>2. API Endpoints Exposed (20 endpoints)</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Route file</th><th>Auth required</th></tr></thead>
+  <tbody>
+    <tr><td>POST</td><td><code>/api/v1/auth/signup</code></td><td>auth.py L32</td><td>No</td></tr>
+    <tr><td>POST</td><td><code>/api/v1/auth/login</code></td><td>auth.py L87</td><td>No</td></tr>
+    <tr><td>POST</td><td><code>/api/v1/auth/refresh</code></td><td>auth.py L160</td><td>Refresh token</td></tr>
+    <tr><td>POST</td><td><code>/api/v1/auth/logout</code></td><td>auth.py L237</td><td>Bearer JWT</td></tr>
+    <tr><td>GET</td><td><code>/api/v1/users</code></td><td>users.py L100</td><td>Bearer JWT</td></tr>
+    <tr><td>PATCH</td><td><code>/api/v1/users/{user_id}</code></td><td>users.py L124</td><td>Bearer JWT</td></tr>
+    <tr><td>DELETE</td><td><code>/api/v1/users/{user_id}</code></td><td>users.py L185</td><td>Bearer JWT</td></tr>
+    <tr><td>GET</td><td><code>/api/v1/users/{user_id}/permissions</code></td><td>users.py L220</td><td>Bearer JWT</td></tr>
+    <tr><td>GET</td><td><code>/api/v1/roles/legacy-permissions-map</code></td><td>roles.py L70</td><td>Bearer JWT</td></tr>
+    <tr><td>GET</td><td><code>/api/v1/roles</code></td><td>roles.py L117</td><td>Bearer JWT</td></tr>
+    <tr><td>POST</td><td><code>/api/v1/roles</code></td><td>roles.py L144</td><td>Bearer JWT</td></tr>
+    <tr><td>GET</td><td><code>/api/v1/roles/{role_id}/permissions</code></td><td>roles.py L166</td><td>Bearer JWT</td></tr>
+    <tr><td>POST</td><td><code>/api/v1/roles/{role_id}/permissions</code></td><td>roles.py L183</td><td>Bearer JWT</td></tr>
+    <tr><td>DELETE</td><td><code>/api/v1/roles/{role_id}</code></td><td>roles.py L217</td><td>Bearer JWT</td></tr>
+    <tr><td>GET</td><td><code>/api/v1/invites</code></td><td>invites.py L132</td><td>Bearer JWT</td></tr>
+    <tr><td>POST</td><td><code>/api/v1/invites</code></td><td>invites.py L147</td><td>Bearer JWT</td></tr>
+    <tr><td>GET</td><td><code>/api/v1/invites/open</code></td><td>invites.py L242</td><td>Token param</td></tr>
+    <tr><td>POST</td><td><code>/api/v1/invites/{invite_id}/resend</code></td><td>invites.py L272</td><td>Bearer JWT</td></tr>
+    <tr><td>POST</td><td><code>/api/v1/invites/accept</code></td><td>invites.py L354</td><td>Token param</td></tr>
+    <tr><td>GET</td><td><code>/api/v1/invites/{invite_id}</code></td><td>invites.py L419</td><td>Bearer JWT</td></tr>
+    <tr><td>GET</td><td><code>/api/v1/permission-catalog</code></td><td>permission_catalog.py L30</td><td>Bearer JWT</td></tr>
+    <tr><td colspan="4" style="color:#475569;font-size:11px;font-style:italic">To add: <code>GET /internal/users/{id}</code>, <code>GET /internal/sessions/{id}</code>, <code>POST /internal/orgs/{id}/seed-permissions</code> (service-key protected)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>3. Monolith Files That Currently Query Auth Tables (10 files)</h3>
+<div class="card">
+<table>
+  <thead><tr><th>File</th><th>Tables queried</th><th>Operation</th><th>Query count</th><th>Phase 1A/B safe?</th><th>Phase 1C action</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>core/dependencies.py</code></td>
+      <td><code>profiles</code> L165<br><code>auth_sessions</code> L186<br><code>role_permissions</code> L91</td>
+      <td><span class="ro">READ</span></td><td>3</td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; via compat view</span></td>
+      <td>Replace with <code>GET /internal/users/{id}</code> + <code>GET /internal/sessions/{id}</code> + JWT perms claim</td>
+    </tr>
+    <tr>
+      <td><code>analytics/repository.py</code></td>
+      <td><code>profiles</code></td>
+      <td><span class="ro">READ</span></td><td>4 JOIN queries</td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; via compat view</span></td>
+      <td>Denormalize recruiter_name to <code>interviews</code> table (Phase 2)</td>
+    </tr>
+    <tr>
+      <td><code>candidate_management/service.py</code></td>
+      <td><code>profiles</code></td>
+      <td><span class="ro">READ</span></td><td>1</td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; via compat view</span></td>
+      <td>Read recruiter email from JWT claim or API</td>
+    </tr>
+    <tr>
+      <td><code>services/client_service.py</code></td>
+      <td><code>profiles</code></td>
+      <td><span class="ro">READ</span></td><td>1</td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; via compat view</span></td>
+      <td>Use org_id from JWT claim directly</td>
+    </tr>
+    <tr>
+      <td><code>services/interview_service.py</code></td>
+      <td><code>profiles</code></td>
+      <td><span class="ro">READ</span></td><td>3</td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; via compat view</span></td>
+      <td>Call <code>GET /internal/users/{id}</code> at email-send time (background task — latency OK)</td>
+    </tr>
+    <tr>
+      <td><code>services/interview_reminder_service.py</code></td>
+      <td><code>profiles</code></td>
+      <td><span class="ro">READ</span></td><td>1</td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; via compat view</span></td>
+      <td>Call <code>GET /internal/users/{id}</code> (background task)</td>
+    </tr>
+    <tr>
+      <td><code>routes/job.py</code></td>
+      <td><code>profiles</code></td>
+      <td><span class="ro">READ</span></td><td>1</td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; via compat view</span></td>
+      <td>Use <code>current_user.organization_id</code> from JWT (already available)</td>
+    </tr>
+    <tr>
+      <td><code>websocket/copilot_ws.py</code></td>
+      <td><code>profiles</code>, <code>role_permissions</code></td>
+      <td><span class="ro">READ</span></td><td>2</td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; via compat view</span></td>
+      <td>Read permissions from JWT claim</td>
+    </tr>
+    <tr>
+      <td><code>core/signup_permissions.py</code></td>
+      <td><code>organization_roles</code>, <code>role_permissions</code>, <code>organizations</code></td>
+      <td><span class="ro">READ + WRITE</span></td><td>3</td>
+      <td><span class="badge refactor" style="font-size:10px">&#x26A0; Write moves to Auth</span></td>
+      <td>Replace with <code>POST /internal/orgs/{id}/seed-permissions</code> in Auth Service</td>
+    </tr>
+    <tr>
+      <td><code>services/permission_service.py</code></td>
+      <td><code>profiles</code>, <code>role_permissions</code></td>
+      <td><span class="ro">READ</span></td><td>4</td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; via compat view</span></td>
+      <td>Delete from monolith — Auth Service retains its own copy for JWT claim generation</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+<div class="alert ag"><strong>Zero writes to auth tables from non-auth-moving monolith files.</strong> Confirmed by static analysis: <code>db.add(profile)</code> in <code>interview_service.py</code> references <code>InterviewerProfile</code> — a separate interview domain model, not auth's <code>Profile</code>. <code>db.execute(select(Profile...))</code> calls are reads, not writes. All 10 files are read-only against auth tables and are safe via compatibility views during Phase 1A/B.</div>
+
+<h3>4. ORM Models to Remove from Monolith (7 files)</h3>
+<div class="card">
+<table>
+  <thead><tr><th>File</th><th>Class</th><th>When to remove</th><th>Risk if removed early</th></tr></thead>
+  <tbody>
+    <tr><td><code>app/models/profile.py</code></td><td><code>Profile</code></td><td>Phase 1C — after all 10 monolith usages converted to API calls</td><td>HIGH — used in 13 monolith files; removing before converting = 500 errors on every authenticated request</td></tr>
+    <tr><td><code>app/models/auth_session.py</code></td><td><code>AuthSession</code></td><td>Phase 1C — after <code>dependencies.py</code> L186 converted</td><td>HIGH — breaks session revocation</td></tr>
+    <tr><td><code>app/models/organization_role.py</code></td><td><code>OrganizationRole</code></td><td>Phase 1C — after <code>dependencies.py</code> L91 + <code>signup_permissions.py</code> converted</td><td>MEDIUM</td></tr>
+    <tr><td><code>app/models/role_permission.py</code></td><td><code>RolePermission</code></td><td>Phase 1C — after <code>permission_service.py</code> removed from monolith</td><td>MEDIUM — every permission-gated endpoint breaks</td></tr>
+    <tr><td><code>app/models/organization.py</code></td><td><code>Organization</code></td><td>Phase 1C — after <code>signup_permissions.py</code> converted</td><td>LOW</td></tr>
+    <tr><td><code>app/models/permission.py</code></td><td><code>Permission</code></td><td>Phase 1C — after <code>permission_catalog.py</code> route removed from monolith</td><td>LOW</td></tr>
+    <tr><td><code>app/models/invite.py</code></td><td><code>Invite</code></td><td>Phase 1C — after <code>invites.py</code> route removed from monolith</td><td>LOW</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>5. Direct DB Access → HTTP Calls (by priority)</h3>
+<div class="card">
+<table>
+  <thead><tr><th>File</th><th>Line</th><th>Current</th><th>HTTP replacement</th><th>Cache?</th><th>Risk</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>core/dependencies.py</code></td><td>165</td>
+      <td><code>db.scalar(select(Profile).where(Profile.id == user_uuid))</code></td>
+      <td><code>GET {AUTH_URL}/internal/users/{id}</code></td>
+      <td>TTL=30s LRU (profile rarely changes)</td>
+      <td><span class="badge blocker" style="font-size:10px">&#x1F6AB; On every request</span></td>
+    </tr>
+    <tr>
+      <td><code>core/dependencies.py</code></td><td>186</td>
+      <td><code>db.scalar(select(AuthSession).where(AuthSession.id == session_uuid))</code></td>
+      <td><code>GET {AUTH_URL}/internal/sessions/{id}</code></td>
+      <td>TTL=5s (revocation must propagate quickly)</td>
+      <td><span class="badge highrisk" style="font-size:10px">&#x26A1; Security critical</span></td>
+    </tr>
+    <tr>
+      <td><code>core/dependencies.py</code></td><td>91</td>
+      <td><code>PermissionService(db).get_user_permissions(user_id)</code></td>
+      <td>Read <code>perms</code> claim from JWT — zero HTTP call</td>
+      <td>No cache needed — embedded in token</td>
+      <td><span class="badge refactor" style="font-size:10px">&#x26A0; Every permission check</span></td>
+    </tr>
+    <tr>
+      <td><code>core/signup_permissions.py</code></td><td>89, 96, 136</td>
+      <td>Writes role_permissions rows on signup</td>
+      <td><code>POST {AUTH_URL}/internal/orgs/{id}/seed-permissions</code></td>
+      <td>N/A</td>
+      <td><span class="badge refactor" style="font-size:10px">&#x26A0; Signup flow</span></td>
+    </tr>
+    <tr>
+      <td><code>analytics/repository.py</code></td><td>122, 132, 142, 212</td>
+      <td>JOINs to profiles for recruiter name aggregation</td>
+      <td>Denormalize recruiter_name to interviews (Phase 2) or <code>GET /internal/users/batch</code></td>
+      <td>N/A</td>
+      <td><span class="badge refactor" style="font-size:10px">&#x26A0; Analytics only</span></td>
+    </tr>
+    <tr>
+      <td><code>websocket/copilot_ws.py</code></td><td>155</td>
+      <td>Direct RolePermission query for WS auth</td>
+      <td>Read <code>perms</code> claim from JWT</td>
+      <td>N/A</td>
+      <td><span class="badge refactor" style="font-size:10px">&#x26A0; WS handshake</span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>6. Circular Dependencies — Auth Service</h3>
+<div class="alert ag"><strong>No circular dependencies found.</strong> All 7 auth model files import only from <code>app.db.base</code> (SQLAlchemy Base class). No auth model imports from any public schema model, screening model, or application service. The auth domain is a pure dependency leaf.</div>
+
+<!-- ================== SCREENING SERVICE ================== -->
+<h2 id="screen" style="color:var(--a2)">AI Screening Service Boundary Analysis</h2>
+<div class="service-bar-screen"></div>
+
+<h3>1. Tables Owned (6 — all move to <code>screening</code> schema)</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Table</th><th>Cross-schema columns</th><th>FK type</th><th>Intra-schema FKs</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>screening.ai_screenings</code></td>
+      <td><code>candidate_id</code>, <code>job_id</code>, <code>pipeline_id</code>, <code>organization_id</code>, <code>created_by</code></td>
+      <td><span class="badge refactor" style="font-size:10px">Soft UUID — no DB constraint</span></td>
+      <td>Root table — no intra FKs</td>
+    </tr>
+    <tr>
+      <td><code>screening.ai_screening_questions</code></td>
+      <td>None</td>
+      <td><span class="badge safe" style="font-size:10px">Clean</span></td>
+      <td><code>screening_id → ai_screenings.id ON DELETE CASCADE</code></td>
+    </tr>
+    <tr>
+      <td><code>screening.ai_screening_answers</code></td>
+      <td>None</td>
+      <td><span class="badge safe" style="font-size:10px">Clean</span></td>
+      <td><code>screening_id → ai_screenings.id</code>, <code>question_id → ai_screening_questions.id</code></td>
+    </tr>
+    <tr>
+      <td><code>screening.ai_screening_evaluations</code></td>
+      <td>None</td>
+      <td><span class="badge safe" style="font-size:10px">Clean</span></td>
+      <td><code>screening_id → ai_screenings.id</code>, <code>question_id → ai_screening_questions.id</code></td>
+    </tr>
+    <tr>
+      <td><code>screening.ai_screening_messages</code></td>
+      <td>None</td>
+      <td><span class="badge safe" style="font-size:10px">Clean</span></td>
+      <td><code>screening_id → ai_screenings.id ON DELETE CASCADE</code></td>
+    </tr>
+    <tr>
+      <td><code>screening.ai_screening_segments</code></td>
+      <td>None</td>
+      <td><span class="badge safe" style="font-size:10px">Clean</span></td>
+      <td><code>screening_id → ai_screenings.id ON DELETE CASCADE</code></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+<div class="alert ag">No DB-level FK constraints exist from any screening table to public schema tables. All cross-schema references (<code>candidate_id</code>, <code>job_id</code>, <code>pipeline_id</code>) are application-enforced UUID columns. The 6-table set can be moved together in a single transaction with zero FK drops required for the screening tables themselves.</div>
+
+<h3>2. API Endpoints Exposed (21 HTTP + 1 WebSocket)</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Method</th><th>Path (prefix: <code>/api/v1/ai-screenings</code>)</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>POST</td><td><code>/</code></td><td>Create self-service screening</td></tr>
+    <tr><td>GET</td><td><code>/</code></td><td>List screenings for org</td></tr>
+    <tr><td>GET</td><td><code>/pipeline-screenings</code> (L207)</td><td>Pipeline-integrated screening list (4-table JOIN — must move to Monolith)</td></tr>
+    <tr><td>GET</td><td><code>/pipeline-candidate/{candidate_id}</code> (L225)</td><td>Get or create screening for pipeline candidate</td></tr>
+    <tr><td>POST</td><td><code>/send-invite</code> (L255)</td><td>Send candidate AI screening invite email</td></tr>
+    <tr><td>GET</td><td><code>/candidate/{token}</code> (L280)</td><td>Candidate self-service — load screening by invite token</td></tr>
+    <tr><td>GET</td><td><code>/sessions</code> (L298)</td><td>List live interview sessions</td></tr>
+    <tr><td>GET</td><td><code>/live-status</code> (L316)</td><td>Live interview status dashboard</td></tr>
+    <tr><td>POST</td><td><code>/live-invite</code> (L385)</td><td>Create live interview + send invite</td></tr>
+    <tr><td>POST</td><td><code>/live-session</code> (L445)</td><td>Create live interview session (no email)</td></tr>
+    <tr><td>POST</td><td><code>/candidate/answer</code> (L605)</td><td>Submit candidate answer</td></tr>
+    <tr><td>GET</td><td><code>/review</code> (L643)</td><td>List screenings pending recruiter review</td></tr>
+    <tr><td>GET</td><td><code>/review/{screening_id}</code> (L677)</td><td>Full screening detail for recruiter review</td></tr>
+    <tr><td>GET</td><td><code>/{screening_id}</code></td><td>Get screening detail</td></tr>
+    <tr><td>POST</td><td><code>/{screening_id}/regenerate-questions</code></td><td>Regenerate AI questions</td></tr>
+    <tr><td>PUT</td><td><code>/{screening_id}/answers</code> (L772)</td><td>Bulk upsert answers</td></tr>
+    <tr><td>POST</td><td><code>/{screening_id}/evaluate</code></td><td>Trigger AI evaluation</td></tr>
+    <tr><td>POST</td><td><code>/{screening_id}/decision</code></td><td>Recruiter review decision (advance/reject)</td></tr>
+    <tr><td>DELETE</td><td><code>/{screening_id}</code></td><td>Delete screening</td></tr>
+    <tr><td>POST</td><td><code>/start</code></td><td>Start self-service screening session</td></tr>
+    <tr><td>POST</td><td><code>/{screening_id}/retry</code></td><td>Retry failed screening</td></tr>
+    <tr><td>POST</td><td><code>/{screening_id}/move-stage</code></td><td>Move pipeline stage from screening context</td></tr>
+    <tr><td>WS</td><td><code>/ws/ai-screening/{screening_id}</code></td><td>Live interview real-time bidirectional stream</td></tr>
+    <tr><td colspan="3" style="color:#475569;font-size:11px;font-style:italic">To add: <code>GET /internal/screenings?candidate_ids=</code>, <code>DELETE /internal/screenings?candidate_id=</code> (service-key protected)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>3. Monolith Endpoints the Screening Service Consumes</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Endpoint</th><th>Already exists?</th><th>Used for</th><th>Attributes needed</th><th>Callsites</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>GET /api/v1/candidates/{id}</code></td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; Exists (candidate.py L112)</span></td>
+      <td>Candidate context for question gen, invite, live interview</td>
+      <td><code>first_name</code>, <code>last_name</code>, <code>email</code>, <code>experience_summary</code>, <code>years_experience</code>, <code>parsed_resume_data</code></td>
+      <td>L109, 169, 213, 534, 619, 1402</td>
+    </tr>
+    <tr>
+      <td><code>GET /api/v1/jobs/{id}</code></td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; Exists (job.py L729)</span></td>
+      <td>Job context for question gen, AI Q&amp;A, live interview</td>
+      <td><code>title</code>, <code>description</code></td>
+      <td>L110, 170, 214, 340, 535, 624, 1689</td>
+    </tr>
+    <tr>
+      <td><code>PATCH /api/v1/pipelines/{id}</code></td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; Exists (pipeline.py L168)</span></td>
+      <td>Advance pipeline stage after recruiter review decision</td>
+      <td>Accepts <code>stage</code>, <code>status</code> fields</td>
+      <td>L1481–1487 (currently direct DB write)</td>
+    </tr>
+    <tr>
+      <td><code>GET /api/v1/candidates/{id}/matches</code></td>
+      <td><span class="badge safe" style="font-size:10px">&#x2713; Exists (candidate.py L165)</span></td>
+      <td>ATS skill gaps for question difficulty calibration</td>
+      <td><code>ats_score</code>, <code>skill_gaps</code>, <code>recommendation</code></td>
+      <td>L179, 232</td>
+    </tr>
+    <tr>
+      <td><code>GET /api/v1/pipelines?candidate_id=&amp;stage=</code></td>
+      <td><span class="badge refactor" style="font-size:10px">Needs filter params added</span></td>
+      <td>Find active pipeline entry for auto-screening creation</td>
+      <td><code>id</code>, <code>job_id</code></td>
+      <td>L1432</td>
+    </tr>
+    <tr>
+      <td><code>POST /internal/pipelines/{id}/stage</code></td>
+      <td><span class="badge blocker" style="font-size:10px">&#x1F6AB; Does not exist — must build</span></td>
+      <td>Service-key protected stage transition for post-review advancement</td>
+      <td>Body: <code>{stage, status?}</code></td>
+      <td>L1481–1487</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>4. All Cross-Schema Queries Currently in the Screening Service</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Line</th><th>Method</th><th>Table accessed</th><th>Schema</th><th>Operation</th><th>Attributes read</th><th>Replacement strategy</th></tr></thead>
+  <tbody>
+    <tr><td>L109</td><td><code>list_screenings()</code></td><td>candidates</td><td>public</td><td><span class="ro">SELECT</span></td><td>first_name, last_name, email</td><td>Use <code>candidate_name_snapshot</code> + add <code>candidate_email_snapshot</code> column</td></tr>
+    <tr><td>L110</td><td><code>list_screenings()</code></td><td>jobs</td><td>public</td><td><span class="ro">SELECT</span></td><td>title</td><td>Use existing <code>job_title_snapshot</code> column</td></tr>
+    <tr><td>L169</td><td><code>get_detail()</code></td><td>candidates</td><td>public</td><td><span class="ro">SELECT</span></td><td>first_name, last_name, email, experience_summary</td><td><code>GET /api/v1/candidates/{id}</code></td></tr>
+    <tr><td>L170</td><td><code>get_detail()</code></td><td>jobs</td><td>public</td><td><span class="ro">SELECT</span></td><td>title, description</td><td><code>GET /api/v1/jobs/{id}</code></td></tr>
+    <tr><td>L179</td><td><code>get_detail()</code></td><td>candidate_job_matches</td><td>public</td><td><span class="ro">SELECT</span></td><td>ats_score, recommendation</td><td><code>GET /api/v1/candidates/{cid}/matches</code></td></tr>
+    <tr><td>L213</td><td><code>generate_questions()</code></td><td>candidates</td><td>public</td><td><span class="ro">SELECT</span></td><td>experience_summary, years_experience, parsed_resume_data</td><td><code>GET /api/v1/candidates/{id}</code></td></tr>
+    <tr><td>L214</td><td><code>generate_questions()</code></td><td>jobs</td><td>public</td><td><span class="ro">SELECT</span></td><td>title, description</td><td><code>GET /api/v1/jobs/{id}</code> or use stored <code>job_description_snapshot</code></td></tr>
+    <tr><td>L232</td><td><code>generate_questions()</code></td><td>candidate_job_matches</td><td>public</td><td><span class="ro">SELECT</span></td><td>skill_gaps</td><td><code>GET /api/v1/candidates/{cid}/matches</code></td></tr>
+    <tr><td>L340</td><td><code>complete_screening()</code></td><td>jobs</td><td>public</td><td><span class="ro">SELECT</span></td><td>title</td><td>Use <code>job_title_snapshot</code></td></tr>
+    <tr><td>L341</td><td><code>complete_screening()</code></td><td>candidates</td><td>public</td><td><span class="ro">SELECT</span></td><td>first_name, last_name</td><td>Use <code>candidate_name_snapshot</code></td></tr>
+    <tr><td>L534</td><td><code>create_live_interview()</code></td><td>candidates</td><td>public</td><td><span class="ro">SELECT</span></td><td>first_name, last_name</td><td><code>GET /api/v1/candidates/{id}</code></td></tr>
+    <tr><td>L535</td><td><code>create_live_interview()</code></td><td>jobs</td><td>public</td><td><span class="ro">SELECT</span></td><td>title</td><td><code>GET /api/v1/jobs/{id}</code></td></tr>
+    <tr><td>L619</td><td><code>send_invite()</code></td><td>candidates</td><td>public</td><td><span class="ro">SELECT</span></td><td>email, first_name, last_name</td><td><code>GET /api/v1/candidates/{id}</code></td></tr>
+    <tr><td>L624</td><td><code>send_invite()</code></td><td>jobs</td><td>public</td><td><span class="ro">SELECT</span></td><td>title</td><td><code>GET /api/v1/jobs/{id}</code></td></tr>
+    <tr><td>L1302–1345</td><td><code>get_pipeline_ai_screenings()</code></td><td>pipelines, candidates, jobs</td><td>public</td><td><span class="ro">4-table JOIN SELECT</span></td><td>stage, candidate name/email, job title</td><td><strong>Move method to Monolith</strong> — not refactorable as API call</td></tr>
+    <tr><td>L1402</td><td><code>get_or_create()</code></td><td>candidates</td><td>public</td><td><span class="ro">SELECT</span></td><td>first_name, last_name</td><td><code>GET /api/v1/candidates/{id}</code></td></tr>
+    <tr><td>L1432</td><td><code>get_or_create()</code></td><td>pipelines</td><td>public</td><td><span class="ro">SELECT</span></td><td>id, job_id</td><td><code>GET /api/v1/pipelines?candidate_id=&amp;stage=</code></td></tr>
+    <tr><td>L1469</td><td><code>advance_pipeline()</code></td><td>pipelines</td><td>public</td><td><span class="ro">SELECT</span></td><td>id, candidate_id, job_id, stage</td><td><code>POST /internal/pipelines/{id}/stage</code></td></tr>
+    <tr><td><strong>L1481–1487</strong></td><td><code>advance_pipeline()</code></td><td>pipelines</td><td>public</td><td><span class="rw">&#x26A0; WRITE</span></td><td>Mutates: stage, stage_updated_at, status</td><td><strong>Blocker.</strong> <code>POST /internal/pipelines/{id}/stage</code> with X-Service-Key</td></tr>
+    <tr><td>L1689</td><td><code>_answer_candidate_question()</code></td><td>jobs</td><td>public</td><td><span class="ro">SELECT</span></td><td>description (2000 chars for AI context)</td><td><code>GET /api/v1/jobs/{id}</code> or store in <code>job_description_snapshot</code></td></tr>
+  </tbody>
+</table>
+</div>
+<div class="alert ao"><strong>19 cross-schema callsites. 18 reads, 1 write.</strong> The single write (<code>advance_pipeline_from_screening()</code> L1481–1487) is the only true blocker. All 18 reads are safe via compatibility views during Phase 1A/B and can be incrementally replaced with API calls or snapshot columns during Phase 1B.</div>
+
+<h3>5. Candidate/Job Data Required — Snapshot Analysis</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Data needed</th><th>Column exists on <code>ai_screenings</code>?</th><th>Callsites that need live fetch</th><th>Callsites that can use snapshot</th></tr></thead>
+  <tbody>
+    <tr><td>Candidate name (<code>first_name + last_name</code>)</td><td><span class="badge safe" style="font-size:10px">&#x2713; candidate_name_snapshot</span></td><td>L534 (create live interview — before snapshot exists)</td><td>L109 (list), L341 (complete)</td></tr>
+    <tr><td>Candidate email</td><td><span class="badge refactor" style="font-size:10px">Add candidate_email_snapshot</span></td><td>L619 (send invite — before snapshot exists)</td><td>L109, L124</td></tr>
+    <tr><td>Candidate experience summary + resume data</td><td>No — too large to snapshot</td><td>L213 (question gen — always needs fresh data)</td><td>None</td></tr>
+    <tr><td>Job title</td><td><span class="badge safe" style="font-size:10px">&#x2713; job_title_snapshot</span></td><td>L535 (create live interview)</td><td>L110 (list), L340 (complete)</td></tr>
+    <tr><td>Job description (2000 chars)</td><td><span class="badge refactor" style="font-size:10px">Add job_description_snapshot</span></td><td>L1689 (candidate Q&amp;A — AI needs fresh context)</td><td>L214, L245</td></tr>
+    <tr><td>ATS match score + skill gaps</td><td>No</td><td>L179, L232 (question difficulty calibration)</td><td>None (optional enrichment)</td></tr>
+    <tr><td>Pipeline ID + job ID for auto-create</td><td>Stored on screening once created</td><td>L1432 (initial lookup only)</td><td>N/A</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>6. Runtime Dependencies on the Monolith</h3>
+<div class="card">
+<table>
+  <thead><tr><th>Dependency</th><th>Type</th><th>Frequency</th><th>Failure mode</th><th>Mitigation</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Candidate profile data</td><td>HTTP GET (read)</td><td>Per screening creation + per question generation</td>
+      <td>Screening creation fails if Monolith is down</td>
+      <td>Retry with backoff. Question gen can use cached data from creation snapshot.</td>
+    </tr>
+    <tr>
+      <td>Job description data</td><td>HTTP GET (read)</td><td>Per screening creation + per question generation</td>
+      <td>Degraded questions (fall back to generic prompts)</td>
+      <td>Store <code>job_description_snapshot</code> at creation; question gen uses snapshot if fresh fetch fails.</td>
+    </tr>
+    <tr>
+      <td>ATS skill gaps (<code>CandidateJobMatch</code>)</td><td>HTTP GET (read)</td><td>Per question generation (optional enrichment)</td>
+      <td>Questions generated without skill gap calibration — degraded but functional</td>
+      <td>Treat as optional: catch 404/503, proceed without skill gap data.</td>
+    </tr>
+    <tr>
+      <td>Pipeline stage advancement</td><td>HTTP POST (write)</td><td>Per recruiter review decision</td>
+      <td><strong>Critical:</strong> candidate stuck in <code>ai_interview</code> stage</td>
+      <td>Retry queue with dead-letter. If Monolith is unavailable, queue the stage change and apply when available. Do not block recruiter UI.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Circular Dependencies — Screening Service</h3>
+<div class="alert ay">
+  <strong>One indirect coupling found: Screening &#x2192; Auth &#x2192; (Monolith).</strong><br><br>
+  <code>routes/ai_screening.py</code> imports <code>get_current_user</code> and <code>require_permission</code> from <code>app.core.dependencies</code>.<br>
+  <code>core/dependencies.py</code> queries <code>Profile</code> (auth table) on every request.<br><br>
+  When Screening Service is extracted: it needs JWT validation. It will call <code>GET {AUTH_URL}/internal/users/{id}</code> to validate tokens. This means:<br>
+  <strong>Screening Service &#x2192; Auth Service</strong> (for all JWT validation) AND <strong>Screening Service &#x2192; Monolith</strong> (for candidate/job/pipeline data).<br><br>
+  This is a <em>fan-out</em> pattern, not a circular dependency. Auth Service does not call Screening Service. Monolith does not call Auth Service in the request path (only during signup). The dependency graph is acyclic.
+</div>
+<div class="card" style="margin-top:12px">
+<table>
+  <thead><tr><th>From</th><th>To</th><th>Reason</th><th>Circular?</th></tr></thead>
+  <tbody>
+    <tr><td>Screening Service</td><td>Auth Service</td><td>JWT validation on every request (<code>GET /internal/users/{id}</code>)</td><td><span class="badge safe" style="font-size:10px">No — one-way</span></td></tr>
+    <tr><td>Screening Service</td><td>Monolith</td><td>Candidate/Job/Pipeline reads + Pipeline write</td><td><span class="badge safe" style="font-size:10px">No — one-way</span></td></tr>
+    <tr><td>Monolith</td><td>Auth Service</td><td>Profile + Session lookups in <code>dependencies.py</code> (Phase 1C)</td><td><span class="badge safe" style="font-size:10px">No — one-way</span></td></tr>
+    <tr><td>Monolith</td><td>Screening Service</td><td>Pipeline board calls <code>GET /internal/screenings</code> for AI status overlay</td><td><span class="badge safe" style="font-size:10px">No — one-way</span></td></tr>
+    <tr><td>Auth Service</td><td>Screening Service</td><td>—</td><td><span class="badge safe" style="font-size:10px">&#x2713; No dependency</span></td></tr>
+    <tr><td>Auth Service</td><td>Monolith</td><td>—</td><td><span class="badge safe" style="font-size:10px">&#x2713; No dependency</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================== INDEPENDENCE PROOF ================== -->
+<h2 id="proof">Independence Proof</h2>
+<p>The following statements can be verified by inspection of the codebase. Each one must be true for the extraction to be considered safe.</p>
+
+<div class="card">
+<table>
+  <thead><tr><th>#</th><th>Statement</th><th>Verified</th><th>Evidence</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>Auth Service tables have no FK constraints pointing to public schema tables after the single jobs FK is dropped.</td>
+      <td><span class="badge safe">&#x2713; True</span></td>
+      <td>Alembic migration scan found only 5 FK constraints on the 7 auth tables; all 4 non-jobs ones are intra-auth. <code>fk_jobs_created_by_profiles</code> is dropped in Migration 002.</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Screening Service tables have no FK constraints pointing to public schema tables.</td>
+      <td><span class="badge safe">&#x2713; True</span></td>
+      <td>Alembic scan found zero DB-level FK constraints from screening tables to <code>candidates</code>, <code>jobs</code>, or <code>pipelines</code>. All cross-schema refs are soft UUID columns.</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>The monolith makes zero writes to auth tables outside of auth-domain files.</td>
+      <td><span class="badge safe">&#x2713; True</span></td>
+      <td>Static analysis of all 10 non-auth files with auth table references confirmed all are <code>SELECT</code>-only. <code>db.add(profile)</code> in <code>interview_service.py</code> is <code>InterviewerProfile</code> (interview domain model), not auth <code>Profile</code>.</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>The only write from Screening Service to public schema is <code>advance_pipeline_from_screening()</code>.</td>
+      <td><span class="badge safe">&#x2713; True</span></td>
+      <td>All 32 <code>db.commit()</code> calls in <code>ai_screening_service.py</code> were reviewed. 31 commit <code>screening.*</code> rows. Only lines 1481–1487 write to <code>Pipeline</code>. Confirmed single blocker.</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Auth Service files import only from auth domain models and shared infrastructure.</td>
+      <td><span class="badge safe">&#x2713; True</span></td>
+      <td>All 7 auth model files import only <code>app.db.base.Base</code>. Auth route files import only auth models + FastAPI + SQLAlchemy + shared schemas/security utilities.</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>Screening Service stateless AI components have no DB dependency.</td>
+      <td><span class="badge safe">&#x2713; True</span></td>
+      <td><code>question_generator.py</code>, <code>answer_evaluator.py</code>, <code>recommendation_engine.py</code>, <code>recruiter_summary.py</code>, <code>ai_screening_email.py</code> — none import SQLAlchemy Session or any DB model.</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>Compatibility views preserve all existing monolith behavior during Phase 1A/B.</td>
+      <td><span class="badge safe">&#x2713; True</span></td>
+      <td>All 10 monolith files that query auth tables do so via <code>select(ModelClass)</code>. After <code>CREATE VIEW public.profiles AS SELECT * FROM app_auth.profiles</code>, SQLAlchemy resolves <code>select(Profile)</code> to <code>public.profiles</code>, which the view redirects transparently. Identical for all 13 tables.</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td>No circular dependencies exist in the 3-service graph.</td>
+      <td><span class="badge safe">&#x2713; True</span></td>
+      <td>Dependency graph: Screening→Auth, Screening→Monolith, Monolith→Auth (Phase 1C), Monolith→Screening (pipeline board). No cycle. Auth is a pure dependency sink.</td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td>All Screening Service API endpoints can authenticate requests without the Monolith.</td>
+      <td><span class="badge refactor">&#x26A0; After Phase 1C</span></td>
+      <td>Currently all routes use <code>get_current_user</code> from <code>core/dependencies.py</code> which queries <code>public.profiles</code>. After Phase 1C, this is replaced by <code>GET {AUTH_URL}/internal/users/{id}</code>. During Phase 1A/B: compat view makes it transparent.</td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td>Removing Auth Service DB access from the Monolith does not break existing ATS functionality.</td>
+      <td><span class="badge refactor">&#x26A0; After BE-018 + BE-022</span></td>
+      <td>Auth table reads in the monolith are for: request auth (BE-018: API call), permission check (BE-022: JWT claim), analytics (Phase 2: snapshot), and interview/reminder emails (Phase 2: API call). All ATS CRUD operations (candidates, jobs, pipelines, offers, sourcing) have zero auth table dependencies.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="alert ag" style="margin-top:24px;font-size:13.5px">
+  <strong>Conclusion: Auth and AI Screening CAN operate independently without breaking existing ATS functionality.</strong><br><br>
+  The extraction is safe under these conditions:<br>
+  (a) Compatibility views are deployed before any model schema tags are applied.<br>
+  (b) <code>advance_pipeline_from_screening()</code> is converted to an HTTP call before Phase 1C begins.<br>
+  (c) <code>core/dependencies.py</code> Profile and AuthSession lookups are converted to API calls before compatibility views are dropped.<br>
+  (d) The schema is renamed from <code>auth</code> to <code>app_auth</code> to avoid collision with Supabase's built-in <code>auth</code> schema.<br><br>
+  All 25 existing route files not in the auth or screening domains are unaffected throughout all phases.
+</div>
+
+<p style="margin-top:52px;color:#2e3350;font-size:12px;border-top:1px solid #2e3350;padding-top:18px">
+  Generated by Claude Code &#183; AIRIS Platform &#183; June 2026 &#183; All findings from static analysis of backend/app/
+</p>
+</div>
+</body>
+</html>

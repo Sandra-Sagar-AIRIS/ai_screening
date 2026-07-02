@@ -13,7 +13,10 @@ from app.db.base import Base
 
 class JobMatchCache(Base):
     __tablename__ = "job_match_cache"
-    __table_args__ = (sa.UniqueConstraint("job_id", name="uq_job_match_cache_job_id"),)
+    __table_args__ = (
+        sa.UniqueConstraint("job_id", name="uq_job_match_cache_job_id"),
+        {"schema": "jobs"},
+    )
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -22,7 +25,7 @@ class JobMatchCache(Base):
     )
     job_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("jobs.id", ondelete="CASCADE"),
+        ForeignKey("jobs.jobs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

@@ -13,7 +13,10 @@ from app.db.base import Base
 
 class JobSkill(Base):
     __tablename__ = "job_skills"
-    __table_args__ = (sa.UniqueConstraint("job_id", "skill", name="uq_job_skills_job_id_skill"),)
+    __table_args__ = (
+        sa.UniqueConstraint("job_id", "skill", name="uq_job_skills_job_id_skill"),
+        {"schema": "jobs"},
+    )
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -22,7 +25,7 @@ class JobSkill(Base):
     )
     job_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("jobs.id", ondelete="CASCADE"),
+        ForeignKey("jobs.jobs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

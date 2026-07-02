@@ -15,6 +15,7 @@ class ClientRecruiterAssignment(Base):
     __tablename__ = "client_recruiter_assignments"
     __table_args__ = (
         UniqueConstraint("client_id", "recruiter_id", name="uq_client_recruiter"),
+        {"schema": "jobs"},
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -24,13 +25,15 @@ class ClientRecruiterAssignment(Base):
     )
     client_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("clients.id", ondelete="CASCADE"),
+        ForeignKey("jobs.clients.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
+    # recruiter_id is a cross-schema reference (identity.profiles) —
+    # 0001_initial.py defines no FK for it; integrity is enforced at the
+    # service layer.
     recruiter_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("profiles.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

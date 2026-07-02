@@ -27,6 +27,7 @@ candidate_source_type_enum = sa.Enum(
 
 class Candidate(Base):
     __tablename__ = "candidates"
+    __table_args__ = {"schema": "candidate"}
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
@@ -37,9 +38,10 @@ class Candidate(Base):
     # Candidate-management module stores the tenant key here; legacy rows may only have organization_id.
     org_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True, index=True)
 
+    # created_by is a cross-schema reference (identity.profiles) — 0001_initial.py
+    # defines no FK for it; integrity is enforced at the service layer.
     created_by: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("profiles.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -64,7 +66,7 @@ class Candidate(Base):
     is_merged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", index=True)
     merged_into_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("candidates.id", ondelete="SET NULL"),
+        ForeignKey("candidate.candidates.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
