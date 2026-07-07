@@ -702,12 +702,18 @@ class TestOrgScoping:
 # ── Auto-transition Integration Tests ────────────────────────────────────────
 
 class TestAutoTransition:
+    """_auto_transition now goes through
+    app.orchestration.pipeline_transitions.transition_pipeline_stage (a
+    module-level orchestrator, called via a local import) rather than
+    calling self._pipeline_svc.transition_stage directly — PlacementHistory
+    is coordinated by that orchestrator, not by PipelineService itself. Mock
+    at that boundary instead of on a PipelineService instance.
+    """
+
     def test_auto_transition_uses_pipeline_service(self):
         db = MagicMock()
         svc = OfferService.__new__(OfferService)
         svc.db = db
-        mock_pipeline_svc = MagicMock()
-        svc._pipeline_svc = mock_pipeline_svc
 
         from app.schemas.pipeline import PipelineStage
 
@@ -715,39 +721,43 @@ class TestAutoTransition:
         user = _make_user()
         org_id = pipeline.organization_id
 
-        svc._auto_transition(
-            pipeline=pipeline,
-            organization_id=org_id,
-            current_user=user,
-            new_stage=PipelineStage.PLACED,
-            reason="Offer accepted.",
-        )
+        with patch("app.orchestration.pipeline_transitions.transition_pipeline_stage") as mock_transition:
+            svc._auto_transition(
+                pipeline=pipeline,
+                organization_id=org_id,
+                current_user=user,
+                new_stage=PipelineStage.PLACED,
+                reason="Offer accepted.",
+            )
 
-        mock_pipeline_svc.transition_stage.assert_called_once()
-        call_kwargs = mock_pipeline_svc.transition_stage.call_args.kwargs
-        assert call_kwargs["pipeline_id"] == pipeline.id
-        assert call_kwargs["organization_id"] == org_id
-        assert call_kwargs["payload"].stage == PipelineStage.PLACED
+        mock_transition.assert_called_once()
+        # transition_pipeline_stage(db, pipeline_id, organization_id, current_user, payload)
+        args = mock_transition.call_args.args
+        assert args[0] is db
+        assert args[1] == pipeline.id
+        assert args[2] == org_id
+        assert args[4].stage == PipelineStage.PLACED
 
     def test_auto_transition_raises_500_on_failure(self):
         db = MagicMock()
         svc = OfferService.__new__(OfferService)
         svc.db = db
-        mock_pipeline_svc = MagicMock()
-        mock_pipeline_svc.transition_stage.side_effect = RuntimeError("DB error")
-        svc._pipeline_svc = mock_pipeline_svc
 
         from app.schemas.pipeline import PipelineStage
         from fastapi import HTTPException
 
-        with pytest.raises(HTTPException) as exc_info:
-            svc._auto_transition(
-                pipeline=_make_pipeline(),
-                organization_id=uuid4(),
-                current_user=_make_user(),
-                new_stage=PipelineStage.PLACED,
-                reason="Test",
-            )
+        with patch(
+            "app.orchestration.pipeline_transitions.transition_pipeline_stage",
+            side_effect=RuntimeError("DB error"),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                svc._auto_transition(
+                    pipeline=_make_pipeline(),
+                    organization_id=uuid4(),
+                    current_user=_make_user(),
+                    new_stage=PipelineStage.PLACED,
+                    reason="Test",
+                )
         assert exc_info.value.status_code == 500
 
 

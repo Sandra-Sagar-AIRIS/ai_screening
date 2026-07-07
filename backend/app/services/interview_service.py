@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import BackgroundTasks, HTTPException, status
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.orm import Session
 
 _svc_log = logging.getLogger("airis.interview_service")
@@ -23,6 +23,7 @@ from app.models.interview import (
 from app.models.job import Job
 from app.models.pipeline import Pipeline
 from app.schemas.auth import CurrentUser
+from app.schemas.pipeline import PipelineStage
 from app.schemas.interview import (
     AISummaryResponse,
     AISummaryUpdate,
@@ -51,10 +52,14 @@ from app.services.interview_reminder_service import (
     schedule_candidate_reminders,
     schedule_interviewer_reminder,
 )
-from app.services.pipeline_service import PipelineService
 
 
-ELIGIBLE_STAGES: frozenset[str] = frozenset({"screening", "interview", "offer", "placed"})
+# "screening" is kept alongside the canonical PipelineStage.AI_INTERVIEW value
+# ("ai_interview") for tolerance of any pre-canonicalization legacy data —
+# see app.candidate_management.service._candidate_stage_to_pipeline_stage.
+ELIGIBLE_STAGES: frozenset[str] = frozenset(
+    {"screening", PipelineStage.AI_INTERVIEW.value, "interview", "offer", "placed"}
+)
 
 
 # ── AI-004: Background summary generation ───────────────────────────────────
@@ -135,7 +140,7 @@ def _assert_stage_eligible(pipeline: Pipeline) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
                 f"Interview scheduling requires the candidate to be at stage "
-                f"'screening', 'interview', 'offer', or 'placed'. "
+                f"'{PipelineStage.AI_INTERVIEW.value}', 'interview', 'offer', or 'placed'. "
                 f"Current stage is '{pipeline.stage}'."
             ),
         )
@@ -215,10 +220,19 @@ def _validate_status_transition(current: str, new: str) -> None:
 
 
 class InterviewService:
+    """Owns Interview-domain persistence and business rules only.
+
+    Does not import or call PipelineService: creating/updating an interview
+    against a pipeline requires reading Pipeline-domain data, but that read
+    is performed by the caller (see app.orchestration.interview_scheduling)
+    and the resulting Pipeline object is passed in here. This keeps the
+    cross-domain call in one visible orchestration layer instead of hidden
+    inside this service.
+    """
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self._scope = AccessScopeService(db)
-        self._pipelines = PipelineService(db)
         self._notify = InterviewNotificationService()
 
     # ── Scoped query base ────────────────────────────────────────────────
@@ -246,8 +260,15 @@ class InterviewService:
         organization_id: UUID,
         current_user: CurrentUser,
         payload: InterviewCreate,
+        pipeline: Pipeline,
     ) -> Interview:
-        pipeline = self._pipelines.get_pipeline_by_id(payload.pipeline_id, organization_id, current_user)
+        """Create an interview against an already-fetched, access-checked pipeline.
+
+        `pipeline` must be fetched by the caller via PipelineService (see
+        app.orchestration.interview_scheduling.create_interview) — this
+        method only reads its `stage`/`candidate_id`/`job_id`, it does not
+        fetch or authorize the pipeline itself.
+        """
         _assert_stage_eligible(pipeline)
         _assert_scheduled_not_in_past(payload.scheduled_at)
 
@@ -346,10 +367,12 @@ class InterviewService:
         update_data = payload.model_dump(exclude_unset=True)
 
         if "pipeline_id" in update_data:
+            # Existence/access validation for the new pipeline_id happens in
+            # app.orchestration.interview_scheduling.update_interview, before
+            # this method is called — this service trusts it was validated.
             new_pipeline_id = update_data.pop("pipeline_id")
             if new_pipeline_id is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pipeline_id cannot be null.")
-            self._pipelines.get_pipeline_by_id(new_pipeline_id, organization_id, current_user)
             update_data["pipeline_id"] = new_pipeline_id
 
         if "scheduled_at" in update_data and update_data["scheduled_at"] is not None:
@@ -1125,3 +1148,34 @@ class InterviewService:
             avg_overall=_avg([fb.rating for fb in feedback_rows]),
             recommendations=recommendations,
         )
+
+    # ── CAND-006: Candidate merge support ───────────────────────────────────
+
+    def reassign_candidate(
+        self,
+        *,
+        from_candidate_id: UUID,
+        to_candidate_id: UUID,
+        organization_id: UUID,
+    ) -> int:
+        """Repoint every Interview row from one candidate to another (candidate merge).
+
+        Called only from app.orchestration for a candidate-merge — this is
+        the sole path through which the Candidate domain may mutate an
+        Interview row's candidate_id. No status change or notification is
+        implied, so nothing else about the interview is touched.
+
+        A durable audit trail specifically for merges is not implemented
+        here — see CandidateMergeService's module docstring for that open
+        product-policy question.
+        """
+        result = self.db.execute(
+            update(Interview)
+            .where(
+                Interview.candidate_id == from_candidate_id,
+                Interview.organization_id == organization_id,
+            )
+            .values(candidate_id=to_candidate_id)
+        )
+        self.db.flush()
+        return result.rowcount or 0

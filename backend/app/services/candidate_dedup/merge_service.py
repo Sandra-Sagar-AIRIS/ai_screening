@@ -2,15 +2,40 @@
 
 Admin-only operation that consolidates a duplicate candidate into a survivor:
 
-  1. Reassigns Pipeline rows:          candidate_id → survivor
-  2. Reassigns Interview rows:         candidate_id → survivor
+  1. Reassigns Pipeline rows:          candidate_id → survivor (via PipelineService,
+                                        see app.orchestration.candidate_merge)
+  2. Reassigns Interview rows:         candidate_id → survivor (via InterviewService,
+                                        see app.orchestration.candidate_merge)
   3. Reassigns CandidateJobMatch rows: candidate_id → survivor
      (deduplicates by (job_id, org_id) to avoid unique-constraint violations)
   4. Reassigns SourcingResult rows:    candidate_id → survivor
   5. Soft-deletes the duplicate:       is_deleted=True, is_merged=True, merged_into_id=survivor
 
+Steps 3-4 stay here: CandidateJobMatch and SourcingResult both live in the
+`candidate` schema (owned by this same domain), so there is no cross-service
+boundary to cross for them — unlike Pipeline (`pipeline` schema) and
+Interview (`interview` schema), which are owned by other services and must
+not be mutated directly from here (see AIRIS Phase 0.5 Task A1 precedent in
+app.orchestration.candidate_pipeline_sync / candidate_pipeline_withdrawal).
+
 All operations are performed inside the caller's transaction — the caller is
 responsible for commit/rollback.
+
+Open product-policy questions (not implemented here — do not guess):
+
+  - Merge audit trail: whether a merge should also write a dedicated,
+    queryable audit record (who merged what into what, and which downstream
+    rows were reassigned as a result) beyond the existing `cand006.merge.*`
+    log lines and the `merged_into_id`/`is_merged` flags on the duplicate
+    candidate row.
+  - Hard delete: the duplicate is always soft-deleted (step 5) and kept as a
+    tombstone row pointed at the survivor via `merged_into_id`. Whether a
+    merge should ever hard-delete the duplicate outright (removing the row
+    entirely, as CandidateService.hard_delete_candidate does for a standalone
+    GDPR erasure request) is undecided — soft-delete-and-point is the only
+    behavior implemented today.
+
+Revisit both if/when a concrete requirement is confirmed.
 """
 from __future__ import annotations
 
@@ -23,6 +48,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.candidate import Candidate
+from app.orchestration.candidate_merge import reassign_candidate_across_pipeline_and_interview
 
 logger = logging.getLogger(__name__)
 
@@ -74,11 +100,13 @@ class CandidateMergeService:
             },
         )
 
-        # ── 1. Pipeline ───────────────────────────────────────────────────────
-        self._reassign_pipelines(db, duplicate_id, survivor_id)
-
-        # ── 2. Interviews ─────────────────────────────────────────────────────
-        self._reassign_interviews(db, duplicate_id, survivor_id)
+        # ── 1 & 2. Pipeline + Interviews (owning services, via orchestration) ──
+        reassign_candidate_across_pipeline_and_interview(
+            db,
+            from_candidate_id=duplicate_id,
+            to_candidate_id=survivor_id,
+            organization_id=org_id,
+        )
 
         # ── 3. CandidateJobMatch (unique constraint-aware) ────────────────────
         self._reassign_job_matches(db, duplicate_id, survivor_id, org_id)
@@ -124,30 +152,6 @@ class CandidateMergeService:
                 detail=f"Candidate {candidate_id} not found.",
             )
         return candidate
-
-    def _reassign_pipelines(self, db: Session, from_id: UUID, to_id: UUID) -> None:
-        try:
-            from app.models.pipeline import Pipeline
-
-            db.execute(
-                update(Pipeline)
-                .where(Pipeline.candidate_id == from_id)
-                .values(candidate_id=to_id)
-            )
-        except Exception:
-            logger.warning("cand006.merge.pipeline_reassign_failed", exc_info=True)
-
-    def _reassign_interviews(self, db: Session, from_id: UUID, to_id: UUID) -> None:
-        try:
-            from app.models.interview import Interview
-
-            db.execute(
-                update(Interview)
-                .where(Interview.candidate_id == from_id)
-                .values(candidate_id=to_id)
-            )
-        except Exception:
-            logger.warning("cand006.merge.interview_reassign_failed", exc_info=True)
 
     def _reassign_job_matches(
         self, db: Session, from_id: UUID, to_id: UUID, org_id: UUID

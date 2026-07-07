@@ -7,7 +7,6 @@ from fastapi import HTTPException
 
 from app.core.permissions import ALL_PERMISSIONS
 from app.schemas.pipeline import PipelineCreate
-from app.services.candidate_service import CandidateService
 from app.services.pipeline_service import PipelineService
 from app.services.permission_service import PermissionService
 from app.schemas.auth import CurrentUser
@@ -65,12 +64,25 @@ def test_list_endpoints_are_scoped_by_organization_id(
 
 
 class _PipelineCreateDbStub:
+    """Stubs the 3 sequential db.scalar() calls create_pipeline makes:
+    1) PipelineService._get_candidate_or_404's org-scoped candidate lookup
+       (inlined directly against Candidate — see pipeline_service.py; it no
+       longer delegates to CandidateService, so there's nothing to monkeypatch
+       there anymore)
+    2) the org-scoped Job lookup
+    3) the existing-pipeline duplicate check
+    """
+
     def __init__(self):
         self._scalar_calls = 0
+        self.statements: list[object] = []
 
-    def scalar(self, *_args, **_kwargs):
+    def scalar(self, stmt, *_args, **_kwargs):
         self._scalar_calls += 1
+        self.statements.append(stmt)
         if self._scalar_calls == 1:
+            return object()  # candidate exists
+        if self._scalar_calls == 2:
             return object()  # job exists
         return None  # no existing pipeline duplicate
 
@@ -87,21 +99,19 @@ class _PipelineCreateDbStub:
         return None
 
 
-def test_pipeline_create_validates_foreign_keys_within_same_org(monkeypatch):
+def test_pipeline_create_validates_foreign_keys_within_same_org():
+    """create_pipeline scopes both the candidate and job lookups to the
+    caller's organization_id — verified here by inspecting the compiled
+    WHERE clause of each lookup rather than by intercepting a service call,
+    since the candidate check is now an inlined, org-scoped query on
+    PipelineService itself (see _get_candidate_or_404), not a delegated
+    CandidateService.get_candidate_by_id() call.
+    """
     db = _PipelineCreateDbStub()
     service = PipelineService(db)
     expected_org = uuid4()
     candidate_id = uuid4()
     job_id = uuid4()
-
-    seen: dict[str, UUID] = {}
-
-    def _candidate_check(self, candidate_id_arg, organization_id_arg, current_user):
-        seen["candidate_org"] = organization_id_arg
-        seen["candidate_id"] = candidate_id_arg
-        return object()
-
-    monkeypatch.setattr(CandidateService, "get_candidate_by_id", _candidate_check)
 
     current_user = CurrentUser(
         user_id=str(uuid4()),
@@ -114,8 +124,14 @@ def test_pipeline_create_validates_foreign_keys_within_same_org(monkeypatch):
         PipelineCreate(candidate_id=candidate_id, job_id=job_id, stage="applied", status="active"),
     )
 
-    assert seen["candidate_org"] == expected_org
-    assert seen["candidate_id"] == candidate_id
+    assert len(db.statements) == 3
+    # The PostgreSQL UUID literal compiler renders undashed hex, not str(uuid).
+    candidate_stmt_str = str(db.statements[0].compile(compile_kwargs={"literal_binds": True}))
+    job_stmt_str = str(db.statements[1].compile(compile_kwargs={"literal_binds": True}))
+    assert expected_org.hex in candidate_stmt_str
+    assert candidate_id.hex in candidate_stmt_str
+    assert expected_org.hex in job_stmt_str
+    assert job_id.hex in job_stmt_str
 
 
 class _PipelineLookupDbStub:

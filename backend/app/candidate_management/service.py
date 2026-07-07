@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.candidate_management.models import (
@@ -43,9 +43,10 @@ from app.candidate_management.schemas import (
     ResumeUploadRequest,
 )
 from app.models.pipeline import Pipeline
-from app.services.candidate_pipeline_withdrawal import withdraw_active_pipelines_for_candidate
-from app.models.application import Application
+from app.orchestration.candidate_pipeline_withdrawal import withdraw_active_pipelines_for_candidate
 from app.models.job import Job
+from app.schemas.auth import CurrentUser
+from app.schemas.pipeline import PipelineStage
 from app.services.task_runner import dispatch_task
 
 logger = logging.getLogger(__name__)
@@ -509,11 +510,20 @@ class CandidateManagementService:
             candidate,
             {"status": CandidateStatus.DELETED, "updated_by": actor_user_id},
         )
+        # PipelineService.change_pipeline_status needs a CurrentUser (for its
+        # own scope/audit checks), but this call chain only carries
+        # actor_user_id/actor_role down from the route layer — build the
+        # minimal CurrentUser those checks actually need rather than thread
+        # a full CurrentUser through every method between the route and here.
         withdraw_active_pipelines_for_candidate(
             self.db,
             candidate_id=candidate.id,
             organization_id=org_id,
-            actor_user_id=actor_user_id,
+            current_user=CurrentUser(
+                user_id=str(actor_user_id) if actor_user_id else "",
+                organization_id=str(org_id),
+                role=actor_role,
+            ),
             reason="Candidate removed",
         )
         self._insert_audit_log(
@@ -972,6 +982,48 @@ class CandidateManagementService:
         self.repository.create_interaction(interaction)
         self.db.commit()
         return interaction
+
+    def record_system_interaction(
+        self,
+        *,
+        candidate_id: UUID,
+        interaction_type: InteractionType,
+        title: str,
+        body: str,
+        interaction_metadata: dict[str, Any] | None = None,
+        actor_user_id: UUID | None = None,
+    ) -> dict[str, UUID] | None:
+        """Record a system-triggered timeline interaction (e.g. a Pipeline
+        stage/status change) for a candidate identified only by ID.
+
+        Unlike add_interaction, callers here (outside the Candidate domain)
+        don't already have org_id/workspace_id the way an authenticated API
+        request does, so this looks the candidate up itself. The Candidate
+        domain owns the CandidateInteraction write; other domains call this
+        instead of constructing CandidateInteraction rows themselves.
+
+        Returns {"org_id": ..., "workspace_id": ...} for the caller's own
+        follow-up (e.g. dispatching a notification email), or None if the
+        candidate no longer exists — matches the previous best-effort no-op
+        behavior when the candidate lookup failed.
+        """
+        candidate = self.db.scalar(select(Candidate).where(Candidate.id == candidate_id))
+        if candidate is None:
+            return None
+
+        interaction = CandidateInteraction(
+            org_id=candidate.org_id,
+            workspace_id=candidate.workspace_id,
+            candidate_id=candidate.id,
+            interaction_type=interaction_type,
+            title=title,
+            body=body,
+            interaction_metadata=interaction_metadata,
+            actor_user_id=actor_user_id,
+        )
+        self.repository.create_interaction(interaction)
+        self.db.commit()
+        return {"org_id": candidate.org_id, "workspace_id": candidate.workspace_id}
 
     def get_timeline(
         self,
@@ -1889,27 +1941,26 @@ class CandidateManagementService:
             )
 
         # Candidate-job mapping should not block pipeline creation if mapping table is unavailable.
+        #
+        # AIRIS Phase 0.5 (final): Candidate Service must never construct or
+        # mutate Application directly (pipeline.applications is owned by
+        # ApplicationService) — same rule already applied to Pipeline below.
+        # commit=False + our own begin_nested() keeps the exact isolation the
+        # old direct-write block had: a failure here rolls back only this
+        # savepoint, not the candidate/skills/audit-log rows already pending
+        # in this transaction.
         try:
             with self.db.begin_nested():
-                application = self.db.scalar(
-                    select(Application).where(
-                        Application.organization_id == candidate.org_id,
-                        Application.candidate_id == candidate.id,
-                        Application.job_id == candidate.job_id,
-                    )
+                from app.schemas.application import ApplicationCreate
+                from app.services.application_service import ApplicationService
+
+                ApplicationService(self.db).create_application(
+                    candidate.org_id,
+                    None,
+                    ApplicationCreate(candidate_id=candidate.id, job_id=candidate.job_id),
+                    notes=f"Created via candidate management sync by {actor_user_id}" if actor_user_id else None,
+                    commit=False,
                 )
-                if application is None:
-                    self.db.add(
-                        Application(
-                            organization_id=candidate.org_id,
-                            candidate_id=candidate.id,
-                            job_id=candidate.job_id,
-                            stage="applied",
-                            status="active",
-                            notes=f"Created via candidate management sync by {actor_user_id}" if actor_user_id else None,
-                        )
-                    )
-                    self.db.flush()
         except SQLAlchemyError as exc:
             logger.exception(
                 "Application mapping sync failed",
@@ -1921,88 +1972,35 @@ class CandidateManagementService:
                 },
             )
 
-        mapped_stage = self._candidate_stage_to_pipeline_stage(candidate.stage)
-        try:
-            with self.db.begin_nested():
-                pipeline = self.db.scalar(
-                    select(Pipeline).where(
-                        Pipeline.organization_id == candidate.org_id,
-                        Pipeline.candidate_id == candidate.id,
-                        Pipeline.job_id == candidate.job_id,
-                    )
-                )
-                if pipeline is None:
-                    logger.info(
-                        "Creating new pipeline entry",
-                        extra={"candidate_id": str(candidate.id), "job_id": str(candidate.job_id), "stage": mapped_stage},
-                    )
-                    self.db.add(
-                        Pipeline(
-                            organization_id=candidate.org_id,
-                            candidate_id=candidate.id,
-                            job_id=candidate.job_id,
-                            stage=mapped_stage,
-                            status="active",
-                            notes=f"Created via candidate management sync by {actor_user_id}" if actor_user_id else None,
-                        )
-                    )
-                    self.db.flush()
-                else:
-                    logger.info(
-                        "Updating existing pipeline stage",
-                        extra={"candidate_id": str(candidate.id), "job_id": str(candidate.job_id), "stage": mapped_stage},
-                    )
-                    pipeline.stage = mapped_stage
-                    self.db.add(pipeline)
-                    self.db.flush()
-        except IntegrityError as exc:
-            logger.exception(
-                "Pipeline duplicate conflict during sync",
-                extra={
-                    "candidate_id": str(candidate.id),
-                    "job_id": str(candidate.job_id),
-                    "stage": mapped_stage,
-                    "db_error": str(exc),
-                },
-            )
-            # If concurrent insert happened, update existing row instead of failing.
-            existing = self.db.scalar(
-                select(Pipeline).where(
-                    Pipeline.organization_id == candidate.org_id,
-                    Pipeline.candidate_id == candidate.id,
-                    Pipeline.job_id == candidate.job_id,
-                )
-            )
-            if existing is not None:
-                existing.stage = mapped_stage
-                self.db.add(existing)
-                self.db.flush()
-                return
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Duplicate pipeline entry detected for candidate and job.",
-            ) from None
-        except SQLAlchemyError as exc:
-            logger.exception(
-                "Pipeline sync failed",
-                extra={
-                    "candidate_id": str(candidate.id),
-                    "job_id": str(candidate.job_id),
-                    "stage": mapped_stage,
-                    "db_error": str(exc),
-                },
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Pipeline sync failed for this candidate submission.",
-            ) from None
+        # AIRIS Phase 0.5 Task A1: Candidate Service must never construct or
+        # mutate Pipeline directly. Pipeline creation/stage-sync is now
+        # entirely owned by PipelineService.sync_stage_for_candidate, invoked
+        # through the orchestration layer — same validation, same error
+        # contract (404/409/400) as the code this replaced. Local import:
+        # the orchestrator imports CandidateManagementService (for the stage
+        # mapping), which would cycle against a module-level import here.
+        from app.orchestration.candidate_pipeline_sync import (
+            sync_pipeline_stage_for_candidate,
+        )
+
+        sync_pipeline_stage_for_candidate(self.db, candidate=candidate, actor_user_id=actor_user_id)
 
     @staticmethod
     def _candidate_stage_to_pipeline_stage(candidate_stage: str) -> str:
+        # Pipeline's canonical DB value for the screening step is "ai_interview"
+        # (see PipelineStage.AI_INTERVIEW and the alias docs in
+        # app.schemas.pipeline / app.services.placement_history_service) — NOT
+        # "screening". This map used to produce the literal "screening", which
+        # sync_stage_for_candidate writes straight onto Pipeline.stage without
+        # going through PipelineCreate/PipelineUpdate's alias-normalizing
+        # validators, so it landed in the DB as a non-canonical value that
+        # every other "is this pipeline in the screening stage?" check in the
+        # codebase (interview eligibility, stage-change emails, dashboard
+        # grouping) failed to recognize.
         stage_map = {
             "applied": "applied",
-            "screening": "screening",
-            "shortlisted": "screening",
+            "screening": PipelineStage.AI_INTERVIEW.value,
+            "shortlisted": PipelineStage.AI_INTERVIEW.value,
             "interview": "interview",
             "offered": "offer",
             "hired": "placed",

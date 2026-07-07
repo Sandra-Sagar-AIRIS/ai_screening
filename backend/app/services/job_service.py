@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import json
 import logging
 import os
 import time
@@ -9,9 +11,10 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException, status
 import sqlalchemy as sa
-from sqlalchemy import Select, or_, select, text
+from sqlalchemy import Select, func, or_, select, text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
 
@@ -24,7 +27,9 @@ from app.models.job_status_history import JobStatusHistory
 from app.models.job_skill import JobSkill
 from app.models.job_match_cache import JobMatchCache
 from app.models.job_submission import JobSubmission
+from app.models.job_vendor import JobVendor
 from app.models.pipeline import Pipeline
+from app.models.profile import Profile
 from app.schemas.auth import CurrentUser
 from app.schemas.job import (
     AtsPairStatusResponse,
@@ -32,6 +37,7 @@ from app.schemas.job import (
     CandidateMatchesResponse,
     HybridScoreBreakdown,
     JobCreate,
+    JobParseResponse,
     JobStatus,
     JobMatchEntry,
     JobMatchCategoryScores,
@@ -58,6 +64,7 @@ from app.services.ats_matching_service import (
     CandidateScoringInput,
     JobScoringInput,
 )
+from app.services.llm_json_completion import LlmJsonCompletionError, complete_json_async
 from app.services.task_runner import dispatch_task
 from app.services.semantic_matching_service import (
     SemanticMatchingService,
@@ -95,10 +102,10 @@ class JobService:
         self._candidates = CandidateService(db)
         self._jd_normalizer = JDNormalizationService()
         self._ats = ATSMatchingService()
-        # Local import to avoid circular import with pipeline_service.
-        from app.services.pipeline_service import PipelineService
-
-        self._pipelines = PipelineService(db)
+        # JobService does not depend on PipelineService or
+        # PlacementHistoryService — the Job -> Pipeline -> PlacementHistory
+        # submission workflow is coordinated by
+        # app.orchestration.job_submission, not by this class.
 
     @staticmethod
     def _extra_str_list(extra: dict[str, object], key: str) -> list[str]:
@@ -274,6 +281,164 @@ class JobService:
             self.db.commit()
             self.db.refresh(client)
         return client
+
+    # ── Vendor assignment (moved from app/routes/job.py) ──────────────────────
+
+    def list_job_vendors(
+        self, job_id: UUID, organization_id: UUID, current_user: CurrentUser
+    ) -> list[tuple[UUID, str]]:
+        """Return (vendor_id, email) pairs for every vendor assigned to a job."""
+        self.get_job_by_id(job_id, organization_id, current_user)
+
+        rows = self.db.execute(
+            select(JobVendor.vendor_id, Profile.email)
+            .join(Profile, Profile.id == JobVendor.vendor_id)
+            .where(
+                JobVendor.job_id == job_id,
+                Profile.organization_id == organization_id,
+            )
+            .order_by(Profile.email.asc())
+        ).all()
+        return [(row[0], row[1]) for row in rows]
+
+    def assign_vendor(
+        self,
+        job_id: UUID,
+        vendor_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> None:
+        """Assign a vendor user to a job. Idempotent — re-assigning is a no-op success."""
+        if (current_user.role or "").strip().lower() == "vendor":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: vendor cannot assign vendors.",
+            )
+
+        job = self.db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == organization_id))
+        if job is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+
+        vendor_profile = self.db.scalar(
+            select(Profile).where(
+                Profile.id == vendor_id,
+                Profile.organization_id == organization_id,
+            )
+        )
+        if vendor_profile is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor user not found.")
+        if (vendor_profile.role or "").strip().lower() != "vendor":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="vendor_id must be a vendor user.",
+            )
+
+        try:
+            self.db.add(JobVendor(job_id=job_id, vendor_id=vendor_id))
+            self.db.commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            constraint_name = getattr(getattr(exc, "orig", None), "diag", None)
+            constraint_name = getattr(constraint_name, "constraint_name", None)
+            # Duplicate job-vendor assignment is idempotent success.
+            if constraint_name in {"job_vendors_pkey", "uq_job_vendors_job_vendor"}:
+                logger.info(
+                    "Job vendor assignment already exists",
+                    extra={"job_id": str(job_id), "vendor_id": str(vendor_id), "organization_id": str(organization_id)},
+                )
+            else:
+                logger.exception(
+                    "Failed assigning vendor to job",
+                    extra={"job_id": str(job_id), "vendor_id": str(vendor_id), "organization_id": str(organization_id)},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Unable to assign vendor to job.",
+                ) from None
+
+    def remove_vendor(
+        self,
+        job_id: UUID,
+        vendor_id: UUID,
+        organization_id: UUID,
+        current_user: CurrentUser,
+    ) -> None:
+        if (current_user.role or "").strip().lower() == "vendor":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: vendor cannot remove vendor assignments.",
+            )
+
+        self.get_job_by_id(job_id, organization_id, current_user)
+
+        jv = self.db.scalar(
+            select(JobVendor).where(
+                JobVendor.job_id == job_id,
+                JobVendor.vendor_id == vendor_id,
+            )
+        )
+        if jv is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor assignment not found.")
+
+        self.db.delete(jv)
+        self.db.commit()
+
+    # ── Job/vendor/candidate metrics (moved from app/routes/job.py) ──────────
+
+    def get_jobs_metrics(
+        self, organization_id: UUID, current_user: CurrentUser
+    ) -> list[dict[str, Any]]:
+        """Return per-job vendor_count/candidate_count for every job the caller can see."""
+        jobs_scope = select(Job.id).where(Job.organization_id == organization_id)
+        if self._scope.is_scoped_user(current_user):
+            jobs_scope = jobs_scope.where(Job.id.in_(self._scope.allowed_job_ids_subquery(current_user)))
+
+        job_ids_sq = jobs_scope.subquery()
+
+        vendor_counts_sq = (
+            select(
+                JobVendor.job_id.label("job_id"),
+                func.count(func.distinct(JobVendor.vendor_id)).label("vendor_count"),
+            )
+            .where(JobVendor.job_id.in_(select(job_ids_sq.c.id)))
+            .group_by(JobVendor.job_id)
+            .subquery()
+        )
+
+        candidate_counts_sq = (
+            select(
+                Pipeline.job_id.label("job_id"),
+                func.count(func.distinct(Pipeline.candidate_id)).label("candidate_count"),
+            )
+            .join(Candidate, Candidate.id == Pipeline.candidate_id)
+            .where(
+                Pipeline.job_id.in_(select(job_ids_sq.c.id)),
+                Candidate.is_deleted.is_(False),
+            )
+        )
+        if self._scope.is_vendor_user(current_user):
+            candidate_counts_sq = candidate_counts_sq.where(Candidate.created_by == UUID(current_user.user_id))
+        candidate_counts_sq = candidate_counts_sq.group_by(Pipeline.job_id).subquery()
+
+        rows = self.db.execute(
+            select(
+                job_ids_sq.c.id.label("job_id"),
+                func.coalesce(vendor_counts_sq.c.vendor_count, 0).label("vendor_count"),
+                func.coalesce(candidate_counts_sq.c.candidate_count, 0).label("candidate_count"),
+            )
+            .select_from(job_ids_sq)
+            .outerjoin(vendor_counts_sq, vendor_counts_sq.c.job_id == job_ids_sq.c.id)
+            .outerjoin(candidate_counts_sq, candidate_counts_sq.c.job_id == job_ids_sq.c.id)
+            .order_by(job_ids_sq.c.id.asc())
+        ).all()
+        return [
+            {
+                "job_id": row.job_id,
+                "vendor_count": int(row.vendor_count or 0),
+                "candidate_count": int(row.candidate_count or 0),
+            }
+            for row in rows
+        ]
 
     def jd_disk_path_for_job(self, job: Job) -> Path | None:
         key = getattr(job, "jd_document_key", None)
@@ -696,6 +861,23 @@ class JobService:
 
 
     def delete_job(self, job_id: UUID, organization_id: UUID, current_user: CurrentUser) -> None:
+        """Hard-delete a job and its dependent rows across several schemas.
+
+        Open product-policy question (not addressed here — do not guess):
+        this is a full hard delete — it reaches directly into Interview
+        (`interview` schema) and Pipeline (`pipeline` schema) tables and
+        deletes rows from them, which is the same cross-schema-service
+        boundary violation CandidateMergeService used to have for Pipeline
+        and Interview updates (see app.orchestration.candidate_merge). It
+        has not been refactored to go through PipelineService/
+        InterviewService (or an orchestration module) because doing so
+        would require deciding product behavior this task must not guess:
+        should deleting a job cascade-delete every candidate's interview/
+        pipeline history for it, or should jobs only ever be soft-closed
+        (there is no `is_deleted`/`deleted_at` column on `jobs.jobs` today —
+        only `status`)? Revisit once that's decided; until then this method
+        is left exactly as it already behaved.
+        """
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"DELETE_START: Job={job_id} Org={organization_id}")
@@ -963,17 +1145,24 @@ class JobService:
     # -------------------------------
     # Job submissions
     # -------------------------------
-    def submit_candidate_to_job(
+    def create_submission_for_candidate(
         self,
         *,
         job_id: UUID,
         organization_id: UUID,
         current_user: CurrentUser,
         payload: JobSubmissionCreate,
-    ) -> JobSubmissionResponse:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"SUBMIT_START: Job={job_id} Candidate={payload.candidate_id} Org={organization_id}")
+    ) -> tuple[Job, Candidate, JobSubmission]:
+        """Validate job/candidate and stage a JobSubmission row.
+
+        Job-domain persistence only: constructs and `db.add()`s the
+        JobSubmission row but does not flush or commit, and does not touch
+        Pipeline or PlacementHistory. The full submission workflow (which
+        also records placement history and creates a pipeline card, then
+        commits all three together) is coordinated by
+        app.orchestration.job_submission.submit_candidate_to_job — that
+        orchestrator calls this method as its first step.
+        """
         job = self.get_job_by_id(job_id, organization_id, current_user)
 
         # Candidate matching/pipeline submission is only valid for open jobs.
@@ -995,86 +1184,7 @@ class JobService:
             notes=payload.notes,
         )
         self.db.add(submission)
-        try:
-            # Flush so we can create the pipeline in the same transaction.
-            self.db.flush()
-            from app.services.placement_history_service import PlacementHistoryService
-
-            PlacementHistoryService(self.db).record_pending_submission(
-                candidate_id=candidate.id,
-                job_id=job.id,
-                submitted_at=submission.submitted_at,
-            )
-        except IntegrityError:
-            self.db.rollback()
-            existing = self.db.scalar(
-                select(JobSubmission).where(
-                    JobSubmission.job_id == job.id,
-                    JobSubmission.candidate_id == candidate.id,
-                )
-            )
-            if existing is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "error": "DUPLICATE_SUBMISSION",
-                        "existing_submission_id": str(existing.id),
-                        "existing_status": existing.submission_status,
-                    },
-                )
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="DUPLICATE_SUBMISSION")
-
-        # Create initial pipeline card (Phase 1 integration).
-        from app.schemas.pipeline import PipelineCreate, PipelineStage, PipelineStatus
-
-        pipeline = self._pipelines.create_pipeline(
-            organization_id=organization_id,
-            current_user=current_user,
-            payload=PipelineCreate(
-                candidate_id=candidate.id,
-                job_id=job.id,
-                stage=PipelineStage.APPLIED,
-                status=PipelineStatus.ACTIVE,
-                notes=payload.notes,
-            ),
-            commit=False,
-        )
-
-        try:
-            # Commit both JobSubmission and Pipeline together.
-            self.db.commit()
-            self.db.refresh(submission)
-            try:
-                from app.candidate_management.tasks_ats import (
-                    rescore_candidate_job_task,
-                    run_rescore_candidate_job,
-                )
-
-                dispatch_task(
-                    task=rescore_candidate_job_task,
-                    fallback=run_rescore_candidate_job,
-                    kwargs={
-                        "organization_id": str(organization_id),
-                        "candidate_id": str(candidate.id),
-                        "job_id": str(job.id),
-                    },
-                )
-            except Exception as dispatch_exc:
-                # Submission is already committed; never rollback here — only log dispatch noise.
-                logger.warning(
-                    "SUBMIT_ATS_DISPATCH_FAILED org=%s job=%s candidate=%s err=%s",
-                    organization_id,
-                    job.id,
-                    candidate.id,
-                    dispatch_exc,
-                    exc_info=True,
-                )
-            res = JobSubmissionResponse.model_validate(submission)
-            logger.info(f"SUBMIT_SUCCESS: Submission {submission.id} created")
-            return res
-        except Exception as e:
-            logger.error(f"SUBMIT_VALIDATION_ERROR: {e}")
-            raise
+        return job, candidate, submission
 
 
     def list_job_submissions(
@@ -1683,6 +1793,190 @@ class JobService:
     def semantic_provider_configured() -> bool:
         s = get_settings()
         return bool((s.groq_ats_api_key or "").strip() or (s.grok_api_key or "").strip())
+
+    # ── Rescore + response building (moved from app/routes/job.py) ───────────
+
+    def rescore_and_report(
+        self, *, organization_id: UUID, job_id: UUID, current_user: CurrentUser
+    ) -> JobMatchTriggerResponse:
+        """Rescore every candidate against a job and report the outcome.
+
+        Raises 404 (via get_job_by_id) if the job doesn't exist/isn't
+        accessible, 500 if rescoring itself fails.
+        """
+        self.get_job_by_id(job_id, organization_id, current_user)
+        try:
+            count = self.rescore_job_fast(organization_id=organization_id, job_id=job_id)
+            self.db.commit()
+        except Exception as exc:
+            self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "error": "ATS_RESCORE_FAILED",
+                    "message": str(exc).strip() or repr(exc),
+                    "exception_type": type(exc).__name__,
+                },
+            ) from exc
+
+        cached = self.db.scalar(select(Job).where(Job.id == job_id, Job.organization_id == organization_id))
+        if count > 0 and JobService.semantic_provider_configured():
+            sem = "queued"
+        elif not JobService.semantic_provider_configured():
+            sem = "disabled"
+        else:
+            sem = "none"
+        return JobMatchTriggerResponse(
+            job_id=job_id,
+            match_count=count,
+            generated_at=(cached.updated_at if cached is not None else datetime.now(timezone.utc)),
+            refresh_requested=True,
+            semantic_enrichment=sem,
+        )
+
+    # ── JD parsing (moved from app/routes/job.py) ─────────────────────────────
+
+    @staticmethod
+    def _jd_parse_prompt(text_content: str) -> str:
+        return f"""Extract job details from this job description.
+Return ONLY valid JSON with these exact fields:
+{{
+  "title": string,
+  "location": string or null,
+  "employment_type": "full_time" | "part_time" | "contract" | "internship" | null,
+  "experience_min_years": integer or null,
+  "experience_max_years": integer or null,
+  "salary_min": integer or null,
+  "salary_max": integer or null,
+  "salary_currency": string default "USD",
+  "urgency": "normal" | "high" | "critical",
+  "description": string,
+  "required_skills": [array of strings],
+  "preferred_skills": [array of strings],
+  "key_responsibilities": [array of strings]
+}}
+No explanation. Only JSON.
+
+JD TEXT:
+{text_content}"""
+
+    @staticmethod
+    def _extract_jd_text(*, file_bytes: bytes | None, filename: str | None, raw_text: str | None) -> str:
+        """Extract raw JD text from an uploaded file's bytes, or fall back to pasted text."""
+        if file_bytes is not None:
+            import pdfplumber  # already in requirements.txt
+            from docx import Document
+
+            name = (filename or "").lower()
+            if not (name.endswith(".pdf") or name.endswith(".doc") or name.endswith(".docx") or name.endswith(".txt")):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Only .pdf, .doc, .docx, or .txt files are accepted.",
+                )
+            try:
+                if name.endswith(".pdf"):
+                    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                        return "\n".join(page.extract_text() or "" for page in pdf.pages).strip()
+                if name.endswith(".docx"):
+                    document = Document(io.BytesIO(file_bytes))
+                    return "\n".join((p.text or "").strip() for p in document.paragraphs if (p.text or "").strip())
+                if name.endswith(".txt"):
+                    return file_bytes.decode("utf-8", errors="replace").strip()
+                # Legacy .doc files are binary; best-effort decode for now.
+                return file_bytes.decode("utf-8", errors="ignore").strip()
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to read uploaded file: {exc}",
+                ) from exc
+        return (raw_text or "").strip()
+
+    @staticmethod
+    def _normalize_jd_parse_payload(parsed: dict, *, raw_jd_text: str) -> JobParseResponse:
+        def _as_str_list(value: object) -> list[str]:
+            if not isinstance(value, list):
+                return []
+            out: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    trimmed = item.strip()
+                    if trimmed:
+                        out.append(trimmed)
+            return out
+
+        payload = {
+            "title": parsed.get("title"),
+            "location": parsed.get("location"),
+            "employment_type": parsed.get("employment_type"),
+            "experience_min_years": parsed.get("experience_min_years"),
+            "experience_max_years": parsed.get("experience_max_years"),
+            "salary_min": parsed.get("salary_min"),
+            "salary_max": parsed.get("salary_max"),
+            "salary_currency": str(parsed.get("salary_currency") or "USD"),
+            "urgency": str(parsed.get("urgency") or "normal"),
+            "description": parsed.get("description"),
+            "required_skills": _as_str_list(parsed.get("required_skills")),
+            "preferred_skills": _as_str_list(parsed.get("preferred_skills")),
+            "key_responsibilities": _as_str_list(parsed.get("key_responsibilities")),
+            "raw_jd_text": raw_jd_text or None,
+        }
+        return JobParseResponse.model_validate(payload)
+
+    async def parse_job_description(
+        self,
+        *,
+        file_bytes: bytes | None,
+        filename: str | None,
+        raw_text: str | None,
+    ) -> JobParseResponse:
+        """Parse a job description via uploaded-file bytes or pasted text.
+
+        Reading the multipart UploadFile stays in the route (request-bound
+        async I/O); format detection, text extraction, the LLM call, and
+        response normalization all live here.
+        """
+        settings = get_settings()
+        from app.services.llm_json_completion import _resolve_groq_backup_key
+
+        if not settings.groq_api_key and not _resolve_groq_backup_key(settings) and not settings.grok_api_key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No LLM API key configured for JD parsing (GROQ_API_KEY, GROQ_API_KEY_BACKUP, or GROK_API_KEY).",
+            )
+
+        text_content = self._extract_jd_text(file_bytes=file_bytes, filename=filename, raw_text=raw_text)
+        if not text_content:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Provide either a JD file or raw_text.",
+            )
+
+        try:
+            parsed, _version = await complete_json_async(self._jd_parse_prompt(text_content), timeout_seconds=30.0)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="AI parse returned malformed JSON — try again.",
+            ) from exc
+        except LlmJsonCompletionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI parse failed: {exc}",
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI API error: {exc.response.status_code}",
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI parse request failed: {exc}",
+            ) from exc
+
+        return self._normalize_jd_parse_payload(parsed, raw_jd_text=text_content)
 
     def dispatch_enrich_candidate_job_semantic(
         self, *, organization_id: UUID, candidate_id: UUID, job_id: UUID
@@ -2772,107 +3066,13 @@ class JobService:
         return bool(exists)
 
     def _load_structured_resume_fields(self, candidate_id: UUID, organization_id: UUID) -> dict[str, object]:
-        """Best-effort JSON resume fields from unified `candidates` row (org_id / organization_id)."""
-        t0 = time.monotonic()
-        empty: dict[str, object] = {
-            "skills": [],
-            "titles": [],
-            "years": None,
-            "education": [],
-            "certifications": [],
-            "summary": None,
-        }
-        try:
-            row = self.db.execute(
-                text(
-                    """
-                    SELECT parsed_resume_data, summary, headline, years_experience
-                    FROM candidate.candidates
-                    WHERE id = :cid
-                      AND (
-                        organization_id = :oid
-                        OR org_id = :oid
-                      )
-                    LIMIT 1
-                    """
-                ),
-                {"cid": candidate_id, "oid": organization_id},
-            ).mappings().first()
-        except ProgrammingError:
-            self.db.rollback()
-            logger.warning("structured_resume_fields_query_failed candidate=%s", candidate_id)
-            return empty
-        except Exception:
-            logger.exception("structured_resume_fields_unexpected candidate=%s", candidate_id)
-            self.db.rollback()
-            return empty
+        """Best-effort JSON resume fields for ATS scoring.
 
-        if not row:
-            logger.info(
-                "ats.resume.extract.completed",
-                extra={
-                    "ats_phase": "resume_extract",
-                    "candidate_id": str(candidate_id),
-                    "organization_id": str(organization_id),
-                    "duration_ms": int((time.monotonic() - t0) * 1000),
-                    "status": "empty",
-                },
-            )
-            return empty
-
-        parsed = row.get("parsed_resume_data")
-        skills: list[str] = []
-        titles: list[str] = []
-        education: list[str] = []
-        certs: list[str] = []
-        if isinstance(parsed, dict):
-            for key in ("skills", "normalized_keywords", "inferred_skills"):
-                raw = parsed.get(key)
-                if isinstance(raw, list):
-                    skills.extend(str(x).strip().lower() for x in raw if x)
-            pt = parsed.get("previous_titles")
-            if isinstance(pt, list):
-                titles.extend(str(x).strip() for x in pt if x)
-            edu = parsed.get("education")
-            if isinstance(edu, str) and edu.strip():
-                education.append(edu.strip())
-            elif isinstance(edu, list):
-                education.extend(str(x).strip() for x in edu if x)
-            c = parsed.get("certifications")
-            if isinstance(c, list):
-                certs.extend(str(x).strip() for x in c if x)
-
-        y = row.get("years_experience")
-        years_val: int | float | None = None
-        if y is not None:
-            try:
-                years_val = float(y)
-            except (TypeError, ValueError):
-                years_val = None
-
-        summary_parts = [row.get("summary"), row.get("headline")]
-        summary = " ".join(str(p).strip() for p in summary_parts if p).strip() or None
-
-        result = {
-            "skills": list(dict.fromkeys(skills))[:50],
-            "titles": titles[:8],
-            "years": years_val,
-            "education": education[:8],
-            "certifications": certs[:12],
-            "summary": summary,
-        }
-        logger.info(
-            "ats.resume.extract.completed",
-            extra={
-                "ats_phase": "resume_extract",
-                "candidate_id": str(candidate_id),
-                "organization_id": str(organization_id),
-                "duration_ms": int((time.monotonic() - t0) * 1000),
-                "skills_count": len(result["skills"]),
-                "titles_count": len(result["titles"]),
-            },
-        )
-        return result
+        Delegates to CandidateService, which owns the `candidate.candidates`
+        table — JobService does not query another domain's schema directly
+        (see CandidateService.get_structured_resume_fields).
+        """
+        return self._candidates.get_structured_resume_fields(candidate_id, organization_id)
 
     @staticmethod
     def _extract_years_from_text(text: str | None) -> float | None:

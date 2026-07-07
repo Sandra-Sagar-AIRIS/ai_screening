@@ -424,16 +424,23 @@ class OfferService:
     ) -> None:
         """
         Fire a pipeline stage transition as a consequence of an offer response.
-        Uses the existing PipelineService.transition_stage() so that all
-        audit logs, notifications, and validation are preserved.
+
+        Goes through app.orchestration.pipeline_transitions (not
+        PipelineService.transition_stage directly) so PlacementHistory keeps
+        getting recorded for offer-driven transitions exactly as it does for
+        every other stage change — all audit logs, notifications, and
+        validation are preserved.
         """
+        from app.orchestration.pipeline_transitions import transition_pipeline_stage
+
         req = PipelineStageTransitionRequest(stage=new_stage, reason=reason)
         try:
-            self._pipeline_svc.transition_stage(
-                pipeline_id=pipeline.id,
-                organization_id=organization_id,
-                current_user=current_user,
-                payload=req,
+            transition_pipeline_stage(
+                self.db,
+                pipeline.id,
+                organization_id,
+                current_user,
+                req,
             )
         except Exception as exc:
             logger.error(

@@ -317,10 +317,17 @@ class TestListJobSubmissionsVendorIsolation:
 # ── Vendor_id set on submit ───────────────────────────────────────────────────
 
 class TestSubmitCandidateVendorId:
-    """Verify vendor_id is set/unset correctly in submit_candidate_to_job."""
+    """Verify vendor_id is set/unset correctly in create_submission_for_candidate.
+
+    The Job -> Pipeline -> PlacementHistory orchestration that used to live in
+    JobService.submit_candidate_to_job now lives in
+    app.orchestration.job_submission.submit_candidate_to_job (see that
+    module's own tests for the full workflow). JobService only builds the
+    JobSubmission row — that's what these tests cover.
+    """
 
     def test_vendor_submission_sets_vendor_id(self):
-        """When a vendor calls submit_candidate_to_job, vendor_id == submitted_by."""
+        """When a vendor calls create_submission_for_candidate, vendor_id == submitted_by."""
         added_objects: list = []
 
         service = _make_job_service()
@@ -341,23 +348,15 @@ class TestSubmitCandidateVendorId:
 
         service.get_job_by_id = MagicMock(return_value=mock_job)
         service._candidates.get_candidate_by_id = MagicMock(return_value=mock_candidate)
-        service._pipelines.create_pipeline = MagicMock(return_value=MagicMock())
         service.db.add.side_effect = added_objects.append
-        service.db.flush.return_value = None
-        service.db.commit.return_value = None
-        service.db.refresh.return_value = None
 
         from app.schemas.job import JobSubmissionCreate  # noqa: PLC0415
-        with patch("app.services.job_service.dispatch_task", side_effect=Exception("no task runner")):
-            try:
-                service.submit_candidate_to_job(
-                    job_id=mock_job.id,
-                    organization_id=uuid4(),
-                    current_user=vendor_user,
-                    payload=JobSubmissionCreate(candidate_id=mock_candidate.id),
-                )
-            except Exception:
-                pass  # ATS dispatch failure is expected in unit test
+        service.create_submission_for_candidate(
+            job_id=mock_job.id,
+            organization_id=uuid4(),
+            current_user=vendor_user,
+            payload=JobSubmissionCreate(candidate_id=mock_candidate.id),
+        )
 
         submission_rows = [o for o in added_objects if isinstance(o, JobSubmission)]
         assert len(submission_rows) == 1
@@ -383,23 +382,15 @@ class TestSubmitCandidateVendorId:
 
         service.get_job_by_id = MagicMock(return_value=mock_job)
         service._candidates.get_candidate_by_id = MagicMock(return_value=mock_candidate)
-        service._pipelines.create_pipeline = MagicMock(return_value=MagicMock())
         service.db.add.side_effect = added_objects.append
-        service.db.flush.return_value = None
-        service.db.commit.return_value = None
-        service.db.refresh.return_value = None
 
         from app.schemas.job import JobSubmissionCreate  # noqa: PLC0415
-        with patch("app.services.job_service.dispatch_task", side_effect=Exception("no task runner")):
-            try:
-                service.submit_candidate_to_job(
-                    job_id=mock_job.id,
-                    organization_id=uuid4(),
-                    current_user=recruiter,
-                    payload=JobSubmissionCreate(candidate_id=mock_candidate.id),
-                )
-            except Exception:
-                pass
+        service.create_submission_for_candidate(
+            job_id=mock_job.id,
+            organization_id=uuid4(),
+            current_user=recruiter,
+            payload=JobSubmissionCreate(candidate_id=mock_candidate.id),
+        )
 
         submission_rows = [o for o in added_objects if isinstance(o, JobSubmission)]
         assert len(submission_rows) == 1

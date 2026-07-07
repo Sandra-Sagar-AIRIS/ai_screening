@@ -12,7 +12,26 @@ class ApplicationService:
     def __init__(self, db: Session):
         self.db = db
 
-    def create_application(self, organization_id: UUID, current_user: CurrentUser, payload: ApplicationCreate) -> Application:
+    def create_application(
+        self,
+        organization_id: UUID,
+        current_user: CurrentUser | None,
+        payload: ApplicationCreate,
+        *,
+        notes: str | None = None,
+        commit: bool = True,
+    ) -> Application:
+        """Get-or-create an Application row for a candidate/job pair.
+
+        `current_user` is accepted for signature parity with other Create
+        methods but is not otherwise used — callers with no request-scoped
+        user (e.g. a system-driven sync) may pass None.
+
+        `commit=False` lets a caller (e.g. an orchestrator or another
+        domain's best-effort sync step) flush this into its own transaction
+        and defer the actual commit to itself — mirrors
+        PipelineService.create_pipeline's `commit` parameter.
+        """
         existing = self.db.scalar(
             select(Application).where(
                 Application.organization_id == organization_id,
@@ -28,10 +47,13 @@ class ApplicationService:
             candidate_id=payload.candidate_id,
             job_id=payload.job_id,
             stage="applied",
-            status="active"
+            status="active",
+            notes=notes,
         )
         self.db.add(app)
-        self.db.commit()
+        self.db.flush()
+        if commit:
+            self.db.commit()
         self.db.refresh(app)
         return app
 

@@ -30,6 +30,9 @@ from app.schemas.pipeline import (
     PipelineUpdate,
     WithdrawPipelineRequest,
 )
+from app.orchestration.pipeline_transitions import (
+    transition_pipeline_stage as orchestrate_pipeline_stage_transition,
+)
 from app.services.pipeline_service import PipelineService
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
@@ -205,12 +208,12 @@ def transition_pipeline_stage(
     A rejection reason (≥ 10 characters) is **required** when transitioning to *rejected*.
     Invalid transitions return HTTP 422.
     """
-    service = PipelineService(db)
-    pipeline = service.transition_stage(
-        pipeline_id=pipeline_id,
-        organization_id=UUID(current_user.organization_id),
-        current_user=current_user,
-        payload=payload,
+    pipeline = orchestrate_pipeline_stage_transition(
+        db,
+        pipeline_id,
+        UUID(current_user.organization_id),
+        current_user,
+        payload,
     )
     return PipelineResponse.model_validate(pipeline)
 

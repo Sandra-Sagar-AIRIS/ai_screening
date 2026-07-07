@@ -74,6 +74,7 @@ from app.db.session import get_db
 from app.schemas.candidate import CandidateCreate as LegacyCandidateCreate
 from app.schemas.auth import CurrentUser
 from app.schemas.interview import InterviewCreate, InterviewResponse, InterviewStatus, InterviewUpdate
+from app.orchestration import interview_scheduling
 from app.services.interview_service import InterviewService
 from app.models.pipeline import Pipeline
 from app.models.interview import Interview
@@ -1523,8 +1524,11 @@ def create_interview_bridge(
     if pipeline is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to create pipeline bridge.")
 
-    interview_service = InterviewService(db)
-    interview = interview_service.create_interview(
+    # Goes through the orchestration layer (not InterviewService directly) so
+    # the same PipelineService existence/access check that used to run
+    # implicitly inside InterviewService.create_interview still runs here.
+    interview = interview_scheduling.create_interview(
+        db,
         UUID(current_user.organization_id),
         current_user,
         InterviewCreate(

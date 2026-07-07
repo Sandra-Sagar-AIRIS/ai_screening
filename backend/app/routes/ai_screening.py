@@ -20,7 +20,6 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, File as _File, Form as _Form, Query, Request, UploadFile as _UploadFile, status
 
 logger = logging.getLogger(__name__)
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_permission
@@ -323,61 +322,7 @@ def get_assemblyai_token(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     """Generate a short-lived AssemblyAI realtime token (browser-side STT only)."""
-    import httpx
-    from fastapi import HTTPException
-    from app.core.config import get_settings
-
-    svc = _svc(db)
-    screening = svc.get_screening_by_token(token)
-    if screening is None or str(screening.id) != str(screening_id):
-        raise HTTPException(status_code=403, detail="Invalid session token.")
-
-    settings = get_settings()
-    api_key = settings.assemblyai_api_key
-    if not api_key:
-        logger.info("assemblyai_token.not_configured screening=%s", screening_id)
-        return {"token": None, "available": False}
-
-    token_urls = [
-        (
-            "https://streaming.assemblyai.com/v3/token",
-            "wss://streaming.assemblyai.com/v3/ws",
-        ),
-        (
-            "https://streaming.eu.assemblyai.com/v3/token",
-            "wss://streaming.eu.assemblyai.com/v3/ws",
-        ),
-    ]
-    for token_url, ws_url in token_urls:
-        try:
-            resp = httpx.get(
-                token_url,
-                headers={"Authorization": api_key},
-                params={"expires_in_seconds": 600},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            token = resp.json().get("token")
-            if token:
-                logger.info(
-                    "assemblyai_token.generated screening=%s endpoint=%s",
-                    screening_id,
-                    token_url,
-                )
-                return {"token": token, "available": True, "ws_url": ws_url}
-            logger.warning(
-                "assemblyai_token.empty screening=%s endpoint=%s",
-                screening_id,
-                token_url,
-            )
-        except Exception as exc:
-            logger.warning(
-                "assemblyai_token.request_failed screening=%s endpoint=%s error=%s",
-                screening_id,
-                token_url,
-                exc,
-            )
-    return {"token": None, "available": False}
+    return _svc(db).get_assemblyai_realtime_token(screening_id, token)
 
 
 # ── Send AI Screening Invite ──────────────────────────────────────────────────
@@ -463,18 +408,11 @@ async def upload_screening_recording(
     rows to the database.
 
     Authentication: the candidate session token (no user login required).
+
+    Reading the multipart UploadFile is request-bound async I/O and stays
+    here; everything else (validation, storage upload, persistence) lives in
+    AIScreeningService.process_recording_upload.
     """
-    import json as _json
-    from fastapi import HTTPException
-
-    from app.services.interview_storage_service import (
-        upload_interview_video,
-        upload_segment_video,
-        upload_transcript,
-        upload_analysis,
-    )
-    from app.models.ai_screening_segment import AIScreeningSegment
-
     # ── Diagnostics — log every request detail so failures are never silent ───
     logger.info(
         "[UPLOAD] received screening=%s content_type=%s "
@@ -492,112 +430,22 @@ async def upload_screening_recording(
             getattr(video, "content_type", "unknown"),
         )
 
-    svc = _svc(db)
-    screening = svc.get_screening_by_token(token)
-    if screening is None or str(screening.id) != str(screening_id):
-        raise HTTPException(status_code=403, detail="Invalid session token.")
-
-    video_key = ""
-    segments: list[dict] = []
-
-    # 1. Upload full recording
+    video_bytes: bytes | None = None
     if video is not None:
         video_bytes = await video.read()
         logger.info("[UPLOAD] received screening=%s size=%d", screening_id, len(video_bytes))
-        if video_bytes:
-            try:
-                video_key = upload_interview_video(screening_id, video_bytes)
-                screening.video_url = video_key
-                logger.info("[UPLOAD] DB updated screening=%s video_url=%s", screening_id, video_key)
-            except Exception as exc:
-                logger.error("[UPLOAD] Supabase failure screening=%s: %s", screening_id, exc)
-                # Non-fatal — continue to save segments and transcript
-        else:
+        if not video_bytes:
             logger.warning("[UPLOAD] blob was empty after read screening=%s", screening_id)
     else:
         logger.warning("[UPLOAD] no video file field in multipart request screening=%s", screening_id)
 
-    # 2. Parse per-question segments JSON
-    if segments_json:
-        try:
-            segments = _json.loads(segments_json)
-        except Exception:
-            segments = []
-
-    # 3. Upload per-question segment clips + persist rows
-    for seg in segments:
-        q_num: int = seg.get("question_number", 0)
-        segment_video_b64: str = seg.get("video_base64", "")
-        video_clip_url = ""
-
-        if segment_video_b64:
-            import base64
-            try:
-                seg_bytes = base64.b64decode(segment_video_b64)
-                video_clip_url = upload_segment_video(screening_id, q_num, seg_bytes)
-            except Exception as exc:
-                logger.warning(
-                    "upload_recording.segment_failed screening=%s q=%d: %s",
-                    screening_id, q_num, exc,
-                )
-
-        # Upsert segment row
-        from sqlalchemy import select as _select
-        existing = db.scalar(
-            _select(AIScreeningSegment).where(
-                AIScreeningSegment.screening_id == screening_id,
-                AIScreeningSegment.question_number == q_num,
-            )
-        )
-        if existing:
-            existing.transcript = seg.get("transcript", existing.transcript)
-            existing.question_start_seconds = seg.get("question_start_seconds", existing.question_start_seconds)
-            existing.answer_start_seconds = seg.get("answer_start_seconds", existing.answer_start_seconds)
-            existing.answer_end_seconds = seg.get("answer_end_seconds", existing.answer_end_seconds)
-            existing.duration_seconds = seg.get("duration_seconds", existing.duration_seconds)
-            if video_clip_url:
-                existing.video_clip_url = video_clip_url
-            db.add(existing)
-        else:
-            row = AIScreeningSegment(
-                screening_id=screening_id,
-                question_number=q_num,
-                question_text=seg.get("question_text", ""),
-                transcript=seg.get("transcript"),
-                question_start_seconds=seg.get("question_start_seconds"),
-                answer_start_seconds=seg.get("answer_start_seconds"),
-                answer_end_seconds=seg.get("answer_end_seconds"),
-                duration_seconds=seg.get("duration_seconds"),
-                video_clip_url=video_clip_url or None,
-            )
-            db.add(row)
-
-    # 4. Upload transcript JSON
-    if transcript_json:
-        try:
-            transcript_data = _json.loads(transcript_json)
-            upload_transcript(screening_id, transcript_data)
-        except Exception as exc:
-            logger.warning("upload_recording.transcript_failed screening=%s: %s", screening_id, exc)
-
-    # 5. Upload analysis JSON (segments metadata without binary data)
-    if segments:
-        try:
-            analysis = {
-                "screening_id": str(screening_id),
-                "questions": [
-                    {k: v for k, v in seg.items() if k != "video_base64"}
-                    for seg in segments
-                ],
-            }
-            upload_analysis(screening_id, analysis)
-        except Exception as exc:
-            logger.warning("upload_recording.analysis_failed screening=%s: %s", screening_id, exc)
-
-    db.add(screening)
-    db.commit()
-
-    return {"screening_id": str(screening_id), "status": "uploaded", "video_stored": bool(video_key)}
+    return _svc(db).process_recording_upload(
+        screening_id,
+        token,
+        video_bytes=video_bytes,
+        segments_json=segments_json,
+        transcript_json=transcript_json,
+    )
 
 
 # ── Recruiter: review decision ────────────────────────────────────────────────
@@ -635,6 +483,7 @@ def submit_review_decision(
         screening_id=screening_id,
         decision=payload.decision,
         notes=payload.notes,
+        current_user=current_user,
     )
     msgs = svc.get_live_messages(screening_id)
     return _to_live_response(screening, msgs)
@@ -657,21 +506,8 @@ def get_screening_recordings(
     Returns null URLs when no recording was uploaded (e.g. candidate had no
     camera, or the upload failed).
     """
-    from app.services.interview_storage_service import get_signed_url
-
     org_id = UUID(current_user.organization_id)
-    svc = _svc(db)
-    screening = svc.get_screening(org_id, screening_id)
-
-    raw_key: str | None = getattr(screening, "video_url", None)
-    signed: str | None = get_signed_url(raw_key) if raw_key else None
-
-    return {
-        "screening_id": str(screening_id),
-        "full_video_url": signed,
-        "full_audio_url": signed,   # same WebM file — audio element extracts the track
-        "has_recording": bool(signed),
-    }
+    return _svc(db).get_recording_urls(org_id, screening_id)
 
 
 @router.get(
@@ -689,36 +525,8 @@ def get_screening_segments(
     Guarded by AI_SCREENING_RESULTS_READ so candidate-facing code can never
     call this endpoint — it returns evaluation data that must stay recruiter-only.
     """
-    from sqlalchemy import select as _select
-    from app.models.ai_screening_segment import AIScreeningSegment
-    from app.services.interview_storage_service import get_signed_url
-
     org_id = UUID(current_user.organization_id)
-    svc = _svc(db)
-    screening = svc.get_screening(org_id, screening_id)  # 404 if not found / wrong org
-
-    rows = list(
-        db.scalars(
-            _select(AIScreeningSegment)
-            .where(AIScreeningSegment.screening_id == screening.id)
-            .order_by(AIScreeningSegment.question_number)
-        )
-    )
-
-    return [
-        {
-            "id": str(r.id),
-            "question_number": r.question_number,
-            "question_text": r.question_text,
-            "transcript": r.transcript,
-            "question_start_seconds": float(r.question_start_seconds) if r.question_start_seconds else None,
-            "answer_start_seconds": float(r.answer_start_seconds) if r.answer_start_seconds else None,
-            "answer_end_seconds": float(r.answer_end_seconds) if r.answer_end_seconds else None,
-            "duration_seconds": float(r.duration_seconds) if r.duration_seconds else None,
-            "video_clip_url": get_signed_url(r.video_clip_url) if r.video_clip_url else None,
-        }
-        for r in rows
-    ]
+    return _svc(db).get_screening_segments_for_recruiter(org_id, screening_id)
 
 
 # ── Detail ────────────────────────────────────────────────────────────────────
@@ -744,18 +552,8 @@ def regenerate_questions(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> AIScreeningResponse:
     """Clear existing questions and regenerate. Useful after AI failure or manual retry."""
-    from sqlalchemy import delete as sa_delete
-    from app.models.ai_screening import AIScreeningQuestion
-
-    svc = _svc(db)
     org_id = UUID(current_user.organization_id)
-    screening = svc.get_screening(org_id, screening_id)
-
-    # Delete existing questions (CASCADE removes answers + evaluations)
-    db.execute(sa_delete(AIScreeningQuestion).where(AIScreeningQuestion.screening_id == screening_id))
-    screening.status = "pending"
-    db.add(screening)
-    db.commit()
+    screening = _svc(db).regenerate_questions(org_id, screening_id)
 
     background_tasks.add_task(
         _run_generate_questions,
@@ -763,7 +561,6 @@ def regenerate_questions(
         screening_id=screening_id,
         db_url="",
     )
-    db.refresh(screening)
     return AIScreeningResponse.model_validate(screening)
 
 
@@ -802,9 +599,8 @@ def evaluate_screening(
     Returns immediately with status=evaluating.
     Poll GET /ai-screenings/{id} until status=completed.
     """
-    svc = _svc(db)
     org_id = UUID(current_user.organization_id)
-    screening = svc.get_screening(org_id, screening_id)
+    screening = _svc(db).start_evaluation(org_id, screening_id)
 
     background_tasks.add_task(
         _run_evaluation,
@@ -812,11 +608,6 @@ def evaluate_screening(
         screening_id=screening_id,
         db_url="",
     )
-
-    screening.status = "evaluating"
-    db.add(screening)
-    db.commit()
-    db.refresh(screening)
     return AIScreeningResponse.model_validate(screening)
 
 
@@ -861,35 +652,14 @@ def start_screening(
     _: Annotated[CurrentUser, Depends(require_permission(AI_SCREENING_CREATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> AIScreeningResponse:
-    """Convenience endpoint: create screening + optionally move pipeline stage to ai_screening.
+    """Convenience endpoint: create screening + optionally move pipeline stage to ai_interview.
 
     Mirrors POST /ai-screenings but accepts a pipeline_id to move the candidate's
     pipeline entry in one atomic step, eliminating two round-trips from the frontend.
     """
-    svc = _svc(db)
     org_id = UUID(current_user.organization_id)
+    screening = _svc(db).start_screening(org_id, current_user, payload)
 
-    # 1. Move pipeline stage if requested
-    if payload.move_pipeline_stage and payload.pipeline_id:
-        from app.services.pipeline_service import PipelineService
-        from app.schemas.pipeline import PipelineUpdate
-        try:
-            PipelineService(db).update_pipeline(
-                payload.pipeline_id, org_id, current_user, PipelineUpdate(stage="ai_screening")
-            )
-        except Exception:
-            # Non-fatal — screening is more important than stage move
-            logger.warning("start_screening: pipeline stage move failed for %s", payload.pipeline_id)
-
-    # 2. Create the screening
-    create_payload = AIScreeningCreate(
-        candidate_id=payload.candidate_id,
-        job_id=payload.job_id,
-        screening_type=payload.screening_type,
-    )
-    screening = svc.create_screening(org_id, current_user, create_payload)
-
-    # 3. Kick off question generation in background
     background_tasks.add_task(
         _run_generate_questions,
         org_id=org_id,
@@ -916,23 +686,10 @@ def retry_screening(
     - If status is 'failed' and questions exist → re-run evaluation.
     - If status is 'questions_ready' → also re-run evaluation (convenient shortcut).
     """
-    from app.models.ai_screening import AIScreeningQuestion
-
-    svc = _svc(db)
     org_id = UUID(current_user.organization_id)
-    screening = svc.get_screening(org_id, screening_id)
+    screening, action = _svc(db).retry(org_id, screening_id)
 
-    question_count = db.scalar(
-        select(func.count()).select_from(AIScreeningQuestion).where(
-            AIScreeningQuestion.screening_id == screening_id
-        )
-    ) or 0
-
-    if question_count == 0:
-        # Re-run question generation
-        screening.status = "pending"
-        db.add(screening)
-        db.commit()
+    if action == "generate_questions":
         background_tasks.add_task(
             _run_generate_questions,
             org_id=org_id,
@@ -940,10 +697,6 @@ def retry_screening(
             db_url="",
         )
     else:
-        # Re-run evaluation
-        screening.status = "evaluating"
-        db.add(screening)
-        db.commit()
         background_tasks.add_task(
             _run_evaluation,
             org_id=org_id,
@@ -951,7 +704,6 @@ def retry_screening(
             db_url="",
         )
 
-    db.refresh(screening)
     return AIScreeningResponse.model_validate(screening)
 
 
@@ -970,23 +722,10 @@ def move_pipeline_stage(
     Typically called after a recruiter decides to advance or reject from the
     screening review panel.  Returns the screening row for easy frontend update.
     """
-    from app.services.pipeline_service import PipelineService
-    from app.schemas.pipeline import PipelineUpdate, PipelineStage
-
     org_id = UUID(current_user.organization_id)
-    svc = _svc(db)
-    screening = svc.get_screening(org_id, screening_id)
-
-    # Validate the stage value
-    valid_stages = {s.value for s in PipelineStage}
-    if payload.stage not in valid_stages:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=400, detail=f"Invalid stage '{payload.stage}'. Valid: {sorted(valid_stages)}")
-
-    PipelineService(db).update_pipeline(
-        payload.pipeline_id, org_id, current_user, PipelineUpdate(stage=payload.stage)
+    screening = _svc(db).move_pipeline_stage(
+        org_id, screening_id, payload.pipeline_id, payload.stage, current_user
     )
-
     return AIScreeningResponse.model_validate(screening)
 
 

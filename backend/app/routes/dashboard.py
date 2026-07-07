@@ -27,6 +27,7 @@ from app.models.candidate import Candidate
 from app.models.job import Job
 from app.models.pipeline import Pipeline
 from app.schemas.auth import CurrentUser
+from app.schemas.pipeline import PipelineStage
 from app.services.access_scope_service import AccessScopeService
 from app.services.permission_service import PermissionService
 
@@ -231,7 +232,10 @@ def get_dashboard_summary(
                         (Pipeline.stage == 'placed', 5),
                         (Pipeline.stage == 'offer', 4),
                         (Pipeline.stage == 'interview', 3),
-                        (Pipeline.stage.in_(['screening', 'assessment', 'applied']), 2),
+                        # 'screening'/'assessment' are kept for tolerance of legacy
+                        # data; the canonical DB value is PipelineStage.AI_INTERVIEW
+                        # ("ai_interview") — see app.schemas.pipeline.
+                        (Pipeline.stage.in_(['screening', PipelineStage.AI_INTERVIEW.value, 'assessment', 'applied']), 2),
                         else_=1
                     )
                 ).label("stage_weight")

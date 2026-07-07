@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, or_, select, text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.models.candidate import Candidate
@@ -13,7 +15,6 @@ from app.models.pipeline import Pipeline
 from app.schemas.auth import CurrentUser
 from app.schemas.candidate import CandidateCreate, CandidateUpdate
 from app.services.access_scope_service import AccessScopeService
-from app.services.candidate_pipeline_withdrawal import withdraw_active_pipelines_for_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,12 @@ class CandidateService:
         current_user: CurrentUser,
     ) -> None:
         """AIR-510: Archive legacy candidate row (is_deleted + deleted_at)."""
+        # Local import to avoid a circular import: PipelineService imports
+        # CandidateService, and the orchestrator imports PipelineService.
+        from app.orchestration.candidate_pipeline_withdrawal import (
+            withdraw_active_pipelines_for_candidate,
+        )
+
         candidate = self._get_candidate_row_for_mutation(candidate_id, organization_id, current_user)
         now = datetime.now(timezone.utc)
         candidate.is_deleted = True
@@ -202,7 +209,7 @@ class CandidateService:
             self.db,
             candidate_id=candidate.id,
             organization_id=organization_id,
-            actor_user_id=UUID(current_user.user_id) if current_user.user_id else None,
+            current_user=current_user,
             reason="Candidate archived",
         )
         self.db.commit()
@@ -291,4 +298,112 @@ class CandidateService:
         self.db.commit()
         self.db.refresh(candidate)
         return candidate
+
+    def get_structured_resume_fields(self, candidate_id: UUID, organization_id: UUID) -> dict[str, object]:
+        """Best-effort JSON resume fields from the unified `candidates` row.
+
+        Owns the raw `candidate.candidates` query so callers outside the
+        Candidate domain (e.g. JobService's ATS matching) go through this
+        method instead of querying another domain's table directly.
+        """
+        t0 = time.monotonic()
+        empty: dict[str, object] = {
+            "skills": [],
+            "titles": [],
+            "years": None,
+            "education": [],
+            "certifications": [],
+            "summary": None,
+        }
+        try:
+            row = self.db.execute(
+                text(
+                    """
+                    SELECT parsed_resume_data, summary, headline, years_experience
+                    FROM candidate.candidates
+                    WHERE id = :cid
+                      AND (
+                        organization_id = :oid
+                        OR org_id = :oid
+                      )
+                    LIMIT 1
+                    """
+                ),
+                {"cid": candidate_id, "oid": organization_id},
+            ).mappings().first()
+        except ProgrammingError:
+            self.db.rollback()
+            logger.warning("structured_resume_fields_query_failed candidate=%s", candidate_id)
+            return empty
+        except Exception:
+            logger.exception("structured_resume_fields_unexpected candidate=%s", candidate_id)
+            self.db.rollback()
+            return empty
+
+        if not row:
+            logger.info(
+                "ats.resume.extract.completed",
+                extra={
+                    "ats_phase": "resume_extract",
+                    "candidate_id": str(candidate_id),
+                    "organization_id": str(organization_id),
+                    "duration_ms": int((time.monotonic() - t0) * 1000),
+                    "status": "empty",
+                },
+            )
+            return empty
+
+        parsed = row.get("parsed_resume_data")
+        skills: list[str] = []
+        titles: list[str] = []
+        education: list[str] = []
+        certs: list[str] = []
+        if isinstance(parsed, dict):
+            for key in ("skills", "normalized_keywords", "inferred_skills"):
+                raw = parsed.get(key)
+                if isinstance(raw, list):
+                    skills.extend(str(x).strip().lower() for x in raw if x)
+            pt = parsed.get("previous_titles")
+            if isinstance(pt, list):
+                titles.extend(str(x).strip() for x in pt if x)
+            edu = parsed.get("education")
+            if isinstance(edu, str) and edu.strip():
+                education.append(edu.strip())
+            elif isinstance(edu, list):
+                education.extend(str(x).strip() for x in edu if x)
+            c = parsed.get("certifications")
+            if isinstance(c, list):
+                certs.extend(str(x).strip() for x in c if x)
+
+        y = row.get("years_experience")
+        years_val: int | float | None = None
+        if y is not None:
+            try:
+                years_val = float(y)
+            except (TypeError, ValueError):
+                years_val = None
+
+        summary_parts = [row.get("summary"), row.get("headline")]
+        summary = " ".join(str(p).strip() for p in summary_parts if p).strip() or None
+
+        result = {
+            "skills": list(dict.fromkeys(skills))[:50],
+            "titles": titles[:8],
+            "years": years_val,
+            "education": education[:8],
+            "certifications": certs[:12],
+            "summary": summary,
+        }
+        logger.info(
+            "ats.resume.extract.completed",
+            extra={
+                "ats_phase": "resume_extract",
+                "candidate_id": str(candidate_id),
+                "organization_id": str(organization_id),
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+                "skills_count": len(result["skills"]),
+                "titles_count": len(result["titles"]),
+            },
+        )
+        return result
 

@@ -21,6 +21,10 @@ NOTIFY_TEMPLATE_STAGES: frozenset[str] = frozenset(
 
 # Map pipeline DB stage values → template key.
 _STAGE_ALIASES: dict[str, str] = {
+    # PipelineStage.AI_INTERVIEW's canonical DB value ("ai_interview", per
+    # app.schemas.pipeline) maps to the "screening" template. "ai_screening"
+    # is kept for tolerance of any pre-canonicalization legacy data.
+    "ai_interview": "screening",
     "ai_screening": "screening",
     "offer": "offered",
     "placed": "hired",

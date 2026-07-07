@@ -42,6 +42,7 @@ from app.schemas.interview import (
     QueueInterviewResponse,
     WorkspaceResponse,
 )
+from app.orchestration import interview_scheduling
 from app.services.interview_service import InterviewService
 from app.services.livekit_service import generate_token, get_room_name
 
@@ -57,8 +58,9 @@ def create_interview(
     _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_CREATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> InterviewResponse:
-    svc = InterviewService(db)
-    interview = svc.create_interview(UUID(current_user.organization_id), current_user, payload)
+    interview = interview_scheduling.create_interview(
+        db, UUID(current_user.organization_id), current_user, payload
+    )
     return InterviewResponse.model_validate(interview)
 
 
@@ -184,8 +186,8 @@ def update_interview(
     _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_UPDATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> InterviewResponse:
-    svc = InterviewService(db)
-    interview = svc.update_interview(
+    interview = interview_scheduling.update_interview(
+        db,
         interview_id=interview_id,
         organization_id=UUID(current_user.organization_id),
         current_user=current_user,
@@ -202,8 +204,8 @@ def update_interview_put(
     _: Annotated[CurrentUser, Depends(require_permission(INTERVIEWS_UPDATE))],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> InterviewResponse:
-    svc = InterviewService(db)
-    interview = svc.update_interview(
+    interview = interview_scheduling.update_interview(
+        db,
         interview_id=interview_id,
         organization_id=UUID(current_user.organization_id),
         current_user=current_user,

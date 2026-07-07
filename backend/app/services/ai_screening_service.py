@@ -19,7 +19,7 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models.ai_screening import (
@@ -39,12 +39,38 @@ from app.schemas.ai_screening import (
     AIScreeningEvaluationResponse,
     AIScreeningResponse,
     AnswerUpsert,
+    StartScreeningPayload,
 )
 from app.schemas.auth import CurrentUser
+from app.schemas.pipeline import PipelineStage
 from app.services.ai.answer_evaluator import AnswerEvaluator
 from app.services.ai.question_generator import QuestionGenerator
 from app.services.ai.recommendation_engine import compute_scores_and_recommendation
 from app.services.ai.recruiter_summary import RecruiterSummaryGenerator
+# Live-interview prompts, scoring thresholds, and pure conversation-flow
+# helpers live in app.services.ai_screening.live_interview_support — they
+# have no dependency on AIScreeningService instance state.
+from app.services.ai_screening.live_interview_support import (
+    _ASSESSMENT_SYSTEM_PROMPT,
+    _CANDIDATE_QA_CLOSING,
+    _CANDIDATE_QA_MAX_ROUNDS,
+    _CANDIDATE_QA_SYSTEM_PROMPT,
+    _LIVE_SYSTEM_PROMPT,
+    _LOGISTICS_QUESTIONS,
+    _MIN_ANSWER_COVERAGE,
+    _MIN_CANDIDATE_WORDS,
+    _MIN_TURN_CHARS,
+    _MIN_TURN_WORDS,
+    _N_LOGISTICS,
+    _OPENING_QUESTION,
+    _RECOMMENDED_DURATION_SECS,
+    _answer_candidate_question,
+    _auto_end_heuristic,
+    _fallback_question,
+    _infer_seniority,
+    _is_no_questions,
+    is_substantive_answer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -975,6 +1001,7 @@ class AIScreeningService:
         screening_id: UUID,
         decision: str,     # "advance" | "reject" | "hold"
         notes: str | None,
+        current_user: CurrentUser,
     ) -> AIScreening:
         """Recruiter makes a final decision on a completed AI screening.
 
@@ -984,6 +1011,11 @@ class AIScreeningService:
 
         In all cases the screening status is set to "completed" and the
         recruiter decision + notes are persisted.
+
+        Pipeline advancement goes through
+        app.orchestration.screening_pipeline.advance_pipeline_from_screening
+        (which itself goes through PipelineService.transition_stage) — this
+        method does not touch Pipeline directly.
         """
         screening = self.get_screening(org_id, screening_id)
 
@@ -1003,11 +1035,18 @@ class AIScreeningService:
 
         if decision in ("advance", "reject") and screening.job_id:
             try:
-                self.advance_pipeline_from_screening(
-                    org_id=org_id,
+                from app.orchestration.screening_pipeline import (
+                    advance_pipeline_from_screening,
+                )
+
+                advance_pipeline_from_screening(
+                    self.db,
+                    organization_id=org_id,
                     candidate_id=screening.candidate_id,
                     job_id=screening.job_id,
                     recommendation=decision,   # "advance" → interview, "reject" → rejected
+                    current_user=current_user,
+                    notes=notes,
                 )
             except Exception:
                 logger.warning(
@@ -1455,273 +1494,390 @@ class AIScreeningService:
             pipeline_id=pipeline.id,
         )
 
-    def advance_pipeline_from_screening(self, org_id, candidate_id, job_id, recommendation):
-        """Move the candidate's pipeline entry after a recruiter decision.
+    # ── Regenerate / retry (moved from app/routes/ai_screening.py) ───────────
 
-        recommendation values accepted:
-          "advance" | anything except "reject"  → interview stage
-          "reject"                               → rejected
+    def regenerate_questions(self, org_id: UUID, screening_id: UUID) -> AIScreening:
+        """Clear existing questions and reset to pending so they can be regenerated.
+
+        Caller is responsible for dispatching generate_questions afterwards
+        (typically via FastAPI BackgroundTasks, which the service layer has
+        no access to).
         """
-        from app.models.pipeline import Pipeline
-        from datetime import UTC, datetime
+        screening = self.get_screening(org_id, screening_id)
 
-        pipeline = self.db.scalar(
-            select(Pipeline).where(
-                Pipeline.organization_id == org_id,
-                Pipeline.candidate_id == candidate_id,
-                Pipeline.job_id == job_id,
-                Pipeline.stage == "ai_interview",
+        # Delete existing questions (CASCADE removes answers + evaluations).
+        self.db.execute(delete(AIScreeningQuestion).where(AIScreeningQuestion.screening_id == screening_id))
+        screening.status = "pending"
+        self.db.add(screening)
+        self.db.commit()
+        self.db.refresh(screening)
+        return screening
+
+    def start_evaluation(self, org_id: UUID, screening_id: UUID) -> AIScreening:
+        """Mark a screening as evaluating.
+
+        Caller is responsible for dispatching run_evaluation afterwards.
+        """
+        screening = self.get_screening(org_id, screening_id)
+        screening.status = "evaluating"
+        self.db.add(screening)
+        self.db.commit()
+        self.db.refresh(screening)
+        return screening
+
+    def retry(self, org_id: UUID, screening_id: UUID) -> tuple[AIScreening, str]:
+        """Re-trigger the last failed background task.
+
+        Returns the screening and the action the caller must dispatch as a
+        background task: "generate_questions" if no questions exist yet,
+        otherwise "evaluate".
+        """
+        screening = self.get_screening(org_id, screening_id)
+
+        question_count = self.db.scalar(
+            select(func.count()).select_from(AIScreeningQuestion).where(
+                AIScreeningQuestion.screening_id == screening_id
+            )
+        ) or 0
+
+        if question_count == 0:
+            screening.status = "pending"
+            action = "generate_questions"
+        else:
+            screening.status = "evaluating"
+            action = "evaluate"
+
+        self.db.add(screening)
+        self.db.commit()
+        self.db.refresh(screening)
+        return screening, action
+
+    # ── Pipeline stage moves (moved from app/routes/ai_screening.py) ─────────
+    #
+    # AIScreeningService does not mutate the Pipeline model directly — both
+    # methods below go through app.orchestration.screening_pipeline, which
+    # is the sole path through which the AI Screening domain may write to a
+    # Pipeline row (mirrors submit_review_decision's use of
+    # advance_pipeline_from_screening).
+
+    def start_screening(
+        self,
+        org_id: UUID,
+        current_user: CurrentUser,
+        payload: StartScreeningPayload,
+    ) -> AIScreening:
+        """Convenience flow: optionally move the pipeline stage, then create a screening.
+
+        Caller is responsible for dispatching generate_questions afterwards.
+        """
+        if payload.move_pipeline_stage and payload.pipeline_id:
+            from app.orchestration.screening_pipeline import (  # noqa: PLC0415
+                set_pipeline_stage_from_screening,
+            )
+
+            try:
+                set_pipeline_stage_from_screening(
+                    self.db,
+                    pipeline_id=payload.pipeline_id,
+                    organization_id=org_id,
+                    current_user=current_user,
+                    stage=PipelineStage.AI_INTERVIEW,
+                )
+            except Exception:
+                # Non-fatal — screening is more important than stage move.
+                logger.warning(
+                    "start_screening.pipeline_stage_move_failed pipeline_id=%s",
+                    payload.pipeline_id,
+                    exc_info=True,
+                )
+
+        create_payload = AIScreeningCreate(
+            candidate_id=payload.candidate_id,
+            job_id=payload.job_id,
+            screening_type=payload.screening_type,
+        )
+        return self.create_screening(org_id, current_user, create_payload)
+
+    def move_pipeline_stage(
+        self,
+        org_id: UUID,
+        screening_id: UUID,
+        pipeline_id: UUID,
+        stage: str,
+        current_user: CurrentUser,
+    ) -> AIScreening:
+        """Move the candidate's pipeline entry to the given stage.
+
+        Typically called after a recruiter decides to advance or reject from
+        the screening review panel. Returns the screening row (unchanged —
+        this only moves the Pipeline, not the AIScreening itself) for the
+        route to re-serialize.
+        """
+        from fastapi import HTTPException  # noqa: PLC0415
+        from app.orchestration.screening_pipeline import (  # noqa: PLC0415
+            set_pipeline_stage_from_screening,
+        )
+
+        screening = self.get_screening(org_id, screening_id)
+
+        valid_stages = {s.value for s in PipelineStage}
+        if stage not in valid_stages:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid stage '{stage}'. Valid: {sorted(valid_stages)}",
+            )
+
+        set_pipeline_stage_from_screening(
+            self.db,
+            pipeline_id=pipeline_id,
+            organization_id=org_id,
+            current_user=current_user,
+            stage=PipelineStage(stage),
+        )
+        return screening
+
+    # ── Candidate-facing token validation (moved from app/routes/ai_screening.py) ─
+
+    def _validate_session_token(self, screening_id: UUID, token: str) -> AIScreening:
+        """Validate a candidate join token against a screening id.
+
+        Raises 403 on mismatch/expiry (get_screening_by_token already
+        excludes expired invites) rather than 404, since the token is a
+        credential, not a lookup key — the id is only used to confirm the
+        token was issued for *this* screening.
+        """
+        from fastapi import HTTPException  # noqa: PLC0415
+
+        screening = self.get_screening_by_token(token)
+        if screening is None or str(screening.id) != str(screening_id):
+            raise HTTPException(status_code=403, detail="Invalid session token.")
+        return screening
+
+    def get_assemblyai_realtime_token(self, screening_id: UUID, token: str) -> dict:
+        """Generate a short-lived AssemblyAI realtime token (browser-side STT only)."""
+        import httpx  # noqa: PLC0415
+        from app.core.config import get_settings  # noqa: PLC0415
+
+        self._validate_session_token(screening_id, token)
+
+        settings = get_settings()
+        api_key = settings.assemblyai_api_key
+        if not api_key:
+            logger.info("assemblyai_token.not_configured screening=%s", screening_id)
+            return {"token": None, "available": False}
+
+        token_urls = [
+            (
+                "https://streaming.assemblyai.com/v3/token",
+                "wss://streaming.assemblyai.com/v3/ws",
+            ),
+            (
+                "https://streaming.eu.assemblyai.com/v3/token",
+                "wss://streaming.eu.assemblyai.com/v3/ws",
+            ),
+        ]
+        for token_url, ws_url in token_urls:
+            try:
+                resp = httpx.get(
+                    token_url,
+                    headers={"Authorization": api_key},
+                    params={"expires_in_seconds": 600},
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                realtime_token = resp.json().get("token")
+                if realtime_token:
+                    logger.info(
+                        "assemblyai_token.generated screening=%s endpoint=%s",
+                        screening_id,
+                        token_url,
+                    )
+                    return {"token": realtime_token, "available": True, "ws_url": ws_url}
+                logger.warning(
+                    "assemblyai_token.empty screening=%s endpoint=%s",
+                    screening_id,
+                    token_url,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "assemblyai_token.request_failed screening=%s endpoint=%s error=%s",
+                    screening_id,
+                    token_url,
+                    exc,
+                )
+        return {"token": None, "available": False}
+
+    # ── Recording upload (moved from app/routes/ai_screening.py) ─────────────
+    #
+    # The route still owns reading the multipart UploadFile (an async,
+    # request-bound I/O operation) — everything after "here are the raw
+    # bytes" is business logic and belongs here.
+
+    def process_recording_upload(
+        self,
+        screening_id: UUID,
+        token: str,
+        *,
+        video_bytes: bytes | None,
+        segments_json: str | None,
+        transcript_json: str | None,
+    ) -> dict:
+        """Persist the full interview recording, per-question segments, and transcript."""
+        import base64  # noqa: PLC0415
+        import json as _json  # noqa: PLC0415
+
+        from app.models.ai_screening_segment import AIScreeningSegment  # noqa: PLC0415
+        from app.services.interview_storage_service import (  # noqa: PLC0415
+            upload_analysis,
+            upload_interview_video,
+            upload_segment_video,
+            upload_transcript,
+        )
+
+        screening = self._validate_session_token(screening_id, token)
+
+        video_key = ""
+        segments: list[dict] = []
+
+        # 1. Upload full recording.
+        if video_bytes:
+            try:
+                video_key = upload_interview_video(screening_id, video_bytes)
+                screening.video_url = video_key
+                logger.info("[UPLOAD] DB updated screening=%s video_url=%s", screening_id, video_key)
+            except Exception as exc:
+                logger.error("[UPLOAD] Supabase failure screening=%s: %s", screening_id, exc)
+                # Non-fatal — continue to save segments and transcript.
+
+        # 2. Parse per-question segments JSON.
+        if segments_json:
+            try:
+                segments = _json.loads(segments_json)
+            except Exception:
+                segments = []
+
+        # 3. Upload per-question segment clips + persist rows.
+        for seg in segments:
+            q_num: int = seg.get("question_number", 0)
+            segment_video_b64: str = seg.get("video_base64", "")
+            video_clip_url = ""
+
+            if segment_video_b64:
+                try:
+                    seg_bytes = base64.b64decode(segment_video_b64)
+                    video_clip_url = upload_segment_video(screening_id, q_num, seg_bytes)
+                except Exception as exc:
+                    logger.warning(
+                        "upload_recording.segment_failed screening=%s q=%d: %s",
+                        screening_id, q_num, exc,
+                    )
+
+            existing = self.db.scalar(
+                select(AIScreeningSegment).where(
+                    AIScreeningSegment.screening_id == screening_id,
+                    AIScreeningSegment.question_number == q_num,
+                )
+            )
+            if existing:
+                existing.transcript = seg.get("transcript", existing.transcript)
+                existing.question_start_seconds = seg.get("question_start_seconds", existing.question_start_seconds)
+                existing.answer_start_seconds = seg.get("answer_start_seconds", existing.answer_start_seconds)
+                existing.answer_end_seconds = seg.get("answer_end_seconds", existing.answer_end_seconds)
+                existing.duration_seconds = seg.get("duration_seconds", existing.duration_seconds)
+                if video_clip_url:
+                    existing.video_clip_url = video_clip_url
+                self.db.add(existing)
+            else:
+                row = AIScreeningSegment(
+                    screening_id=screening_id,
+                    question_number=q_num,
+                    question_text=seg.get("question_text", ""),
+                    transcript=seg.get("transcript"),
+                    question_start_seconds=seg.get("question_start_seconds"),
+                    answer_start_seconds=seg.get("answer_start_seconds"),
+                    answer_end_seconds=seg.get("answer_end_seconds"),
+                    duration_seconds=seg.get("duration_seconds"),
+                    video_clip_url=video_clip_url or None,
+                )
+                self.db.add(row)
+
+        # 4. Upload transcript JSON.
+        if transcript_json:
+            try:
+                transcript_data = _json.loads(transcript_json)
+                upload_transcript(screening_id, transcript_data)
+            except Exception as exc:
+                logger.warning("upload_recording.transcript_failed screening=%s: %s", screening_id, exc)
+
+        # 5. Upload analysis JSON (segments metadata without binary data).
+        if segments:
+            try:
+                analysis = {
+                    "screening_id": str(screening_id),
+                    "questions": [
+                        {k: v for k, v in seg.items() if k != "video_base64"}
+                        for seg in segments
+                    ],
+                }
+                upload_analysis(screening_id, analysis)
+            except Exception as exc:
+                logger.warning("upload_recording.analysis_failed screening=%s: %s", screening_id, exc)
+
+        self.db.add(screening)
+        self.db.commit()
+
+        return {"screening_id": str(screening_id), "status": "uploaded", "video_stored": bool(video_key)}
+
+    def get_screening_segments_for_recruiter(self, org_id: UUID, screening_id: UUID) -> list[dict]:
+        """Return all per-question segments with signed playback URLs for a completed live screening."""
+        from app.models.ai_screening_segment import AIScreeningSegment  # noqa: PLC0415
+        from app.services.interview_storage_service import get_signed_url  # noqa: PLC0415
+
+        screening = self.get_screening(org_id, screening_id)  # 404 if not found / wrong org
+
+        rows = list(
+            self.db.scalars(
+                select(AIScreeningSegment)
+                .where(AIScreeningSegment.screening_id == screening.id)
+                .order_by(AIScreeningSegment.question_number)
             )
         )
-        if not pipeline:
-            logger.warning("ai_screening.advance.not_found candidate=%s", candidate_id)
-            return
 
-        new_stage = "rejected" if recommendation == "reject" else "interview"
-        pipeline.stage = new_stage
-        pipeline.stage_updated_at = datetime.now(UTC)
-        if new_stage == "rejected":
-            pipeline.status = "closed"
+        return [
+            {
+                "id": str(r.id),
+                "question_number": r.question_number,
+                "question_text": r.question_text,
+                "transcript": r.transcript,
+                "question_start_seconds": float(r.question_start_seconds) if r.question_start_seconds else None,
+                "answer_start_seconds": float(r.answer_start_seconds) if r.answer_start_seconds else None,
+                "answer_end_seconds": float(r.answer_end_seconds) if r.answer_end_seconds else None,
+                "duration_seconds": float(r.duration_seconds) if r.duration_seconds else None,
+                "video_clip_url": get_signed_url(r.video_clip_url) if r.video_clip_url else None,
+            }
+            for r in rows
+        ]
 
-        self.db.add(pipeline)
-        self.db.commit()
-        logger.info("ai_screening.pipeline_advanced candidate=%s ->%s", candidate_id, new_stage)
+    def get_recording_urls(self, org_id: UUID, screening_id: UUID) -> dict:
+        """Return short-lived signed Supabase Storage URLs for the full interview recording.
 
+        Both video and audio point to the same WebM file — the browser
+        decides whether to play it as video or audio-only. Returns null
+        URLs when no recording was uploaded (e.g. candidate had no camera,
+        or the upload failed).
+        """
+        from app.services.interview_storage_service import get_signed_url  # noqa: PLC0415
 
-def _infer_seniority(candidate: Candidate | None) -> str:
-    if not candidate:
-        return "mid-level"
-    years = getattr(candidate, "years_experience", None)
-    if years is None:
-        # Try parsed resume data
-        parsed = getattr(candidate, "parsed_resume_data", None) or {}
-        years = parsed.get("years_of_experience")
-    if years is None:
-        return "mid-level"
-    try:
-        years = float(years)
-    except (TypeError, ValueError):
-        return "mid-level"
-    if years < 2:
-        return "junior"
-    elif years < 5:
-        return "mid-level"
-    elif years < 9:
-        return "senior"
-    else:
-        return "lead/principal"
+        screening = self.get_screening(org_id, screening_id)
+        raw_key: str | None = getattr(screening, "video_url", None)
+        signed: str | None = get_signed_url(raw_key) if raw_key else None
 
-# ── Live interview prompts ────────────────────────────────────────────────────
-
-_OPENING_QUESTION = (
-    "Can you briefly introduce yourself and walk me through your professional background?"
-)
-
-# ── Mandatory recruiter logistics questions ───────────────────────────────────
-# These are ALWAYS asked after the AI assessment questions, regardless of
-# max_questions.  They are excluded from AI scoring — only assessed questions
-# contribute to scores and recommendations.
-
-_LOGISTICS_QUESTIONS: list[str] = [
-    "Thank you — just a couple of quick practical questions for the hiring team. "
-    "What is your current notice period, and when would you be available to start if you were offered this role?",
-
-    "What are your current and expected compensation expectations? "
-    "Please mention your current package and what you're looking for in your next role.",
-
-    "Finally, do you have any questions for us about the role, the team, or the company? "
-    "Feel free to ask anything that would help you decide.",
-]
-
-_N_LOGISTICS = len(_LOGISTICS_QUESTIONS)   # 3
-
-# ── Candidate Q&A phase ───────────────────────────────────────────────────────
-# After the final logistics question ("Do you have any questions?") the AI must
-# genuinely RESPOND to whatever the candidate asks — not end the interview.
-# Up to _CANDIDATE_QA_MAX_ROUNDS exchanges are allowed before the AI closes.
-
-_CANDIDATE_QA_MAX_ROUNDS = 2   # max candidate question→AI answer rounds
-
-_CANDIDATE_QA_SYSTEM_PROMPT = """\
-You are the AI interviewer for {company} conducting a candidate Q&A.
-The candidate just asked you a question about the role or company.
-
-Context you have available:
-{job_context}
-
-Rules:
-- Answer the candidate's question concisely and honestly using the context above.
-- If you do not have specific information, say so warmly and suggest they ask the recruiter.
-- Keep the response to 2–4 sentences maximum.
-- After answering, invite follow-up: "Is there anything else you'd like to know?"
-- Do NOT ask assessment questions — you are in the closing Q&A phase.
-- Return ONLY your response — no preamble, labels, or system notes.
-"""
-
-_CANDIDATE_QA_CLOSING = (
-    "Thank you so much for your time today — it was great speaking with you. "
-    "The recruitment team will review your responses and be in touch soon. "
-    "We wish you all the best!"
-)
-
-_LIVE_SYSTEM_PROMPT = """\
-You are a senior recruitment specialist conducting an initial candidate screening interview.
-
-Rules:
-- Ask ONE question at a time — never multiple questions in a single message.
-- Build follow-up questions from what the candidate actually says.
-- Topics to cover: work experience, key projects, career goals, salary expectations, \
-notice period, team fit, motivation, and role understanding.
-- NEVER ask technical coding questions, algorithms, or whiteboard problems.
-- Keep the tone warm, conversational, and professional.
-- Return ONLY the question — no preamble, labels, or lists.
-- One or two sentences maximum per question.
-
-Routing rules:
-- Candidate mentions a project → ask about their specific contribution and impact.
-- Candidate mentions leadership → ask about team size and management approach.
-- Candidate mentions career change → ask about motivation for the switch.
-- Candidate mentions redundancy / layoff → ask sensitively about current situation.
-- After 12+ questions → ask about notice period or salary if not yet covered.
-"""
-
-# ── Scoring thresholds ────────────────────────────────────────────────────────
-# These are enforced in Python BEFORE calling Groq. The LLM never sees
-# insufficient data — it cannot hallucinate scores for a partial transcript.
-
-_MIN_CANDIDATE_WORDS       = 200   # total words across all candidate messages — hard gate
-_MIN_ANSWER_COVERAGE       = 0.80  # candidate must answer ≥ 80% of questions asked — hard gate
-_RECOMMENDED_DURATION_SECS = 300   # 5 min — below this a low-confidence warning is added but
-                                   # scoring is NOT blocked; duration alone never fails an interview
-_MIN_TURN_WORDS            = 3     # minimum words to treat one turn as a real answer
-_MIN_TURN_CHARS            = 12    # avoid progressing on filler like "yes" / "ok"
-
-_ASSESSMENT_SYSTEM_PROMPT = """\
-You are an expert HR analytics engine evaluating a completed screening interview.
-
-STRICT RULES — READ BEFORE SCORING:
-1. Only score dimensions for which the transcript contains DIRECT EVIDENCE.
-   If the transcript lacks evidence for a dimension, score it 40 (insufficient data).
-2. Every strength and concern MUST include a direct quote or specific paraphrase
-   from the transcript as evidence. No generic statements allowed.
-3. DO NOT invent, assume, or extrapolate information not present in the transcript.
-4. If the candidate gave vague or one-word answers, score them low (30–45).
-5. Scores must reflect actual transcript content, not job-title assumptions.
-
-OUTPUT FORMAT (return ONLY valid JSON, no prose, no markdown):
-{
-  "communication_score": <0-100 integer, based on clarity, fluency, structure>,
-  "experience_score": <0-100 integer, based on concrete examples given>,
-  "confidence_score": <0-100 integer, based on decisiveness and specificity>,
-  "culture_fit_score": <0-100 integer, based on collaboration/values signals>,
-  "leadership_score": <0-100 integer, based on evidence of leadership, team management, or initiative; score 40 if no evidence>,
-  "overall_score": <0-100 integer, weighted composite>,
-  "recommendation": "<strong_hire|hire|consider|reject>",
-  "strengths": [
-    {"claim": "<one-line strength>", "evidence": "<direct quote or paraphrase>"}
-  ],
-  "concerns": [
-    {"claim": "<one-line concern>", "evidence": "<direct quote or paraphrase>"}
-  ],
-  "salary_expectation": "<exact text from transcript or null>",
-  "notice_period": "<exact text from transcript or null>",
-  "career_goals": "<verbatim or close paraphrase from transcript, or null>",
-  "key_projects_mentioned": ["<only projects explicitly named by candidate>"],
-  "ai_summary": "<3-4 sentence factual summary based strictly on transcript>"
-}
-
-SCORING THRESHOLDS:
-  strong_hire: 85+  (clear strengths, strong evidence across multiple areas)
-  hire:        70–84 (solid performance, good evidence)
-  consider:    55–69 (mixed performance, some gaps)
-  reject:      <55   (significant concerns, vague/weak answers)
-
-EVIDENCE REQUIREMENT:
-  - A strength with no direct transcript evidence MUST NOT be listed.
-  - A concern with no direct transcript evidence MUST NOT be listed.
-  - Generic phrases like "good communicator" without evidence → omit entirely.
-"""
+        return {
+            "screening_id": str(screening_id),
+            "full_video_url": signed,
+            "full_audio_url": signed,
+            "has_recording": bool(signed),
+        }
 
 
-def _auto_end_heuristic(last_answer: str, q_count: int) -> bool:
-    """Return True if the interview should wrap up automatically."""
-    if q_count < 8:
-        return False
-    goodbyes = {"thank you", "thanks for having me", "goodbye", "that's all", "no more questions"}
-    return any(phrase in last_answer.lower() for phrase in goodbyes)
 
-
-def _fallback_question(q_num: int) -> str:
-    """Generic follow-up when Groq is unavailable."""
-    bank = [
-        "Can you tell me about a project you are particularly proud of?",
-        "What motivates you most in your day-to-day work?",
-        "How do you handle sudden changes in priorities?",
-        "Tell me about a time you worked closely with a difficult colleague.",
-        "What are your career goals for the next two to three years?",
-        "What is your current notice period, and what are your salary expectations?",
-        "Why are you interested in this particular role?",
-        "What questions do you have for us about the team or company?",
-    ]
-    return bank[min(q_num - 1, len(bank) - 1)]
-
-
-def _is_no_questions(text: str) -> bool:
-    """Return True when the candidate indicates they have no questions."""
-    lowered = (text or "").lower().strip()
-    no_patterns = [
-        "no ", "nope", "not really", "nothing", "none",
-        "i'm good", "i am good", "that's all", "that is all",
-        "no questions", "no thank", "thank you, no",
-    ]
-    return any(lowered.startswith(p) or p in lowered[:80] for p in no_patterns)
-
-
-def _answer_candidate_question(screening: "AIScreening", question: str, db: "Session") -> str:
-    """Use Groq to answer the candidate's question using job description context."""
-    from app.services.groq_interview_client import GroqInterviewClient, GroqInterviewUnavailableError
-    from app.models.job import Job
-
-    job_title = screening.job_title_snapshot or "Unknown Role"
-    job_description = ""
-    if screening.job_id:
-        try:
-            job = db.get(Job, screening.job_id)
-            if job:
-                job_description = (job.description or "")[:2000]
-        except Exception:
-            pass
-
-    job_context = f"Role: {job_title}\n\nJob Description:\n{job_description}" if job_description \
-        else f"Role: {job_title}"
-
-    system_prompt = _CANDIDATE_QA_SYSTEM_PROMPT.format(
-        company="the company",
-        job_context=job_context,
-    )
-
-    groq = GroqInterviewClient()
-    try:
-        resp = groq.chat(
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question},
-            ],
-            temperature=0.5,
-            max_tokens=300,
-        )
-        return resp.content.strip()
-    except GroqInterviewUnavailableError:
-        return (
-            "That's a great question — the recruiting team will be able to provide "
-            "you with full details when they follow up. Is there anything else you'd like to know?"
-        )
-
-
-def is_substantive_answer(text: str) -> bool:
-    """Return True when the candidate answer has enough content to progress."""
-    cleaned = (text or "").strip()
-    if len(cleaned) < _MIN_TURN_CHARS:
-        return False
-    words = [w for w in cleaned.split() if w.strip()]
-    return len(words) >= _MIN_TURN_WORDS
